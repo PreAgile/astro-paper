@@ -2,7 +2,11 @@
 import { ClientRouter } from "astro:transitions";
 import { PUBLIC_GOOGLE_SITE_VERIFICATION } from "astro:env/client";
 import { SITE } from "@/config";
+import { getLocaleFromUrl } from "@/i18n/utils";
 import "@/styles/global.css";
+
+const locale = getLocaleFromUrl(Astro.url);
+const langCode = locale === "ko" ? "ko-KR" : "en-US";
 
 type Props = {
   title?: string;
@@ -50,7 +54,7 @@ const structuredData = {
 <!doctype html>
 <html
   dir={SITE.dir}
-  lang=`${SITE.lang ?? "en"}`
+  lang={langCode}
   class={`${scrollSmooth && "scroll-smooth"}`}
 >
   <head>
@@ -131,6 +135,7 @@ const structuredData = {
     <ClientRouter />
 
     <script is:inline src="/toggle-theme.js"></script>
+    <script is:inline src="/detect-language.js"></script>
   </head>
   <body>
     <slot />

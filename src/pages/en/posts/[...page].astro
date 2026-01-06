@@ -11,12 +11,11 @@ import getSortedPosts from "@/utils/getSortedPosts";
 import { SITE } from "@/config";
 import { t } from "@/i18n/utils";
 
-const locale = "ko";
+const locale = "en";
 
 export const getStaticPaths = (async ({ paginate }) => {
-  // 한국어 포스트 또는 언어 폴더가 없는 기존 포스트
   const posts = await getCollection("blog", ({ id, data }) =>
-    !data.draft && (id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/")))
+    id.startsWith("en/") && !data.draft
   );
   return paginate(getSortedPosts(posts), { pageSize: SITE.postPerPage });
 }) satisfies GetStaticPaths;
@@ -26,7 +25,7 @@ const { page } = Astro.props;
 
 <Layout title={`${t(locale, "nav.posts")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.posts")} pageDesc="작성한 모든 글 목록입니다.">
+  <Main pageTitle={t(locale, "nav.posts")} pageDesc="All the articles I've posted.">
     <ul>
       {page.data.map(data => <Card {...data} />)}
     </ul>

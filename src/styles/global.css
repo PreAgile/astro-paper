@@ -1,6 +1,24 @@
 @import "tailwindcss";
 @import "./typography.css";
 
+/* Pretendard - 한글 본문용 */
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css");
+
+/* Charter (Medium 스타일) - 영문 본문용 */
+@import url("https://fonts.cdnfonts.com/css/charter");
+
+/* Source Code Pro - Medium 코드 블록용 */
+@import url("https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500;600&display=swap");
+
+/* D2Coding - 한글 코드 블록용 */
+@font-face {
+  font-family: "D2Coding";
+  src: url("https://cdn.jsdelivr.net/gh/projectnoonnu/noonfonts_three@1.0/D2Coding.woff")
+    format("woff");
+  font-weight: normal;
+  font-style: normal;
+}
+
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 :root,
@@ -38,7 +56,29 @@ html[data-theme="dark"] {
     @apply overflow-y-scroll scroll-smooth;
   }
   body {
-    @apply flex min-h-svh flex-col bg-background font-mono text-foreground selection:bg-accent/75 selection:text-background;
+    @apply flex min-h-svh flex-col bg-background text-foreground selection:bg-accent/75 selection:text-background;
+  }
+
+  /* 한국어: Pretendard + D2Coding */
+  html[lang="ko-KR"] body {
+    font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  }
+  html[lang="ko-KR"] code,
+  html[lang="ko-KR"] pre,
+  html[lang="ko-KR"] kbd,
+  html[lang="ko-KR"] samp {
+    font-family: "D2Coding", "Fira Code", Menlo, Monaco, Consolas, monospace;
+  }
+
+  /* 영어: Charter + Source Code Pro (Medium 스타일) */
+  html[lang="en-US"] body {
+    font-family: Charter, Georgia, Cambria, "Times New Roman", Times, serif;
+  }
+  html[lang="en-US"] code,
+  html[lang="en-US"] pre,
+  html[lang="en-US"] kbd,
+  html[lang="en-US"] samp {
+    font-family: "Source Code Pro", Menlo, Monaco, Consolas, "Courier New", monospace;
   }
   a,
   button {

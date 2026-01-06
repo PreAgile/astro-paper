@@ -1,5 +1,6 @@
 ---
 import IconHash from "@/assets/icons/IconHash.svg";
+import { getLocaleFromUrl } from "@/i18n/utils";
 
 type Props = {
   tag: string;
@@ -7,12 +8,14 @@ type Props = {
   size?: "sm" | "lg";
 };
 
+const locale = getLocaleFromUrl(Astro.url);
 const { tag, tagName, size = "lg" } = Astro.props;
+const tagPath = locale === "ko" ? `/tags/${tag}/` : `/${locale}/tags/${tag}/`;
 ---
 
 <li>
   <a
-    href={`/tags/${tag}/`}
+    href={tagPath}
     transition:name={tag}
     class:list={[
       "flex items-center gap-0.5",

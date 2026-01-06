@@ -1,0 +1,69 @@
+{
+  "site": {
+    "title": "Forward Engineering",
+    "description": "내일을 위한 기록 — 더 나은 엔지니어링을 향해"
+  },
+  "nav": {
+    "home": "홈",
+    "posts": "글",
+    "tags": "태그",
+    "about": "소개",
+    "archives": "아카이브",
+    "search": "검색",
+    "skipToContent": "본문으로 건너뛰기"
+  },
+  "home": {
+    "greeting": "안녕하세요",
+    "description": "내일을 위한 기록 — 오늘보다 더 나은 엔지니어링을 배우고, 기록하고, 공유합니다.",
+    "socialLinks": "소셜 링크:",
+    "featured": "추천 글",
+    "recentPosts": "최근 글",
+    "allPosts": "모든 글 보기"
+  },
+  "post": {
+    "published": "발행일",
+    "updated": "수정일",
+    "readingTime": "분 소요",
+    "tableOfContents": "목차",
+    "tags": "태그",
+    "share": "공유하기",
+    "editPost": "수정하기",
+    "prevPost": "이전 글",
+    "nextPost": "다음 글"
+  },
+  "search": {
+    "title": "검색",
+    "placeholder": "검색어를 입력하세요...",
+    "noResults": "검색 결과가 없습니다"
+  },
+  "tags": {
+    "title": "태그",
+    "allTags": "모든 태그",
+    "postsTaggedWith": "태그된 글:"
+  },
+  "archives": {
+    "title": "아카이브",
+    "description": "모든 글을 시간순으로 정리했습니다."
+  },
+  "about": {
+    "title": "소개"
+  },
+  "footer": {
+    "copyright": "All rights reserved.",
+    "poweredBy": "Powered by"
+  },
+  "common": {
+    "readMore": "더 읽기",
+    "backToTop": "맨 위로",
+    "goBack": "뒤로 가기",
+    "language": "언어",
+    "theme": "테마",
+    "lightMode": "라이트 모드",
+    "darkMode": "다크 모드"
+  },
+  "error": {
+    "notFound": "페이지를 찾을 수 없습니다",
+    "notFoundDesc": "요청하신 페이지가 존재하지 않습니다.",
+    "goHome": "홈으로 돌아가기"
+  }
+}

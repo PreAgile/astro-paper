@@ -9,7 +9,7 @@ import getPostsByGroupCondition from "@/utils/getPostsByGroupCondition";
 import { SITE } from "@/config";
 import { t } from "@/i18n/utils";
 
-const locale = "ko";
+const locale = "en";
 
 // Redirect to 404 page if `showArchives` config is false
 if (!SITE.showArchives) {
@@ -17,7 +17,7 @@ if (!SITE.showArchives) {
 }
 
 const posts = await getCollection("blog", ({ id, data }) =>
-  !data.draft && (id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/")))
+  id.startsWith("en/") && !data.draft
 );
 
 const months = [
@@ -38,7 +38,7 @@ const months = [
 
 <Layout title={`${t(locale, "nav.archives")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.archives")} pageDesc="보관된 모든 글 목록입니다.">
+  <Main pageTitle={t(locale, "nav.archives")} pageDesc="All the articles I've archived.">
     {
       Object.entries(
         getPostsByGroupCondition(posts, post =>

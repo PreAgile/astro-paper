@@ -1,0 +1,57 @@
+---
+import { languages, getLocaleFromUrl, getLocalizedUrl, type Locale } from "@/i18n/utils";
+
+const currentLocale = getLocaleFromUrl(Astro.url);
+---
+
+<div class="language-toggle flex items-center gap-1">
+  {
+    Object.entries(languages).map(([code, name]) => {
+      const isActive = code === currentLocale;
+      const targetUrl = getLocalizedUrl(Astro.url, code as Locale);
+
+      return (
+        <>
+          {code !== Object.keys(languages)[0] && (
+            <span class="text-muted">|</span>
+          )}
+          <a
+            href={targetUrl}
+            class:list={[
+              "px-1 py-0.5 text-sm font-medium transition-colors",
+              {
+                "text-accent font-bold": isActive,
+                "text-foreground/70 hover:text-accent": !isActive,
+              },
+            ]}
+            aria-label={`Switch to ${name}`}
+            aria-current={isActive ? "page" : undefined}
+            data-locale={code}
+          >
+            {code.toUpperCase()}
+          </a>
+        </>
+      );
+    })
+  }
+</div>
+
+<script>
+  function initLanguageToggle() {
+    const links = document.querySelectorAll(".language-toggle a[data-locale]");
+
+    links.forEach(link => {
+      link.addEventListener("click", () => {
+        const locale = (link as HTMLAnchorElement).dataset.locale;
+        if (locale) {
+          localStorage.setItem("preferred-language", locale);
+        }
+      });
+    });
+  }
+
+  initLanguageToggle();
+
+  // View Transitions 지원
+  document.addEventListener("astro:after-swap", initLanguageToggle);
+</script>

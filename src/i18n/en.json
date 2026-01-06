@@ -1,0 +1,69 @@
+{
+  "site": {
+    "title": "Forward Engineering",
+    "description": "Recording for tomorrow — Towards better engineering"
+  },
+  "nav": {
+    "home": "Home",
+    "posts": "Posts",
+    "tags": "Tags",
+    "about": "About",
+    "archives": "Archives",
+    "search": "Search",
+    "skipToContent": "Skip to content"
+  },
+  "home": {
+    "greeting": "Hello",
+    "description": "Recording for tomorrow — Learning, documenting, and sharing better engineering every day.",
+    "socialLinks": "Social Links:",
+    "featured": "Featured",
+    "recentPosts": "Recent Posts",
+    "allPosts": "All Posts"
+  },
+  "post": {
+    "published": "Published",
+    "updated": "Updated",
+    "readingTime": "min read",
+    "tableOfContents": "Table of Contents",
+    "tags": "Tags",
+    "share": "Share",
+    "editPost": "Edit Post",
+    "prevPost": "Previous Post",
+    "nextPost": "Next Post"
+  },
+  "search": {
+    "title": "Search",
+    "placeholder": "Search for anything...",
+    "noResults": "No results found"
+  },
+  "tags": {
+    "title": "Tags",
+    "allTags": "All Tags",
+    "postsTaggedWith": "Posts tagged with:"
+  },
+  "archives": {
+    "title": "Archives",
+    "description": "All posts organized chronologically."
+  },
+  "about": {
+    "title": "About"
+  },
+  "footer": {
+    "copyright": "All rights reserved.",
+    "poweredBy": "Powered by"
+  },
+  "common": {
+    "readMore": "Read more",
+    "backToTop": "Back to top",
+    "goBack": "Go back",
+    "language": "Language",
+    "theme": "Theme",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode"
+  },
+  "error": {
+    "notFound": "Page not found",
+    "notFoundDesc": "The page you're looking for doesn't exist.",
+    "goHome": "Go back home"
+  }
+}

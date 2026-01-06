@@ -9,17 +9,15 @@ import getUniqueTags from "@/utils/getUniqueTags";
 import { SITE } from "@/config";
 import { t } from "@/i18n/utils";
 
-const locale = "ko";
-const posts = await getCollection("blog", ({ id }) =>
-  id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/"))
-);
+const locale = "en";
+const posts = await getCollection("blog", ({ id }) => id.startsWith("en/"));
 
 let tags = getUniqueTags(posts);
 ---
 
 <Layout title={`${t(locale, "nav.tags")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.tags")} pageDesc="글에 사용된 모든 태그입니다.">
+  <Main pageTitle={t(locale, "nav.tags")} pageDesc="All the tags used in posts.">
     <ul class="flex flex-wrap gap-6">
       {tags.map(({ tag, tagName }) => <Tag {tag} {tagName} />)}
     </ul>

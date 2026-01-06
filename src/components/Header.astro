@@ -6,8 +6,11 @@ import IconArchive from "@/assets/icons/IconArchive.svg";
 import IconSunHigh from "@/assets/icons/IconSunHigh.svg";
 import IconMenuDeep from "@/assets/icons/IconMenuDeep.svg";
 import LinkButton from "./LinkButton.astro";
+import LanguageToggle from "./LanguageToggle.astro";
 import { SITE } from "@/config";
+import { getLocaleFromUrl, t } from "@/i18n/utils";
 
+const locale = getLocaleFromUrl(Astro.url);
 const { pathname } = Astro.url;
 
 // Remove trailing slash from current pathname if exists
@@ -27,7 +30,7 @@ const isActive = (path: string) => {
   href="#main-content"
   class="absolute start-16 -top-full z-50 bg-background px-3 py-2 text-accent backdrop-blur-lg transition-all focus:top-4"
 >
-  Skip to content
+  {t(locale, "nav.skipToContent")}
 </a>
 
 <header
@@ -72,52 +75,52 @@ const isActive = (path: string) => {
         ]}
       >
         <li class="col-span-2">
-          <a href="/posts" class:list={{ "active-nav": isActive("/posts") }}>
-            Posts
+          <a href={locale === "ko" ? "/posts" : `/${locale}/posts`} class:list={{ "active-nav": isActive("/posts") || isActive(`/${locale}/posts`) }}>
+            {t(locale, "nav.posts")}
           </a>
         </li>
         <li class="col-span-2">
-          <a href="/tags" class:list={{ "active-nav": isActive("/tags") }}>
-            Tags
+          <a href={locale === "ko" ? "/tags" : `/${locale}/tags`} class:list={{ "active-nav": isActive("/tags") || isActive(`/${locale}/tags`) }}>
+            {t(locale, "nav.tags")}
           </a>
         </li>
         <li class="col-span-2">
-          <a href="/about" class:list={{ "active-nav": isActive("/about") }}>
-            About
+          <a href={locale === "ko" ? "/about" : `/${locale}/about`} class:list={{ "active-nav": isActive("/about") || isActive(`/${locale}/about`) }}>
+            {t(locale, "nav.about")}
           </a>
         </li>
         {
           SITE.showArchives && (
             <li class="col-span-2">
               <LinkButton
-                href="/archives"
+                href={locale === "ko" ? "/archives" : `/${locale}/archives`}
                 class:list={[
                   "focus-outline flex justify-center p-3 sm:p-1",
                   {
-                    "active-nav [&>svg]:stroke-accent": isActive("/archives"),
+                    "active-nav [&>svg]:stroke-accent": isActive("/archives") || isActive(`/${locale}/archives`),
                   },
                 ]}
-                title="Archives"
-                aria-label="archives"
+                title={t(locale, "nav.archives")}
+                aria-label={t(locale, "nav.archives")}
               >
                 <IconArchive class="hidden sm:inline-block" />
-                <span class="sm:sr-only">Archives</span>
+                <span class="sm:sr-only">{t(locale, "nav.archives")}</span>
               </LinkButton>
             </li>
           )
         }
         <li class="col-span-1 flex items-center justify-center">
           <LinkButton
-            href="/search"
+            href={locale === "ko" ? "/search" : `/${locale}/search`}
             class:list={[
               "focus-outline flex p-3 sm:p-1",
-              { "[&>svg]:stroke-accent": isActive("/search") },
+              { "[&>svg]:stroke-accent": isActive("/search") || isActive(`/${locale}/search`) },
             ]}
-            title="Search"
-            aria-label="search"
+            title={t(locale, "nav.search")}
+            aria-label={t(locale, "nav.search")}
           >
             <IconSearch />
-            <span class="sr-only">Search</span>
+            <span class="sr-only">{t(locale, "nav.search")}</span>
           </LinkButton>
         </li>
         {
@@ -126,7 +129,7 @@ const isActive = (path: string) => {
               <button
                 id="theme-btn"
                 class="focus-outline relative size-12 p-4 sm:size-8 hover:[&>svg]:stroke-accent"
-                title="Toggles light & dark"
+                title={t(locale, "common.theme")}
                 aria-label="auto"
                 aria-live="polite"
               >
@@ -136,6 +139,9 @@ const isActive = (path: string) => {
             </li>
           )
         }
+        <li class="col-span-2 flex items-center justify-center sm:col-span-1">
+          <LanguageToggle />
+        </li>
       </ul>
     </nav>
   </div>

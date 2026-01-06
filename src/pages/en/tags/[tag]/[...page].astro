@@ -12,9 +12,7 @@ import getPostsByTag from "@/utils/getPostsByTag";
 import { SITE } from "@/config";
 
 export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
-  const posts = await getCollection("blog", ({ id }) =>
-    id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/"))
-  );
+  const posts = await getCollection("blog", ({ id }) => id.startsWith("en/"));
   const tags = getUniqueTags(posts);
 
   return tags.flatMap(({ tag, tagName }) => {
