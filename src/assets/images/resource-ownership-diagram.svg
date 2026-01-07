@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 900" font-family="Virgil, 'Cascadia Code', monospace">
+  <!-- Title -->
+  <text x="550" y="35" font-size="24" font-weight="bold" text-anchor="middle" fill="#1e293b">
+    Resource Ownership Problem: "누가 이 세션을 소유하는가?"
+  </text>
+
+  <!-- Central Session -->
+  <g>
+    <ellipse cx="550" cy="200" rx="140" ry="80" fill="#fef3c7" stroke="#f59e0b" stroke-width="4"/>
+    <text x="550" y="190" font-size="18" font-weight="bold" text-anchor="middle" fill="#92400e">session-abc-123</text>
+    <text x="550" y="215" font-size="14" text-anchor="middle" fill="#78350f">(브라우저 세션)</text>
+  </g>
+
+  <!-- Owner 1: getCamoufoxPage -->
+  <g>
+    <rect x="100" y="340" width="220" height="110" fill="#dbeafe" stroke="#3b82f6" stroke-width="3" rx="10"/>
+    <text x="210" y="370" font-size="15" font-weight="bold" text-anchor="middle" fill="#1e40af">getCamoufoxPage()</text>
+    <text x="120" y="395" font-size="12" fill="#1e293b">"함수가 종료되면</text>
+    <text x="120" y="415" font-size="12" fill="#1e293b">정리해야 하나?"</text>
+    <text x="210" y="440" font-size="13" font-weight="bold" text-anchor="middle" fill="#3b82f6">Owner?</text>
+  </g>
+
+  <!-- Arrow 1 -->
+  <path d="M 300 395 L 450 240" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrow-blue)" stroke-dasharray="5,5"/>
+
+  <!-- Owner 2: Watchdog -->
+  <g>
+    <rect x="380" y="340" width="220" height="110" fill="#fef3c7" stroke="#f59e0b" stroke-width="3" rx="10"/>
+    <text x="490" y="370" font-size="15" font-weight="bold" text-anchor="middle" fill="#92400e">Watchdog Timeout</text>
+    <text x="400" y="395" font-size="12" fill="#1e293b">"timeout 발생하면</text>
+    <text x="400" y="415" font-size="12" fill="#1e293b">정리해야 하나?"</text>
+    <text x="490" y="440" font-size="13" font-weight="bold" text-anchor="middle" fill="#f59e0b">Owner?</text>
+  </g>
+
+  <!-- Arrow 2 -->
+  <path d="M 490 340 L 520 280" stroke="#f59e0b" stroke-width="3" marker-end="url(#arrow-orange)" stroke-dasharray="5,5"/>
+
+  <!-- Owner 3: Disconnect Handler -->
+  <g>
+    <rect x="660" y="340" width="220" height="110" fill="#fecaca" stroke="#dc2626" stroke-width="3" rx="10"/>
+    <text x="770" y="370" font-size="15" font-weight="bold" text-anchor="middle" fill="#991b1b">Disconnect Handler</text>
+    <text x="680" y="395" font-size="12" fill="#1e293b">"연결 끊기면</text>
+    <text x="680" y="415" font-size="12" fill="#1e293b">정리해야 하나?"</text>
+    <text x="770" y="440" font-size="13" font-weight="bold" text-anchor="middle" fill="#dc2626">Owner?</text>
+  </g>
+
+  <!-- Arrow 3 -->
+  <path d="M 720 340 L 600 240" stroke="#dc2626" stroke-width="3" marker-end="url(#arrow-red)" stroke-dasharray="5,5"/>
+
+  <!-- Owner 4: Finally Block -->
+  <g>
+    <rect x="940" y="340" width="140" height="110" fill="#dcfce7" stroke="#22c55e" stroke-width="3" rx="10"/>
+    <text x="1010" y="370" font-size="15" font-weight="bold" text-anchor="middle" fill="#15803d">Finally</text>
+    <text x="1010" y="395" font-size="15" font-weight="bold" text-anchor="middle" fill="#15803d">Block</text>
+    <text x="960" y="420" font-size="12" fill="#1e293b">"무조건</text>
+    <text x="960" y="440" font-size="12" fill="#1e293b">정리?"</text>
+  </g>
+
+  <!-- Arrow 4 -->
+  <path d="M 940 380 L 680 220" stroke="#22c55e" stroke-width="3" marker-end="url(#arrow-green)" stroke-dasharray="5,5"/>
+
+  <!-- Problem Statement -->
+  <g>
+    <rect x="200" y="500" width="700" height="100" fill="#fef2f2" stroke="#dc2626" stroke-width="4" rx="12"/>
+    <text x="550" y="530" font-size="18" font-weight="bold" text-anchor="middle" fill="#991b1b">
+      ⚠️ 문제: Shared Ownership without Coordination
+    </text>
+    <text x="550" y="560" font-size="14" text-anchor="middle" fill="#7f1d1d">
+      4개의 경로가 모두 "나도 정리해야 하나?"라고 생각함
+    </text>
+    <text x="550" y="585" font-size="14" font-weight="bold" text-anchor="middle" fill="#dc2626">
+      → 모두가 소유한다 = 아무도 소유하지 않는다!
+    </text>
+  </g>
+
+  <!-- Solution: C++ RAII vs JavaScript -->
+  <g>
+    <text x="550" y="650" font-size="18" font-weight="bold" text-anchor="middle" fill="#1e293b">
+      언어별 리소스 관리 방식
+    </text>
+
+    <!-- C++ Box -->
+    <rect x="100" y="680" width="400" height="180" fill="#f0fdf4" stroke="#22c55e" stroke-width="3" rx="10"/>
+    <text x="300" y="710" font-size="16" font-weight="bold" text-anchor="middle" fill="#15803d">
+      C++ / Rust (RAII)
+    </text>
+    <rect x="120" y="725" width="360" height="120" fill="#dcfce7" stroke="#22c55e" stroke-width="2" rx="8"/>
+    <text x="140" y="750" font-size="13" font-family="Courier New, monospace" fill="#166534">{</text>
+    <text x="160" y="770" font-size="13" font-family="Courier New, monospace" fill="#166534">std::unique_ptr&lt;Browser&gt; browser;</text>
+    <text x="160" y="790" font-size="13" font-family="Courier New, monospace" fill="#166534">// 스코프 끝 = 자동 소멸</text>
+    <text x="160" y="810" font-size="13" font-family="Courier New, monospace" fill="#166534">// 이중 해제 불가능 ✅</text>
+    <text x="140" y="830" font-size="13" font-family="Courier New, monospace" fill="#166534">}</text>
+
+    <!-- JavaScript Box -->
+    <rect x="600" y="680" width="400" height="180" fill="#fef2f2" stroke="#dc2626" stroke-width="3" rx="10"/>
+    <text x="800" y="710" font-size="16" font-weight="bold" text-anchor="middle" fill="#991b1b">
+      JavaScript (수동 관리)
+    </text>
+    <rect x="620" y="725" width="360" height="120" fill="#fecaca" stroke="#dc2626" stroke-width="2" rx="8"/>
+    <text x="640" y="750" font-size="13" font-family="Courier New, monospace" fill="#7f1d1d">{</text>
+    <text x="660" y="770" font-size="13" font-family="Courier New, monospace" fill="#7f1d1d">const browser = await launch();</text>
+    <text x="660" y="790" font-size="13" font-family="Courier New, monospace" fill="#7f1d1d">// 수동으로 닫아야 함!</text>
+    <text x="660" y="810" font-size="13" font-family="Courier New, monospace" fill="#7f1d1d">await browser.close(); ❌</text>
+    <text x="640" y="830" font-size="13" font-family="Courier New, monospace" fill="#7f1d1d">}</text>
+  </g>
+
+  <!-- Markers -->
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3b82f6"/>
+    </marker>
+    <marker id="arrow-orange" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22c55e"/>
+    </marker>
+  </defs>
+</svg>

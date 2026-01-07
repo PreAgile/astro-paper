@@ -36,11 +36,11 @@ description: "50개의 Firefox 브라우저를 동시에 관리하는 자동화 
 
 ### 1.1 비즈니스 요구사항
 
-우리 팀은 여러 플랫폼에서 리뷰 데이터를 수집하는 스크래핑 시스템을 운영하고 있습니다. 그중 CPEATS라는 플랫폼은 특히 까다로웠습니다:
+우리 팀은 여러 플랫폼에서 리뷰 데이터를 수집하는 스크래핑 시스템을 운영하고 있습니다. 그중 배달 플랫폼 C사가 특히 까다로웠습니다:
 
 - 단일 요청이 5분 이상 소요 (수백 페이지의 페이지네이션)
 - 동적 렌더링 (브라우저 자동화 필수)
-- Anti-bot 메커니즘 (일반적인 Puppeteer는 차단됨)
+- 강력한 보안 솔루션인 A사의 Anti-bot 메커니즘
 
 처음에는 요청을 순차적으로 처리했지만, 하루 10,000건 이상의 요청을 처리하려면 병렬 처리가 필수였습니다.
 
@@ -194,13 +194,13 @@ async attach(sessionId: string): Promise<SessionHandle> {
 
 ---
 
-## 3. 운영: 3개월간 안정적이었다
+## 3. 운영: 꽤 오랫동안 안정적이었다
 
-이 시스템은 3개월간 꽤 잘 작동했습니다:
+이 시스템은 꽤 오랫동안 잘 작동했습니다:
 
 ```
-일일 요청: 5,000~8,000건
-평균 동시 브라우저: 30~40개
+일일 요청: 몇십만 건
+평균 동시 브라우저: 40개 정도
 피크 타임: 50개 도달
 메모리 사용량: 18~22GB (안정적)
 ```
@@ -209,12 +209,12 @@ async attach(sessionId: string): Promise<SessionHandle> {
 
 ```typescript
 // 로그 예시 (정상)
-[Camoufox] counter(32) == sessions(32) ✅
-[Locks] 28 locks, 32 active operations
+[Camoufox] counter(42) == sessions(42) ✅
+[SessionLock] locks: 38, activeOps: 42
 [Memory] RSS: 19.2GB
 ```
 
-그런데 12월 중순부터 이상한 신호들이 나타나기 시작했습니다.
+그런데 최근 들어서 이상한 신호들이 나타나기 시작했습니다.
 
 ---
 
@@ -241,6 +241,117 @@ async attach(sessionId: string): Promise<SessionHandle> {
 코드에 주기적으로 "orphan lock"을 청소하는 로직이 있었습니다. 평소에는 거의 발동하지 않았는데, 자주 발동하기 시작했습니다.
 
 "왜 Lock이 쌓이지? 정리가 안 되는 건가?"
+
+#### Orphan Lock이란 무엇인가?
+
+**Orphan Lock(고아 락)**은 세션이 종료되었는데도 Lock 레지스트리에 남아있는 락 객체를 말합니다.
+
+정상적인 Lock 생명주기는 다음과 같습니다:
+
+```typescript
+// SessionLockRegistry.ts - 정상 흐름
+1. attach()    → Lock 생성 (activeCount++)
+2. 작업 수행   → 브라우저 사용
+3. release()   → Lock 해제 (activeCount--)
+4. cleanup     → Lock 삭제 (activeCount === 0)
+```
+
+하지만 예외 상황에서 이 흐름이 깨집니다:
+
+```typescript
+// 비정상 흐름: release() 호출 실패
+1. attach()    → Lock 생성 ✅
+2. 작업 중     → Exception 발생! 💥
+3. release()   → 호출 안됨! ❌
+4. cleanup     → 실행 안됨! ❌
+
+결과: Lock 객체만 메모리에 남음 → Orphan Lock
+```
+
+#### Lock Sweep 메커니즘
+
+이 문제를 해결하기 위해 우리는 "Sweep" 로직을 구현했습니다. 실제 cmong-scraper-js 코드를 보겠습니다:
+
+```typescript
+// browser.service.ts - Lock Sweep 트리거
+private monitorAndCleanupResources(): void {
+  const locksSize = this.sessionLockRegistry.getLockCount();
+  const activeOps = this.activeOperations.size;
+
+  // 🔍 핵심 조건: Lock이 너무 많으면 Sweep 실행
+  if (locksSize > activeOps * 2) {
+    this.logger.warn(
+      `[LockSweep] locksSize(${locksSize}) > activeOps(${activeOps}) × 2 - triggering sweep`,
+      'BrowserService',
+    );
+
+    try {
+      const validSessionIds = new Set(this.pages.keys());
+      const sweptCount = await this.sessionLockRegistry.sweepOrphanedLocks(validSessionIds);
+
+      if (sweptCount > 0) {
+        this.logger.log(
+          `[LockSweep] 고아 락 ${sweptCount}개 정리 완료 | locksSize: ${locksSize}→${this.sessionLockRegistry.getLockCount()}`,
+          'BrowserService',
+        );
+      }
+    } catch (error) {
+      this.logger.error(`[LockSweep] 고아 락 정리 실패: ${error.message}`, 'BrowserService');
+    }
+  }
+}
+```
+
+```typescript
+// session-lock-registry.service.ts - Sweep 실행
+async sweepOrphanedLocks(validSessionIds: Set<string>): Promise<number> {
+  let sweptCount = 0;
+
+  for (const [sessionId, state] of this.locks) {
+    // 🔍 핵심 로직: pages Map에 없는 Lock은 Orphan
+    if (!validSessionIds.has(sessionId)) {
+      // 타이머 정리
+      if (state.idleTimer) {
+        clearTimeout(state.idleTimer);
+      }
+
+      this.logger.warn(
+        `[LockSweep] 고아 락 정리: session=${sessionId} activeCount=${state.activeCount} lastOp=${state.lastOperation ?? 'unknown'}`,
+        'BrowserService',
+      );
+
+      this.locks.delete(sessionId);
+      sweptCount++;
+    }
+  }
+
+  return sweptCount;
+}
+```
+
+#### 왜 Orphan Lock이 메모리 누수의 조기 경보인가?
+
+Lock 객체 자체는 작습니다 (수십 bytes). 하지만 문제는 **참조 체인**입니다:
+
+```
+Lock 객체 (100 bytes)
+  └─> state.closeSession (함수 클로저)
+       └─> BrowserContext 참조
+            └─> Page 객체들
+                 └─> 브라우저 리소스 (수백 MB!)
+```
+
+Lock이 정리되지 않으면:
+1. Lock → BrowserContext 참조 유지
+2. BrowserContext → 브라우저 프로세스 유지
+3. V8 GC가 메모리 회수 불가능
+4. 메모리 사용량 계속 증가
+
+따라서 Orphan Lock의 증가는 **"어디선가 정리 로직이 실행되지 않고 있다"**는 강력한 신호였습니다.
+
+아래 다이어그램은 정상 흐름과 Orphan이 되는 과정을 시각화한 것입니다:
+
+![Orphan Lock Lifecycle](/src/assets/images/orphan-lock-lifecycle.svg)
 
 ### 4.3 세 번째 신호: 메모리 증가
 
@@ -406,6 +517,138 @@ v2.3 (2025년 1월)
 
 ---
 
+### 5.4 시스템적 근본 원인: Resource Ownership의 모호함
+
+Git history를 보면서 더 근본적인 질문에 도달했습니다:
+
+> **"이 브라우저 세션을 누가 소유하는가?"**
+
+#### Ownership의 혼란
+
+```typescript
+// 질문: session-abc-123을 누가 "소유"하는가?
+
+Option 1: getCamoufoxPage() 함수가 소유?
+         → 함수가 종료되면 정리해야 함
+
+Option 2: Watchdog timeout handler가 소유?
+         → timeout 발생하면 정리해야 함
+
+Option 3: Browser disconnect event handler가 소유?
+         → 연결 끊기면 정리해야 함
+
+Option 4: Finally 블록이 소유?
+         → 무조건 정리해야 함
+
+답: **모두가 소유한다 = 아무도 소유하지 않는다!**
+```
+
+이것은 전형적인 **Shared Ownership without Coordination** 문제입니다.
+
+#### RAII 패턴과의 비교
+
+C++에서는 이 문제가 언어 차원에서 해결됩니다:
+
+```cpp
+// C++의 RAII (Resource Acquisition Is Initialization)
+{
+  std::unique_ptr<Browser> browser = createBrowser();
+  // 스코프를 벗어나면 자동으로 소멸자 호출
+  // 이중 해제 불가능 (컴파일 에러)
+}
+
+// Rust의 Ownership
+{
+  let browser = Browser::new();
+  // browser의 소유권이 명확함
+  // 스코프 끝에서 drop() 자동 호출
+} // browser는 여기서 소멸, 이후 접근 불가
+```
+
+**핵심 차이점:**
+- C++/Rust: **Deterministic Destruction** (언제 파괴되는지 명확함)
+- JavaScript: **Non-deterministic GC** (언제 GC 될지 모름)
+
+JavaScript에서는:
+1. 리소스 정리를 **수동으로** 호출해야 함 (`await page.close()`)
+2. 여러 곳에서 호출 가능 → 이중 해제 위험
+3. 호출 안 하면 → 메모리 누수
+
+#### 우리 시스템의 Ownership 문제
+
+실제 cmong-scraper-js 코드에서 이 문제를 보겠습니다:
+
+```typescript
+// browser.service.ts - Ownership이 분산됨
+async getPage(sessionId: string): Promise<Page> {
+  const session = await this.getCamoufoxPage(sessionId);
+  // ❓ 누가 session을 정리해야 하는가?
+
+  // 가능성 1: Caller가 정리
+  // 가능성 2: Watchdog이 정리
+  // 가능성 3: Disconnect handler가 정리
+  // 가능성 4: TTL cleanup이 정리
+
+  return session.page;
+}
+```
+
+```typescript
+// cpeats.service.ts - Caller 입장
+async getReviews(request: GetReviewsRequest) {
+  const { page } = await this.browserService.getPage(sessionId);
+  // ❓ 내가 page를 닫아야 하나?
+  // ❓ 아니면 browserService가 알아서 닫나?
+
+  try {
+    return await this.scrapeReviews(page);
+  } finally {
+    // 여기서 닫아야 하나? 🤔
+  }
+}
+```
+
+**문제의 본질:**
+
+> **Ownership이 명확하지 않으면, 모든 곳에서 "혹시 모르니 정리"를 시도합니다.**
+>
+> 이것이 바로 3개의 정리 경로가 생긴 이유입니다.
+
+#### 해결 방향: Ownership 명확화
+
+우리는 다음과 같이 Ownership을 재설계했습니다:
+
+```typescript
+// ✅ 명확한 Ownership: SessionHandle 패턴
+interface SessionHandle {
+  release(): Promise<void>;  // 소유권 반환
+  shouldForceCloseContext(): boolean;
+}
+
+// 사용
+const handle = await sessionLockRegistry.attach(sessionId, ...);
+try {
+  const { page } = await browserService.getPage(sessionId);
+  await workWithPage(page);
+} finally {
+  await handle.release();  // ← Ownership을 명확하게 반환
+}
+```
+
+**핵심 원칙:**
+
+1. **Single Owner**: 한 번에 하나의 Handle만 세션을 소유
+2. **Explicit Release**: 소유권 반환이 명시적 (`await handle.release()`)
+3. **Idempotent Cleanup**: Release를 여러 번 호출해도 안전
+
+이것이 바로 **"자원 관리는 소유권 관리"**라는 시스템 프로그래밍의 핵심 원칙입니다.
+
+아래 다이어그램은 Ownership 문제를 시각화한 것입니다:
+
+![Resource Ownership Problem](/src/assets/images/resource-ownership-diagram.svg)
+
+---
+
 ## 6. 심화: Promise.race의 치명적 함정
 
 이 시점에서 더 근본적인 질문을 하게 되었습니다:
@@ -494,12 +737,137 @@ try {
 
 ### 7.1 핵심 원칙: "한 번만 정리하라"
 
-문제를 이해하고 나니 해결책은 명확했습니다: **멱등성(Idempotency)**을 보장해야 합니다.
+문제를 이해하고 나니 해결책은 명확했습니다: **멱등성(Idempotency)** 을 보장해야 합니다.
 
-> **멱등성이란?**
-> 같은 작업을 여러 번 해도 결과가 한 번 한 것과 같은 것.
+#### 왜 멱등성인가?
+
+먼저 멱등성의 정의부터 짚고 넘어가겠습니다:
+
+> **멱등성(Idempotency)이란?**
 >
-> 예: "전등 끄기" 버튼을 10번 눌러도 = 1번 누른 것과 같음
+> 같은 작업을 여러 번 수행해도 결과가 한 번 수행한 것과 동일한 특성
+>
+> **일상 예시:**
+> - 전등 끄기: 10번 눌러도 = 1번 누른 것과 같음 ✅
+> - 은행 출금: 10번 실행하면 = 10배 출금됨 ❌ (멱등하지 않음!)
+
+우리 시스템에서 멱등성이 필요한 이유는 **여러 정리 경로가 동시에 실행될 수 있기 때문**입니다.
+
+```typescript
+// 문제 상황: 3개 경로가 동시에 카운터를 감소시킴
+Path 1: closeSession()       → counter--
+Path 2: safeCloseSession()   → counter--  (동시 실행!)
+Path 3: disconnect handler   → counter--  (동시 실행!)
+
+결과: counter가 -2가 됨! 💥
+```
+
+#### 분산 시스템 관점에서의 멱등성
+
+이것은 단순한 버그가 아니라 **분산 시스템의 근본적인 문제**입니다.
+
+분산 시스템에서는 3가지 전달 보장(Delivery Guarantee)이 있습니다:
+
+| 방식 | 설명 | 문제점 | 우리의 상황 |
+|------|------|--------|------------|
+| **At-most-once** | 최대 1번 실행 | 실패하면 정리 안됨 | ❌ 메모리 누수 |
+| **At-least-once** | 최소 1번 실행 | 중복 실행 가능성 | ✅ **현재 상황** |
+| **Exactly-once** | 정확히 1번 실행 | 이론적으로 불가능* | ❌ 현실적이지 않음 |
+
+\* Exactly-once는 Two-Phase Commit, Saga 패턴 등으로 근사할 수 있지만, 성능과 복잡도 트레이드오프가 큽니다.
+
+**우리의 선택:** At-least-once + Idempotency
+
+- 정리 로직은 여러 번 호출될 수 있다 (At-least-once)
+- 하지만 실제 효과는 한 번만 발생한다 (Idempotency)
+
+#### 다른 해결 방법들과 비교
+
+멱등성 플래그 외에도 여러 대안이 있었습니다. 왜 이 방법을 선택했을까요?
+
+| 방식 | 구현 | 장점 | 단점 | 선택 이유 |
+|------|------|------|------|----------|
+| **Atomic Counter** | `Atomics.add()` 사용 | 원자성 보장 | SharedArrayBuffer 필요, 성능 오버헤드 | ❌ 단일 프로세스에서 과도함 |
+| **CAS (Compare-And-Swap)** | `while(!cas(counter)) retry` | Lock-free | 스핀락으로 CPU 낭비 가능 | ❌ 복잡도 대비 이득 적음 |
+| **Mutex Lock** | `await mutex.acquire()` | 확실한 직렬화 | 데드락 위험, 성능 저하 | ❌ 브라우저 종료는 빨라야 함 |
+| **Reference Counting** | 참조 카운터 추가 | 정확한 추적 | 순환 참조 시 누수, 복잡도 증가 | ❌ 디버깅 어려움 |
+| **Idempotency Flag** ✅ | `counterDecremented: boolean` | 단순, 직관적, 빠름 | 플래그당 메모리 1 byte | ✅ **트레이드오프 최적** |
+
+**우리의 판단:**
+- 세션당 1 byte 메모리 사용은 무시할 수 있는 수준 (50 sessions = 50 bytes)
+- 코드가 단순하고 이해하기 쉬움 = 다음 엔지니어가 유지보수 가능
+- 성능 오버헤드 없음 (단순 boolean 체크)
+
+#### Race Condition과의 싸움
+
+하지만 여전히 문제가 있습니다. **Race Condition**입니다:
+
+```typescript
+// 시간축    Thread A              Thread B
+// T=0      session.counterDecremented? (false)
+// T=1                             session.counterDecremented? (false)
+// T=2      session.counterDecremented = true
+// T=3                             session.counterDecremented = true (중복!)
+// T=4      counter--
+// T=5                             counter-- (여전히 이중 감소!)
+```
+
+**해결책: Check-and-Set을 Atomic하게**
+
+JavaScript는 Single-threaded이므로, 한 줄의 코드는 Atomic합니다:
+
+```typescript
+// ❌ 잘못된 구현: Race Condition 가능
+if (!session.counterDecremented) {
+  session.counterDecremented = true;  // ← 여기서 끼어들 수 있음!
+  this.camoufoxActiveCount--;
+}
+
+// ✅ 올바른 구현: Early return으로 보호
+private decrementCounter(sessionId: string, reason: string): void {
+  const session = this.pages.get(sessionId);
+  if (!session?.isCamoufox) return;
+
+  // 🔒 핵심: 이미 감소했으면 즉시 리턴 (멱등성 보장)
+  if (session.counterDecremented) {
+    this.logger.debug(`[Counter] Already decremented for ${sessionId}, skipping`);
+    return;  // ← 여기서 함수 종료, 이후 코드 실행 안됨
+  }
+
+  // 플래그 설정과 감소를 한 곳에서 수행
+  session.counterDecremented = true;
+  this.camoufoxActiveCount = Math.max(0, this.camoufoxActiveCount - 1);
+
+  this.logger.info(
+    `[Counter] Decremented: ${reason}, new count: ${this.camoufoxActiveCount}`
+  );
+}
+```
+
+**왜 이것이 안전한가?**
+
+Node.js의 Event Loop는 Single-threaded입니다:
+1. `decrementCounter()` 함수가 실행되는 동안 다른 코드는 끼어들 수 없음
+2. `if` 체크와 `return`이 Atomic하게 실행됨
+3. 따라서 두 번째 호출은 항상 `if (session.counterDecremented)` 에서 걸림
+
+단, `await` 키워드가 있으면 이야기가 달라집니다:
+
+```typescript
+// ⚠️ 주의: await 때문에 Race Condition 가능
+if (!session.counterDecremented) {
+  await someAsyncOperation();  // ← 여기서 다른 코드가 끼어들 수 있음!
+  session.counterDecremented = true;
+}
+
+// ✅ 해결: 플래그를 먼저 설정
+if (!session.counterDecremented) {
+  session.counterDecremented = true;  // ← 먼저 설정
+  await someAsyncOperation();  // ← 이제 안전
+}
+```
+
+이것이 바로 **"동시성 프로그래밍은 순서가 전부"**라는 말의 의미입니다.
 
 **Before (문제 코드)**:
 
@@ -650,6 +1018,226 @@ const watchdogMs = this.getJitteredTimeout(this.getReviewsWatchdogMs);
 12:05:00~12:05:30 사이에 분산 종료 ✅
 └─ 부하가 30초에 걸쳐 분산됨
 ```
+
+---
+
+### 7.4 아키텍처적 고찰: Single Responsibility for Cleanup
+
+앞서 구현한 솔루션들을 한 걸음 물러나서 바라보겠습니다. 이것은 단순한 버그 수정이 아니라 **아키텍처 원칙의 적용**이었습니다.
+
+#### 문제의 본질: 책임의 분산
+
+Before 아키텍처를 다시 보겠습니다:
+
+```typescript
+// ❌ Before: 3개의 cleanup 경로가 각자 알아서 정리
+┌─────────────────────────────────────┐
+│  getCamoufoxPage()                  │
+│  ├─ counter++                       │
+│  ├─ Promise.race([work, watchdog])  │
+│  │   ├─ watchdog timeout            │
+│  │   │   └─ safeCloseSession()      │
+│  │   │       └─ counter--  (Path 1) │
+│  │   └─ disconnect event            │
+│  │       └─ safeCloseSession()      │
+│  │           └─ counter--  (Path 2) │
+│  └─ finally                         │
+│      └─ closeSession()              │
+│          └─ counter--  (Path 3)     │
+└─────────────────────────────────────┘
+
+문제: 3개 경로가 독립적으로 동작
+      → 조율(Coordination) 없음
+      → 이중 실행 가능
+```
+
+After 아키텍처:
+
+```typescript
+// ✅ After: 1개의 cleanup 함수에 책임 집중
+┌─────────────────────────────────────┐
+│  getCamoufoxPage()                  │
+│  ├─ counter++                       │
+│  ├─ Promise.race([work, watchdog])  │
+│  │   ├─ watchdog timeout            │
+│  │   │   └─ decrementCounter()  ────┐
+│  │   └─ disconnect event            │
+│  │       └─ decrementCounter()  ────┤
+│  └─ finally                         │
+│      └─ decrementCounter()  ────────┤
+│                                      │
+│  decrementCounter()  ← 모든 경로가 여기로 집중
+│  └─ if (already done) return; ✅    │
+│      counter--;                      │
+└─────────────────────────────────────┘
+
+해결: 단일 진입점(Single Entry Point)
+      → 멱등성 보장
+      → 이중 실행 방지
+```
+
+#### 적용된 디자인 원칙들
+
+##### 1. **SRP (Single Responsibility Principle)**
+
+> **"하나의 책임만 가져라"**
+
+**Before:**
+```typescript
+// closeSession()의 책임이 너무 많음
+async closeSession(id: string) {
+  await page.close();           // 1. 페이지 닫기
+  await context.close();        // 2. 컨텍스트 닫기
+  await browser.close();        // 3. 브라우저 닫기
+  this.camoufoxActiveCount--;   // 4. 카운터 감소 ⚠️
+  this.pages.delete(id);        // 5. Map에서 제거
+  await lock.release();         // 6. Lock 해제
+}
+```
+
+**After:**
+```typescript
+// 책임 분리: 각 함수가 하나의 책임만
+async closeSession(id: string) {
+  await this.closeBrowserResources(id);  // 브라우저 리소스만
+  this.decrementCounter(id, 'close');    // 카운터 감소만 ✅
+  this.cleanupSessionState(id);          // 상태 정리만
+}
+
+private decrementCounter(id: string, reason: string) {
+  // 이 함수는 "카운터 감소"라는 하나의 책임만 가짐
+  // + 멱등성 보장
+}
+```
+
+##### 2. **DRY (Don't Repeat Yourself)**
+
+**Before:**
+```typescript
+// 카운터 감소 로직이 3곳에 중복됨
+async closeSession(id: string) {
+  this.camoufoxActiveCount = Math.max(0, this.camoufoxActiveCount - 1);
+}
+
+async safeCloseSession(id: string) {
+  this.camoufoxActiveCount = Math.max(0, this.camoufoxActiveCount - 1);
+}
+
+browser.on('disconnected', () => {
+  this.camoufoxActiveCount = Math.max(0, this.camoufoxActiveCount - 1);
+});
+```
+
+**After:**
+```typescript
+// 카운터 감소 로직이 한 곳에만 존재
+private decrementCounter(id: string, reason: string) {
+  // 단일 구현 ✅
+  // 변경 시 한 곳만 수정하면 됨
+}
+
+async closeSession(id: string) {
+  this.decrementCounter(id, 'close');  // 재사용
+}
+
+async safeCloseSession(id: string) {
+  this.decrementCounter(id, 'safe_close');  // 재사용
+}
+```
+
+##### 3. **Defensive vs Fail-Safe Programming**
+
+이것은 미묘하지만 중요한 차이입니다.
+
+**Defensive Programming (잘못된 적용):**
+```typescript
+// "혹시 모르니 모든 곳에서 정리하자"
+async closeSession(id: string) {
+  await this.cleanup(id);  // 혹시 모르니 정리
+}
+
+async safeCloseSession(id: string) {
+  await this.cleanup(id);  // 혹시 모르니 정리
+}
+
+browser.on('disconnected', () => {
+  await this.cleanup(id);  // 혹시 모르니 정리
+});
+
+// 결과: 3번 실행됨! ❌
+```
+
+**Fail-Safe Programming (올바른 적용):**
+```typescript
+// "여러 번 호출되어도 안전하게"
+async cleanup(id: string) {
+  if (this.alreadyCleaned(id)) {
+    return;  // 이미 정리됨, 안전하게 스킵 ✅
+  }
+  // 실제 정리 로직
+}
+
+// 결과: 몇 번 호출되든 한 번만 실행됨 ✅
+```
+
+**핵심 차이:**
+- Defensive: "문제가 생기지 않게 여러 곳에서 방어" → 과잉 방어 → 중복 실행
+- Fail-Safe: "문제가 생겨도 안전하게 동작" → 멱등성 → 중복 실행해도 안전
+
+#### 일반화된 패턴: Cleanup Coordinator
+
+우리가 구현한 패턴을 일반화하면 다음과 같습니다:
+
+```typescript
+// 재사용 가능한 패턴
+class ResourceCleanupCoordinator<T> {
+  private cleanedResources = new Set<string>();
+
+  cleanup(resourceId: string, cleanupFn: () => Promise<void>): Promise<void> {
+    // 멱등성 보장
+    if (this.cleanedResources.has(resourceId)) {
+      return Promise.resolve();
+    }
+
+    this.cleanedResources.add(resourceId);
+
+    return cleanupFn()
+      .catch(error => {
+        // 실패해도 플래그는 유지 (재시도 방지)
+        this.logger.warn(`Cleanup failed for ${resourceId}: ${error}`);
+      });
+  }
+}
+
+// 사용
+const coordinator = new ResourceCleanupCoordinator();
+
+// 여러 곳에서 호출해도 안전
+await coordinator.cleanup('session-123', () => closeSession('session-123'));
+await coordinator.cleanup('session-123', () => closeSession('session-123'));
+await coordinator.cleanup('session-123', () => closeSession('session-123'));
+// → 실제로는 1번만 실행됨
+```
+
+이 패턴은 다음에도 적용 가능합니다:
+- 데이터베이스 커넥션 정리
+- 파일 핸들 닫기
+- 웹소켓 연결 종료
+- 이벤트 리스너 제거
+
+#### 트레이드오프 인식
+
+완벽한 해결책은 아닙니다. 우리가 받아들인 트레이드오프:
+
+| 측면 | Before | After | 트레이드오프 |
+|------|--------|-------|------------|
+| **복잡도** | 중간 (3개 경로) | 낮음 (단일 함수) | ✅ 단순해짐 |
+| **메모리** | 0 bytes | 50 bytes (플래그) | ✅ 무시 가능 |
+| **성능** | 빠름 | 조금 느림 (플래그 체크) | ✅ ns 단위 차이 |
+| **안정성** | 불안정 (이중 감소) | 안정 (멱등성) | ✅ 크게 개선 |
+| **디버깅** | 어려움 (어디서 문제?) | 쉬움 (단일 진입점) | ✅ 크게 개선 |
+
+**결론: 명백한 개선**
 
 ---
 
