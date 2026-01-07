@@ -5,7 +5,12 @@ import { SITE } from "@/config";
 export const BLOG_PATH = "src/data/blog";
 
 const blog = defineCollection({
-  loader: glob({ pattern: "**/[^_]*.md", base: `./${BLOG_PATH}` }),
+  loader: glob({
+    pattern: "**/[^_]*.md",
+    base: `./${BLOG_PATH}`,
+    // 파일 경로 전체를 id로 사용하여 중복 방지
+    generateId: ({ entry }) => entry,
+  }),
   schema: ({ image }) =>
     z.object({
       author: z.string().default(SITE.author),

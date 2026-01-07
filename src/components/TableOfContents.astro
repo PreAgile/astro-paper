@@ -1,0 +1,276 @@
+---
+import { getLocaleFromUrl, t } from "@/i18n/utils";
+
+const locale = getLocaleFromUrl(Astro.url);
+const tocTitle = t(locale, "post.tableOfContents");
+---
+
+<aside id="toc-sidebar" class="toc-sidebar">
+  <nav class="toc-nav">
+    <h2 class="toc-title">{tocTitle}</h2>
+    <ul id="toc-list" class="toc-list">
+      <!-- TOC items will be populated by JavaScript -->
+    </ul>
+  </nav>
+</aside>
+
+<style>
+  .toc-sidebar {
+    position: fixed;
+    top: 120px;
+    right: max(calc((100vw - 768px) / 2 - 280px), 20px);
+    width: 240px;
+    max-height: calc(100vh - 160px);
+    overflow-y: auto;
+    padding: 1rem;
+    border-radius: 8px;
+    background-color: var(--background);
+    border: 1px solid var(--border);
+    z-index: 40;
+    opacity: 0;
+    transform: translateX(20px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    scrollbar-width: thin;
+    scrollbar-color: var(--muted) transparent;
+  }
+
+  .toc-sidebar.visible {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  .toc-sidebar::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .toc-sidebar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .toc-sidebar::-webkit-scrollbar-thumb {
+    background-color: var(--muted);
+    border-radius: 2px;
+  }
+
+  .toc-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--foreground);
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .toc-list :global(li) {
+    margin: 0;
+    padding: 0;
+  }
+
+  .toc-list :global(a) {
+    display: block;
+    padding: 0.375rem 0.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    color: var(--foreground);
+    opacity: 0.65;
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    border-radius: 0 4px 4px 0;
+    transition: all 0.2s ease;
+    word-break: break-word;
+  }
+
+  .toc-list :global(a:hover) {
+    opacity: 0.9;
+    background-color: var(--muted);
+  }
+
+  .toc-list :global(a.active) {
+    opacity: 1;
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 0.875rem;
+    border-left-color: var(--accent);
+    background-color: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  /* Heading level indentation */
+  .toc-list :global(.toc-h2) {
+    padding-left: 0.5rem;
+  }
+
+  .toc-list :global(.toc-h3) {
+    padding-left: 1rem;
+  }
+
+  .toc-list :global(.toc-h4) {
+    padding-left: 1.5rem;
+  }
+
+  .toc-list :global(.toc-h5) {
+    padding-left: 2rem;
+  }
+
+  .toc-list :global(.toc-h6) {
+    padding-left: 2.5rem;
+  }
+
+  /* Hide on smaller screens */
+  @media (max-width: 1280px) {
+    .toc-sidebar {
+      display: none;
+    }
+  }
+</style>
+
+<script is:inline data-astro-rerun>
+  function initTableOfContents() {
+    const tocSidebar = document.getElementById("toc-sidebar");
+    const tocList = document.getElementById("toc-list");
+    const article = document.getElementById("article");
+
+    if (!tocSidebar || !tocList || !article) return;
+
+    // Get all headings from the article
+    const headings = article.querySelectorAll("h2, h3, h4, h5, h6");
+
+    if (headings.length === 0) {
+      tocSidebar.style.display = "none";
+      return;
+    }
+
+    // Clear existing TOC items
+    tocList.innerHTML = "";
+
+    // Build TOC
+    headings.forEach((heading, index) => {
+      // Ensure heading has an id
+      if (!heading.id) {
+        const text = heading.textContent || "";
+        heading.id = `heading-${index}-${text.toLowerCase().replace(/[^a-z0-9가-힣]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "")}`;
+      }
+
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+
+      a.href = `#${heading.id}`;
+      a.textContent = heading.textContent?.replace(/#$/, "").trim() || "";
+      a.className = `toc-${heading.tagName.toLowerCase()}`;
+      a.dataset.targetId = heading.id;
+
+      // Smooth scroll on click
+      a.addEventListener("click", (e) => {
+        e.preventDefault();
+        const target = document.getElementById(heading.id);
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "start" });
+          // Update URL hash without jumping
+          history.pushState(null, "", `#${heading.id}`);
+        }
+      });
+
+      li.appendChild(a);
+      tocList.appendChild(li);
+    });
+
+    // Show the sidebar with animation
+    requestAnimationFrame(() => {
+      tocSidebar.classList.add("visible");
+    });
+
+    // Track active heading
+    let currentActiveId = null;
+
+    const updateActiveHeading = () => {
+      const scrollY = window.scrollY;
+      const windowHeight = window.innerHeight;
+      const documentHeight = document.documentElement.scrollHeight;
+
+      // Find the heading that is closest to the top of the viewport
+      let activeHeading = null;
+      let minDistance = Infinity;
+
+      headings.forEach((heading) => {
+        const rect = heading.getBoundingClientRect();
+        const topOffset = rect.top;
+
+        // Consider headings that are above the middle of the viewport
+        if (topOffset < windowHeight * 0.4) {
+          const distance = Math.abs(topOffset - 80); // 80px from top as ideal position
+          if (distance < minDistance || topOffset > 0) {
+            if (topOffset > -rect.height) {
+              minDistance = distance;
+              activeHeading = heading;
+            }
+          }
+        }
+      });
+
+      // If we're at the bottom of the page, highlight the last heading
+      if (scrollY + windowHeight >= documentHeight - 50) {
+        activeHeading = headings[headings.length - 1];
+      }
+
+      // If no heading found and we're near the top, use the first heading
+      if (!activeHeading && scrollY < 200 && headings.length > 0) {
+        activeHeading = headings[0];
+      }
+
+      const newActiveId = activeHeading?.id || null;
+
+      if (newActiveId !== currentActiveId) {
+        currentActiveId = newActiveId;
+
+        // Update active states
+        tocList.querySelectorAll("a").forEach((link) => {
+          if (link.dataset.targetId === currentActiveId) {
+            link.classList.add("active");
+            // Scroll the TOC to keep active item visible
+            const linkRect = link.getBoundingClientRect();
+            const sidebarRect = tocSidebar.getBoundingClientRect();
+            if (linkRect.top < sidebarRect.top + 60 || linkRect.bottom > sidebarRect.bottom - 20) {
+              link.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          } else {
+            link.classList.remove("active");
+          }
+        });
+      }
+    };
+
+    // Throttle scroll events
+    let ticking = false;
+    const onScroll = () => {
+      if (!ticking) {
+        requestAnimationFrame(() => {
+          updateActiveHeading();
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+
+    // Initial update
+    updateActiveHeading();
+
+    // Handle page transitions
+    document.addEventListener("astro:after-swap", () => {
+      window.removeEventListener("scroll", onScroll);
+    });
+  }
+
+  // Initialize on page load and after Astro transitions
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initTableOfContents);
+  } else {
+    initTableOfContents();
+  }
+</script>

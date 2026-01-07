@@ -57,6 +57,15 @@ export default defineConfig({
     optimizeDeps: {
       exclude: ["@resvg/resvg-js"],
     },
+    server: {
+      watch: {
+        // 파일 쓰기 완료 후 이벤트 발생 (중복 watch 이벤트 방지)
+        awaitWriteFinish: {
+          stabilityThreshold: 100,
+          pollInterval: 50,
+        },
+      },
+    },
   },
   image: {
     responsiveStyles: true,
