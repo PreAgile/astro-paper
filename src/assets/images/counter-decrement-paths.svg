@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 800" font-family="Virgil, 'Cascadia Code', monospace">
+  <!-- Title -->
+  <text x="450" y="35" font-size="22" font-weight="bold" text-anchor="middle" fill="#1e293b">
+    Counter Decrement Paths (3 Paths → Problem!)
+  </text>
+
+  <!-- Increment (Start) -->
+  <g>
+    <rect x="325" y="70" width="250" height="70" fill="#d1fae5" stroke="#22c55e" stroke-width="3" rx="12"/>
+    <text x="450" y="100" font-size="16" font-weight="bold" text-anchor="middle" fill="#15803d">getCamoufoxPage()</text>
+    <text x="450" y="125" font-size="14" text-anchor="middle" fill="#166534">counter++ (Line 3745)</text>
+  </g>
+
+  <!-- Arrow down -->
+  <line x1="450" y1="140" x2="450" y2="180" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Trigger Events Box -->
+  <g>
+    <rect x="300" y="180" width="300" height="60" fill="#f1f5f9" stroke="#94a3b8" stroke-width="2" rx="8"/>
+    <text x="450" y="210" font-size="15" font-weight="bold" text-anchor="middle" fill="#1e293b">3 Different Triggers</text>
+    <text x="450" y="230" font-size="12" text-anchor="middle" fill="#475569">(Normal, Exception, Disconnect)</text>
+  </g>
+
+  <!-- Three paths split -->
+  <line x1="450" y1="240" x2="450" y2="270" stroke="#64748b" stroke-width="3"/>
+  <line x1="450" y1="270" x2="150" y2="310" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="450" y1="270" x2="450" y2="310" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="450" y1="270" x2="750" y2="310" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Path 1: closeSession -->
+  <g>
+    <rect x="25" y="310" width="250" height="130" fill="#dbeafe" stroke="#3b82f6" stroke-width="3" rx="12"/>
+    <text x="150" y="340" font-size="15" font-weight="bold" text-anchor="middle" fill="#1e40af">Path 1: closeSession()</text>
+    <text x="45" y="365" font-size="12" fill="#334155">Trigger: Normal close</text>
+    <text x="45" y="390" font-size="12" fill="#334155">Location: Line 1142</text>
+    <text x="45" y="415" font-size="13" font-weight="bold" fill="#dc2626">Action: counter--</text>
+  </g>
+
+  <!-- Path 2: safeCloseSession -->
+  <g>
+    <rect x="325" y="310" width="250" height="130" fill="#fef3c7" stroke="#f59e0b" stroke-width="3" rx="12"/>
+    <text x="450" y="340" font-size="15" font-weight="bold" text-anchor="middle" fill="#92400e">Path 2: safeCloseSession()</text>
+    <text x="345" y="365" font-size="12" fill="#334155">Trigger: Exception/Timeout</text>
+    <text x="345" y="390" font-size="12" fill="#334155">Location: Line 975</text>
+    <text x="345" y="415" font-size="13" font-weight="bold" fill="#dc2626">Action: counter--</text>
+  </g>
+
+  <!-- Path 3: disconnect handler -->
+  <g>
+    <rect x="625" y="310" width="250" height="130" fill="#fee2e2" stroke="#ef4444" stroke-width="3" rx="12"/>
+    <text x="750" y="340" font-size="15" font-weight="bold" text-anchor="middle" fill="#991b1b">Path 3: disconnect handler</text>
+    <text x="645" y="365" font-size="12" fill="#334155">Trigger: Browser crash</text>
+    <text x="645" y="390" font-size="12" fill="#334155">Location: Line 3928</text>
+    <text x="645" y="415" font-size="13" font-weight="bold" fill="#dc2626">Calls: safeCloseSession()</text>
+  </g>
+
+  <!-- Converge arrows -->
+  <line x1="150" y1="440" x2="450" y2="490" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="450" y1="440" x2="450" y2="490" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+  <line x1="750" y1="440" x2="450" y2="490" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Problem Box -->
+  <g>
+    <rect x="200" y="490" width="500" height="100" fill="#fef2f2" stroke="#dc2626" stroke-width="4" rx="12"/>
+    <text x="450" y="520" font-size="17" font-weight="bold" text-anchor="middle" fill="#dc2626">⚠️ PROBLEM: Race Condition</text>
+    <text x="450" y="545" font-size="13" text-anchor="middle" fill="#991b1b">When watchdog timeout occurs:</text>
+    <text x="450" y="565" font-size="13" text-anchor="middle" fill="#991b1b">Path 2 (safeClose) AND Path 1 (finally) both execute!</text>
+    <text x="450" y="585" font-size="13" font-weight="bold" text-anchor="middle" fill="#dc2626">→ counter-- happens TWICE! 💥</text>
+  </g>
+
+  <!-- Solution Box -->
+  <g>
+    <rect x="150" y="620" width="600" height="150" fill="#f0fdf4" stroke="#22c55e" stroke-width="3" rx="12"/>
+    <text x="450" y="650" font-size="18" font-weight="bold" text-anchor="middle" fill="#15803d">✓ Solution: Idempotent Flag</text>
+
+    <rect x="180" y="665" width="540" height="95" fill="#dcfce7" stroke="#16a34a" stroke-width="2" rx="8" fill-opacity="0.5"/>
+    <text x="200" y="690" font-size="12" font-family="'Cascadia Code', monospace" fill="#166534">session.counterDecremented?: boolean</text>
+    <text x="200" y="710" font-size="12" font-family="'Cascadia Code', monospace" fill="#166534">if (session.counterDecremented) return;</text>
+    <text x="200" y="730" font-size="12" font-family="'Cascadia Code', monospace" fill="#166534">session.counterDecremented = true;</text>
+    <text x="200" y="750" font-size="12" font-family="'Cascadia Code', monospace" fill="#166534">counter--;</text>
+  </g>
+
+  <!-- Arrow marker definition -->
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+</svg>

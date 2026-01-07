@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700" font-family="Virgil, 'Cascadia Code', monospace">
+  <!-- Title -->
+  <text x="450" y="35" font-size="22" font-weight="bold" text-anchor="middle" fill="#1e293b">
+    Browser Automation System Architecture
+  </text>
+
+  <!-- Counter Box -->
+  <g>
+    <rect x="50" y="80" width="250" height="180" fill="#dbeafe" stroke="#3b82f6" stroke-width="3" rx="12"/>
+    <text x="175" y="110" font-size="18" font-weight="bold" text-anchor="middle" fill="#1e40af">Counter</text>
+    <text x="70" y="140" font-size="14" fill="#1e293b">Purpose:</text>
+    <text x="70" y="165" font-size="13" fill="#475569">"How many browsers</text>
+    <text x="70" y="185" font-size="13" fill="#475569">are running?"</text>
+    <line x1="70" y1="195" x2="280" y2="195" stroke="#3b82f6" stroke-width="1"/>
+    <text x="70" y="215" font-size="12" fill="#334155">Max: 50 browsers</text>
+    <text x="70" y="235" font-size="12" fill="#334155">Counter: 0 → 50</text>
+    <text x="70" y="255" font-size="12" font-weight="bold" fill="#dc2626">⚠️ 3 decrement paths!</text>
+  </g>
+
+  <!-- Watchdog Box -->
+  <g>
+    <rect x="325" y="80" width="250" height="180" fill="#fef3c7" stroke="#f59e0b" stroke-width="3" rx="12"/>
+    <text x="450" y="110" font-size="18" font-weight="bold" text-anchor="middle" fill="#92400e">Watchdog</text>
+    <text x="345" y="140" font-size="14" fill="#1e293b">Purpose:</text>
+    <text x="345" y="165" font-size="13" fill="#475569">"Kill if takes</text>
+    <text x="345" y="185" font-size="13" fill="#475569">too long"</text>
+    <line x1="345" y1="195" x2="555" y2="195" stroke="#f59e0b" stroke-width="1"/>
+    <text x="345" y="215" font-size="12" fill="#334155">Timeout: 5 minutes</text>
+    <text x="345" y="235" font-size="12" fill="#334155">Uses Promise.race</text>
+    <text x="345" y="255" font-size="12" font-weight="bold" fill="#dc2626">⚠️ Winner doesn't stop loser!</text>
+  </g>
+
+  <!-- Lock Box -->
+  <g>
+    <rect x="600" y="80" width="250" height="180" fill="#dcfce7" stroke="#22c55e" stroke-width="3" rx="12"/>
+    <text x="725" y="110" font-size="18" font-weight="bold" text-anchor="middle" fill="#15803d">Lock</text>
+    <text x="620" y="140" font-size="14" fill="#1e293b">Purpose:</text>
+    <text x="620" y="165" font-size="13" fill="#475569">"Who's using</text>
+    <text x="620" y="185" font-size="13" fill="#475569">this session?"</text>
+    <line x1="620" y1="195" x2="830" y2="195" stroke="#22c55e" stroke-width="1"/>
+    <text x="620" y="215" font-size="12" fill="#334155">Mutex-like mechanism</text>
+    <text x="620" y="235" font-size="12" fill="#334155">activeCount tracker</text>
+    <text x="620" y="255" font-size="12" font-weight="bold" fill="#dc2626">⚠️ Can leak if not released!</text>
+  </g>
+
+  <!-- Request Flow -->
+  <g>
+    <rect x="150" y="310" width="600" height="60" fill="#f8fafc" stroke="#94a3b8" stroke-width="2" rx="8"/>
+    <text x="450" y="340" font-size="16" font-weight="bold" text-anchor="middle" fill="#1e293b">getReviews Request Flow</text>
+    <text x="450" y="360" font-size="13" text-anchor="middle" fill="#475569">Counter++ → Lock.acquire() → Promise.race(actualWork, watchdog)</text>
+  </g>
+
+  <!-- Normal Flow -->
+  <g>
+    <text x="150" y="410" font-size="16" font-weight="bold" fill="#22c55e">✓ Normal Flow:</text>
+    <rect x="150" y="420" width="600" height="100" fill="#f0fdf4" stroke="#22c55e" stroke-width="2" rx="8"/>
+    <text x="170" y="445" font-size="13" fill="#166534">1. actualWork completes before timeout</text>
+    <text x="170" y="470" font-size="13" fill="#166534">2. Finally block runs → lock.release() → counter--</text>
+    <text x="170" y="495" font-size="13" fill="#166534">3. Resources cleaned up once ✅</text>
+  </g>
+
+  <!-- Problem Flow -->
+  <g>
+    <text x="150" y="550" font-size="16" font-weight="bold" fill="#dc2626">✗ Watchdog Timeout (Problem):</text>
+    <rect x="150" y="560" width="600" height="120" fill="#fef2f2" stroke="#dc2626" stroke-width="2" rx="8"/>
+    <text x="170" y="585" font-size="13" fill="#991b1b">1. Watchdog wins race → timeout callback executes</text>
+    <text x="170" y="610" font-size="13" fill="#991b1b">2. Callback: safeCloseSession() → counter--, lock deleted</text>
+    <text x="170" y="635" font-size="13" font-weight="bold" fill="#dc2626">3. Finally block ALSO runs → counter--, lock.release() ❌</text>
+    <text x="170" y="660" font-size="13" font-weight="bold" fill="#dc2626">4. Result: Double cleanup! Counter mismatch!</text>
+  </g>
+
+  <!-- Arrow showing relationship -->
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <path d="M 175 260 L 450 310" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="5,5"/>
+  <path d="M 450 260 L 450 310" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="5,5"/>
+  <path d="M 725 260 L 550 310" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)" stroke-dasharray="5,5"/>
+</svg>
