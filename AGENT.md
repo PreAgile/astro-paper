@@ -165,15 +165,104 @@ src/
 
 ## Architecture Diagrams
 
-**Excalidraw 사용 권장**
+### Mermaid Diagrams (Preferred)
 
-- 손그림 스타일로 "완성된 문서" 부담 감소
-- 빠른 수정과 반복 가능
+**모든 다이어그램에 Mermaid 사용 권장**
+
+- Markdown에 직접 삽입 가능
+- 버전 관리 용이 (텍스트 기반)
+- 일관된 스타일 유지
+- 수정 및 유지보수 간편
+
+**시각적 디자인 원칙:**
+
+```markdown
+# 색상 시스템 (Tailwind 팔레트 기반)
+- 빨간색 (#ff6b6b): 문제/에러/Before
+- 노란색 (#ffd43b): 주의/경고/TODO
+- 초록색 (#51cf66): 해결책/After/성공
+- 파란색 (#4dabf7): 정상 흐름/질문
+
+# 이모지 사용 금지
+- ❌ 이모지 아이콘 사용 금지
+- ✅ 텍스트 레이블 사용: [문제], [결과], [OK], [WARN] 등
+
+# 시각적 계층
+- 굵은 선 (stroke-width:3-4px): 중요한 결정/결과
+- 점선 (-.): 개선 관계, 변환 관계
+- 화살표: 인과 관계, 프로세스 흐름
+```
+
+**다이어그램 예시:**
+
+````markdown
+```mermaid
+%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'14px'}}}%%
+graph LR
+    subgraph "Before"
+        A1["[문제] 레이턴시<br/><b>50ms</b>"]
+    end
+    subgraph "After"
+        B1["[해결] 레이턴시<br/><b>&lt;1ms</b>"]
+    end
+    A1 -.개선.-> B1
+    style A1 fill:#ff6b6b,stroke:#c92a2a,color:#fff
+    style B1 fill:#51cf66,stroke:#2b8a3e,color:#fff
+```
+````
+
+### Excalidraw (선택적)
+
+- 복잡한 아키텍처 다이어그램에만 사용
 - SVG/PNG로 내보내서 `src/assets/images/`에 저장
 
 ```markdown
 ![Architecture](/assets/images/architecture.svg)
 ```
+
+---
+
+## Recent Posts
+
+### 멀티 플랫폼 데이터베이스 설계 (2026-01-07)
+
+**파일:**
+- 한글: `src/data/blog/multi-platform-database-design-deep-dive.md`
+- 영어: `src/data/blog/multi-platform-database-design-deep-dive-en.md`
+
+**핵심 내용:**
+- 새로운 외부 플랫폼 연동을 위한 DB 아키텍처 설계
+- God Table 안티패턴 → Bounded Context 분리
+- AI Debate를 활용한 설계 검증 프로세스
+- 고성능 로깅 시스템 (버퍼링, 배치 처리)
+- 인덱스 전략과 EXPLAIN 기반 의사결정
+- 데이터 라이프사이클 관리 (파티셔닝, 아카이브)
+- Observability를 고려한 스키마 설계
+
+**다이어그램 (10개):**
+1. God Table 문제 시각화
+2. Bounded Context 분리 (DDD)
+3. 3-Table ERD
+4. 성능 비교 (Before/After - 50배 개선)
+5. 버퍼링 시스템 Sequence Diagram
+6. 인덱스 의사결정 플로우
+7. 세션 안정성 등급 (STABLE/UNSTABLE/CRITICAL)
+8. 파티션 프루닝
+9. 데이터 라이프사이클 (Hot→Cold→Delete)
+10. 비용 비교 (67% 절감)
+
+**주요 수치:**
+- 약 4,000줄의 코드
+- 95% 테스트 커버리지
+- 50배 성능 개선 (레이턴시, DB 커넥션)
+- 100배 처리량 개선 (100 → 10,000+ logs/sec)
+- 67% 스토리지 비용 절감
+
+**사용된 원칙:**
+- "추측하지 말고 측정하라" (EXPLAIN 기반)
+- 정규화 우선, 비정규화는 측정 후
+- 인덱스는 가설 → Production 검증 후 제거
+- 트레이드오프를 명시적으로 문서화
 
 ---
 
