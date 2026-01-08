@@ -284,4 +284,253 @@ const nextPost =
   document.addEventListener("astro:after-swap", () =>
     window.scrollTo({ left: 0, top: 0, behavior: "instant" })
   );
+
+  /* Initialize Mermaid diagrams */
+  async function initMermaid() {
+    // Find mermaid code blocks (Shiki adds data-language="mermaid")
+    const mermaidElements = document.querySelectorAll('pre[data-language="mermaid"]');
+    if (mermaidElements.length === 0) {
+      // No mermaid, just init lightbox for images
+      initLightbox();
+      return;
+    }
+
+    // Dynamically import mermaid
+    const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+
+    // Detect dark mode
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark" ||
+                   document.documentElement.classList.contains("dark") ||
+                   window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: isDark ? "dark" : "default",
+      securityLevel: "loose",
+      fontFamily: "inherit",
+    });
+
+    // Render each mermaid diagram
+    for (const element of mermaidElements) {
+      // Get code content from the code element inside pre
+      const codeEl = element.querySelector("code");
+      const code = codeEl ? codeEl.textContent || "" : element.textContent || "";
+      const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+
+      try {
+        const { svg } = await mermaid.render(id, code);
+        const wrapper = document.createElement("div");
+        wrapper.className = "mermaid-diagram my-4 flex justify-center overflow-x-auto";
+        wrapper.innerHTML = svg;
+        element.replaceWith(wrapper);
+      } catch (e) {
+        console.error("Mermaid rendering error:", e);
+        // Keep original code block visible on error
+      }
+    }
+
+    // Initialize lightbox AFTER mermaid diagrams are rendered
+    initLightbox();
+  }
+  initMermaid();
+
+  // Re-init mermaid after page navigation
+  document.addEventListener("astro:after-swap", initMermaid);
+
+  /* Custom Lightbox for images and SVG diagrams */
+  function initLightbox() {
+    // Create lightbox overlay if not exists
+    let overlay = document.getElementById("lightbox-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "lightbox-overlay";
+      overlay.innerHTML = `
+        <div class="lightbox-content">
+          <button class="lightbox-close" aria-label="Close">&times;</button>
+          <div class="lightbox-body"></div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      // Close on overlay click
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay || e.target.classList.contains("lightbox-close")) {
+          overlay.classList.remove("active");
+          document.body.style.overflow = "";
+        }
+      });
+
+      // Close on ESC key
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && overlay.classList.contains("active")) {
+          overlay.classList.remove("active");
+          document.body.style.overflow = "";
+        }
+      });
+    }
+
+    // Target images and mermaid diagrams
+    const images = document.querySelectorAll("#article img");
+    const mermaidDiagrams = document.querySelectorAll(".mermaid-diagram");
+
+    // Add click handler to images
+    images.forEach((img) => {
+      img.style.cursor = "zoom-in";
+      img.addEventListener("click", () => {
+        const body = overlay.querySelector(".lightbox-body");
+        body.innerHTML = `<img src="${img.src}" alt="${img.alt || ""}" />`;
+        overlay.classList.add("active");
+        document.body.style.overflow = "hidden";
+      });
+    });
+
+    // Add click handler to mermaid diagrams
+    mermaidDiagrams.forEach((diagram) => {
+      diagram.style.cursor = "zoom-in";
+      diagram.addEventListener("click", () => {
+        const svg = diagram.querySelector("svg");
+        if (!svg) return;
+
+        const body = overlay.querySelector(".lightbox-body");
+        const clonedSvg = svg.cloneNode(true);
+
+        // Get viewBox dimensions for proper sizing
+        const viewBox = svg.getAttribute("viewBox");
+        if (viewBox) {
+          const [, , vbWidth, vbHeight] = viewBox.split(" ").map(Number);
+          const aspectRatio = vbWidth / vbHeight;
+
+          // Calculate size to fit viewport
+          const maxW = window.innerWidth * 0.9;
+          const maxH = window.innerHeight * 0.85;
+
+          let width, height;
+          if (maxW / aspectRatio <= maxH) {
+            width = maxW;
+            height = maxW / aspectRatio;
+          } else {
+            height = maxH;
+            width = maxH * aspectRatio;
+          }
+
+          clonedSvg.setAttribute("width", width);
+          clonedSvg.setAttribute("height", height);
+        }
+
+        clonedSvg.style.maxWidth = "90vw";
+        clonedSvg.style.maxHeight = "85vh";
+        body.innerHTML = "";
+        body.appendChild(clonedSvg);
+        overlay.classList.add("active");
+        document.body.style.overflow = "hidden";
+      });
+    });
+  }
+
 </script>
+
+<style is:global>
+  /* Lightbox Styles */
+  #lightbox-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    backdrop-filter: blur(4px);
+  }
+
+  #lightbox-overlay.active {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .lightbox-content {
+    position: relative;
+    max-width: 95vw;
+    max-height: 95vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .lightbox-close {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: white;
+    font-size: 32px;
+    cursor: pointer;
+    padding: 8px 16px;
+    line-height: 1;
+    border-radius: 8px;
+    transition: background 0.2s;
+  }
+
+  .lightbox-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .lightbox-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .lightbox-body img {
+    max-width: 90vw;
+    max-height: 90vh;
+    object-fit: contain;
+    border-radius: 8px;
+  }
+
+  .lightbox-body svg {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  }
+
+  /* Make images and diagrams appear clickable */
+  #article img,
+  .mermaid-diagram {
+    cursor: zoom-in;
+    transition: transform 0.2s ease;
+  }
+
+  #article img:hover,
+  .mermaid-diagram:hover {
+    transform: scale(1.01);
+  }
+
+  /* Zoom hint on hover */
+  .mermaid-diagram {
+    position: relative;
+  }
+
+  .mermaid-diagram::after {
+    content: "Click to zoom";
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+  }
+
+  .mermaid-diagram:hover::after {
+    opacity: 1;
+  }
+</style>

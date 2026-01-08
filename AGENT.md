@@ -128,6 +128,42 @@ src/
 
 ---
 
+### 플랫폼/회사 익명화 규칙
+
+외부 플랫폼이나 회사를 언급할 때는 **간접적으로 익명화**하여 작성합니다.
+
+**배달 플랫폼:**
+| 실제 이름 | 익명 표기 | 비고 |
+|----------|----------|------|
+| 배달의민족 | **B사** | Baemin의 B |
+| 쿠팡이츠 | **C사** | Coupang의 C |
+| 요기요 | **Y사** | Yogiyo의 Y |
+| 땡겨요 | **D사** | Ddangyo의 D |
+
+**보안 솔루션:**
+| 실제 이름 | 익명 표기 |
+|----------|----------|
+| Akamai | **A사** |
+
+**작성 예시:**
+```markdown
+# 좋은 예
+배달 플랫폼 C사의 리뷰 데이터를 수집해야 했습니다.
+A사의 Anti-Bot 솔루션이 적용되면서 차단이 시작되었습니다.
+
+# 나쁜 예
+쿠팡이츠의 리뷰 데이터를 수집해야 했습니다.
+Akamai Bot Manager가 적용되면서...
+```
+
+**이유:**
+- 특정 회사의 보안 취약점을 직접적으로 노출하지 않음
+- 법적 리스크 최소화
+- 기술적 내용에 집중할 수 있음
+- 독자가 자신의 상황에 일반화하여 적용하기 쉬움
+
+---
+
 ### 피해야 할 것
 
 - 단순 튜토리얼 ("설치하고 실행하면 끝")
@@ -211,14 +247,95 @@ graph LR
 ```
 ````
 
-### Excalidraw (선택적)
+### Excalidraw — 정성스러운 다이어그램
 
-- 복잡한 아키텍처 다이어그램에만 사용
-- SVG/PNG로 내보내서 `src/assets/images/`에 저장
+**ASCII 박스 다이어그램 대신 Excalidraw 사용**
+
+블로그에서 구조를 설명할 때, 코드 블록 안에 ASCII 문자로 그린 박스 다이어그램은 피합니다:
+
+```
+# 피해야 할 것 — AI스러운 ASCII 다이어그램
+
+┌─────────────────────────────────────────┐
+│ FIL Header (38 bytes)                   │  ← 이런 스타일
+│  - Checksum (무결성 검증)               │
+│  - Page Number                          │
+├─────────────────────────────────────────┤
+│ INDEX Header (36 bytes)                 │
+└─────────────────────────────────────────┘
+```
+
+이런 다이어그램은 **Excalidraw**로 직접 그려서 이미지로 대체합니다.
+
+**왜 Excalidraw인가?**
+
+| ASCII 다이어그램 | Excalidraw |
+|------------------|------------|
+| 기계적이고 차가운 느낌 | 손으로 그린 듯한 따뜻한 느낌 |
+| 텍스트 정렬에 한계 | 자유로운 레이아웃 |
+| 색상 표현 불가 | 색상으로 구분/강조 가능 |
+| 복잡한 구조 표현 어려움 | 화살표, 그룹핑 자유로움 |
+| AI가 생성한 느낌 | **정성 들인 느낌** |
+
+**Excalidraw 사용 원칙:**
+
+1. **파일 저장 위치**: `src/assets/images/{주제}/`
+   ```
+   src/assets/images/
+   └── innodb/
+       ├── page-structure.svg        # Page 내부 구조
+       ├── record-format.svg         # Record 저장 형식
+       ├── buffer-pool-hit-miss.svg  # Buffer Pool Hit/Miss 흐름
+       └── lru-young-old.svg         # LRU Sublist 구조
+   ```
+
+2. **파일 형식**: SVG 우선 (PNG은 고해상도 필요 시)
+   - Excalidraw에서 "Export" → "SVG" 선택
+   - "Embed scene" 체크 (나중에 수정 가능하도록)
+
+3. **스타일 가이드**:
+   - **색상**: Tailwind 팔레트 사용 (Mermaid와 일관성)
+     - 빨간색 (#ff6b6b): 문제/에러/Before
+     - 노란색 (#ffd43b): 주의/경고/신규
+     - 초록색 (#51cf66): 해결책/After/성공
+     - 파란색 (#4dabf7): 정상 흐름/정보
+     - 회색 (#868e96): 비활성/콜드 데이터
+   - **폰트**: Excalidraw 기본 손글씨 스타일 유지
+   - **선 스타일**: 손으로 그린 느낌의 "Architect" 스타일
+
+4. **네이밍 규칙**: `{주제}-{내용}.svg`
+   - 예: `innodb-page-structure.svg`
+   - 예: `buffer-pool-lru-algorithm.svg`
+
+**블로그에서 사용:**
 
 ```markdown
-![Architecture](/assets/images/architecture.svg)
+![InnoDB Page 내부 구조](/assets/images/innodb/page-structure.svg)
 ```
+
+또는 Astro의 Image 컴포넌트 사용:
+
+```astro
+---
+import pageStructure from '@/assets/images/innodb/page-structure.svg';
+---
+<Image src={pageStructure} alt="InnoDB Page 내부 구조" />
+```
+
+**Excalidraw로 대체해야 하는 것들:**
+
+| 기존 표현 방식 | Excalidraw로 대체 |
+|---------------|------------------|
+| `┌───┬───┐` 형태의 ASCII 박스 | 손그림 스타일 다이어그램 |
+| 텍스트 기반 구조 설명 | 시각적 계층 구조 |
+| Step 1 → Step 2 텍스트 흐름 | 화살표와 타임라인 |
+| 크기/비율 수치 나열 | 비례 시각화 |
+
+**Excalidraw 편집 팁:**
+
+1. [excalidraw.com](https://excalidraw.com)에서 직접 작업
+2. `.excalidraw` 파일을 `docs/diagrams/` 폴더에 원본 저장 (선택)
+3. 블로그용은 SVG로 export하여 `src/assets/images/`에 저장
 
 ---
 
