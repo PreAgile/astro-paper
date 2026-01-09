@@ -1,0 +1,65 @@
+---
+import { Image } from "astro:assets";
+import type { ImageMetadata } from "astro";
+
+interface Props {
+  lightSrc: ImageMetadata;
+  darkSrc: ImageMetadata;
+  alt: string;
+  class?: string;
+  width?: number;
+  height?: number;
+}
+
+const { lightSrc, darkSrc, alt, class: className, width, height } = Astro.props;
+---
+
+<picture class:list={["theme-image", className]}>
+  <Image
+    src={lightSrc}
+    alt={alt}
+    class="theme-image-light"
+    width={width}
+    height={height}
+  />
+  <Image
+    src={darkSrc}
+    alt={alt}
+    class="theme-image-dark"
+    width={width}
+    height={height}
+  />
+</picture>
+
+<style>
+  .theme-image {
+    display: block;
+    width: 100%;
+  }
+
+  .theme-image-light,
+  .theme-image-dark {
+    width: 100%;
+    height: auto;
+  }
+
+  /* Light mode: show light image, hide dark image */
+  :root .theme-image-light,
+  html[data-theme="light"] .theme-image-light {
+    display: block;
+  }
+
+  :root .theme-image-dark,
+  html[data-theme="light"] .theme-image-dark {
+    display: none;
+  }
+
+  /* Dark mode: show dark image, hide light image */
+  html[data-theme="dark"] .theme-image-light {
+    display: none;
+  }
+
+  html[data-theme="dark"] .theme-image-dark {
+    display: block;
+  }
+</style>

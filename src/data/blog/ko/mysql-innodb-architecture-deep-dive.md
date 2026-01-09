@@ -86,7 +86,7 @@ graph TB
 
 ### Page란 무엇인가?
 
-InnoDB의 **Page(페이지)**는 데이터 저장 및 I/O의 기본 단위입니다. 기본 크기는 **16KB**이며, 모든 데이터와 인덱스는 이 페이지 단위로 관리됩니다.
+InnoDB의 **Page**(페이지)는 데이터 저장 및 I/O의 기본 단위입니다. 기본 크기는 **16KB**이며, 모든 데이터와 인덱스는 이 페이지 단위로 관리됩니다.
 
 **Page의 핵심 역할:**
 - **I/O의 최소 단위**: 디스크에서 읽고 쓰는 최소 단위
@@ -101,9 +101,9 @@ InnoDB의 **Page(페이지)**는 데이터 저장 및 I/O의 기본 단위입니
 %%{init: {'theme':'base'}}%%
 graph TB
     subgraph "I/O 스택"
-        A[Application - InnoDB<br/>16KB Page 요청]
+        A["Application: InnoDB<br/>16KB Page 요청"]
         B[OS Page Cache<br/>4KB 페이지 단위]
-        C[Filesystem - ext4/xfs<br/>4KB 블록 단위]
+        C["Filesystem: ext4/xfs<br/>4KB 블록 단위"]
         D[Block Device Layer]
         E[Hardware<br/>HDD: 512B/4KB 섹터<br/>SSD: 4KB~16KB 페이지]
     end
@@ -144,7 +144,7 @@ graph LR
 | 페이지 크기 | 장점 | 단점 | 적합한 워크로드 |
 |------------|------|------|----------------|
 | **4KB** | 메모리 효율적, 랜덤 읽기 최소화 | 메타데이터 오버헤드, 인덱스 깊이 증가 | OLTP (소량 랜덤) |
-| **16KB (기본)** | 균형잡힌 성능, 인덱스 fan-out 증가 | 일부 메모리 낭비 가능 | **대부분의 워크로드** |
+| **16KB** (기본) | 균형잡힌 성능, 인덱스 fan-out 증가 | 일부 메모리 낭비 가능 | **대부분의 워크로드** |
 | **64KB** | 대용량 스캔 효율적, 인덱스 깊이 감소 | 메모리 낭비, 캐시 오염 | OLAP (대량 순차 스캔) |
 
 **Spatial Locality의 활용**: 같은 페이지 내의 인접한 레코드는 함께 접근될 가능성이 높습니다. 16KB를 한 번에 읽으면, 다음에 필요한 데이터가 이미 메모리에 있을 확률이 높아집니다.
@@ -178,7 +178,7 @@ graph LR
 
 ### Record란 무엇인가?
 
-**Record(레코드)**는 테이블의 한 **행(Row)**을 의미합니다. 하지만 실제 저장 형식은 우리가 생각하는 것보다 복잡합니다.
+**Record**(레코드)는 테이블의 한 **행**(Row)을 의미합니다. 하지만 실제 저장 형식은 우리가 생각하는 것보다 복잡합니다.
 
 | 영역 | 크기 | 구성 요소 |
 |------|------|----------|
@@ -318,7 +318,7 @@ SELECT * FROM users WHERE id = 2;
 
 ### LRU 알고리즘: 왜 "개선된" LRU가 필요했나?
 
-Buffer Pool이 가득 차면 어떤 페이지를 버릴지 결정해야 합니다. 가장 직관적인 방법은 **LRU (Least Recently Used)** 알고리즘입니다.
+Buffer Pool이 가득 차면 어떤 페이지를 버릴지 결정해야 합니다. 가장 직관적인 방법은 **LRU**(Least Recently Used) 알고리즘입니다.
 
 **기본 LRU 알고리즘:**
 
@@ -370,14 +370,14 @@ WHERE created_at BETWEEN '2023-01-01' AND '2025-12-31';
 graph TB
     subgraph "Buffer Pool LRU List"
         subgraph "Young Sublist - 5/8 (62.5%)"
-            Y1[Hot Page 1 - 자주 접근]
+            Y1["Hot Page 1: 자주 접근"]
             Y2[Hot Page 2]
             Y3[Hot Page 3]
         end
         subgraph "Old Sublist - 3/8 (37.5%)"
-            O1[New Page - 여기에 삽입]
+            O1["New Page: 여기에 삽입"]
             O2[Cold Page 1]
-            O3[Cold Page 2 - 제거 대상]
+            O3["Cold Page 2: 제거 대상"]
         end
     end
 
@@ -397,7 +397,7 @@ graph TB
 1. **새 페이지 삽입**: Old Sublist의 Head (Midpoint)에 삽입
    - 아직 "Hot"으로 인정받지 못함
 
-2. **시간 기반 승격 (핵심!)**:
+2. **시간 기반 승격** (핵심!):
    ```
    if (현재시각 - 페이지.첫접근시각) > innodb_old_blocks_time(기본 1000ms)
       AND 페이지가 다시 접근됨:
@@ -413,7 +413,7 @@ graph TB
 |------|---------------------|-------------------|------|
 | **Before Scan** | Hot Page 1, 2, 3, ... | 일부 Cold Pages | 정상 |
 | **During Scan** | Hot Pages **유지** (보호됨) | Scan Pages 쌓임 | Young 보호 |
-| **After Scan (1초 후)** | Hot Pages **유지** | Scan Pages 빠르게 제거됨 | 정상 복구 |
+| **After Scan** (1초 후) | Hot Pages **유지** | Scan Pages 빠르게 제거됨 | 정상 복구 |
 
 **결과:** Hot Pages는 Young Sublist에서 보호되고, Scan Pages는 Old에서 1초 내에 제거되어 OLTP 쿼리 성능이 유지됩니다.
 
@@ -541,7 +541,7 @@ COMMIT;
 | 1 | `BEGIN` | - | 트랜잭션 시작 |
 | 2 | `SELECT ... FOR UPDATE` | **Clean** | 페이지를 Buffer Pool로 로드 |
 | 3 | `UPDATE` | **Dirty** | Buffer Pool에서만 수정. Redo Log에 변경 기록 |
-| 4 | `COMMIT` | **Dirty (유지)** | Redo Log fsync로 내구성 보장. 페이지는 나중에 Checkpoint에서 flush |
+| 4 | `COMMIT` | **Dirty** (유지) | Redo Log fsync로 내구성 보장. 페이지는 나중에 Checkpoint에서 flush |
 
 **MySQL 소스 코드에서 Dirty Page 추적** (`buf_page_t` 구조체):
 
@@ -582,7 +582,7 @@ class buf_page_t {
 
 트랜잭션이 COMMIT되면, 데이터는 "영구적으로 저장"되어야 합니다. 하지만 Dirty Page를 매번 디스크에 쓰면 **랜덤 I/O**가 발생합니다.
 
-InnoDB의 해결책: **WAL (Write-Ahead Logging)** - 먼저 로그에 쓰고, 나중에 데이터를 쓴다
+InnoDB의 해결책: **WAL**(Write-Ahead Logging) - 먼저 로그에 쓰고, 나중에 데이터를 쓴다
 
 ```mermaid
 %%{init: {'theme':'base'}}%%
@@ -681,7 +681,7 @@ COMMIT 시 Redo Log를 언제 디스크에 쓸지 결정합니다:
 
 | 값 | 동작 | 내구성 | 성능 | 위험 시나리오 |
 |----|------|-------|------|---------------|
-| **1 (기본)** | 매 COMMIT마다 fsync | 최고 | 느림 | 없음 (ACID 완전 보장) |
+| **1** (기본) | 매 COMMIT마다 fsync | 최고 | 느림 | 없음 (ACID 완전 보장) |
 | **2** | OS 버퍼까지만 write | 중간 | 중간 | OS/서버 장애 시 최대 1초 손실 |
 | **0** | 1초마다 fsync | 낮음 | 빠름 | MySQL 장애 시에도 최대 1초 손실 |
 
@@ -706,7 +706,7 @@ innodb_flush_log_at_trx_commit = 2
 
 ### 읽기 잠금 없는 SELECT
 
-**MVCC (Multi-Version Concurrency Control)**는 읽기 작업이 쓰기 작업을 블로킹하지 않도록 하는 메커니즘입니다.
+**MVCC**(Multi-Version Concurrency Control)는 읽기 작업이 쓰기 작업을 블로킹하지 않도록 하는 메커니즘입니다.
 
 ```mermaid
 %%{init: {'theme':'base'}}%%

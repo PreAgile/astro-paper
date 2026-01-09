@@ -2,7 +2,6 @@
 author: MyeonSoo
 pubDatetime: 2026-01-07T02:30:00Z
 title: "Multi-Platform Database Design: Building Enterprise-Grade Logging Systems"
-slug: multi-platform-database-design-deep-dive-en
 featured: true
 draft: false
 tags:
@@ -13,8 +12,6 @@ tags:
   - postgresql
 description: "From specialized table design for new platform integration to AI-driven design validation, index optimization, and partitioning strategies - A complete guide to enterprise-grade database design"
 ---
-
-# Multi-Platform Database Design: Building Enterprise-Grade Logging Systems
 
 ## Table of Contents
 

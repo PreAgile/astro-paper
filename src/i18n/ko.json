@@ -15,15 +15,15 @@
   "home": {
     "greeting": "안녕하세요",
     "description": "내일을 위한 기록 — 오늘보다 더 나은 엔지니어링을 배우고, 기록하고, 공유합니다.",
-    "socialLinks": "소셜 링크:",
-    "featured": "추천 글",
-    "recentPosts": "최근 글",
+    "socialLinks": "함께해요:",
+    "featured": "추천하는 글",
+    "recentPosts": "최근에 쓴 글",
     "allPosts": "모든 글 보기"
   },
   "post": {
     "published": "발행일",
     "updated": "수정일",
-    "readingTime": "분 소요",
+    "readingTime": "분 읽기",
     "tableOfContents": "목차",
     "tags": "태그",
     "share": "공유하기",
@@ -38,12 +38,13 @@
   },
   "tags": {
     "title": "태그",
+    "description": "주제별로 글들을 찾아볼 수 있어요.",
     "allTags": "모든 태그",
-    "postsTaggedWith": "태그된 글:"
+    "postsTaggedWith": "이 태그가 달린 글들"
   },
   "archives": {
     "title": "아카이브",
-    "description": "모든 글을 시간순으로 정리했습니다."
+    "description": "지금까지 쓴 글들을 시간순으로 모아봤어요."
   },
   "about": {
     "title": "소개"

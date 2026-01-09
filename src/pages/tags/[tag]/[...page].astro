@@ -10,11 +10,12 @@ import Pagination from "@/components/Pagination.astro";
 import getUniqueTags from "@/utils/getUniqueTags";
 import getPostsByTag from "@/utils/getPostsByTag";
 import { SITE } from "@/config";
+import { t } from "@/i18n/utils";
+
+const locale = "ko";
 
 export async function getStaticPaths({ paginate }: GetStaticPathsOptions) {
-  const posts = await getCollection("blog", ({ id }) =>
-    id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/"))
-  );
+  const posts = await getCollection("blog", ({ id }) => id.startsWith("ko/"));
   const tags = getUniqueTags(posts);
 
   return tags.flatMap(({ tag, tagName }) => {
@@ -38,7 +39,7 @@ const { page, tagName } = Astro.props;
   <Main
     pageTitle={[`Tag:`, `${tagName}`]}
     titleTransition={tag}
-    pageDesc={`All the articles with the tag "${tagName}".`}
+    pageDesc={`${t(locale, "tags.postsTaggedWith")} "${tagName}"`}
   >
     <h1 slot="title" transition:name={tag}>{`Tag:${tag}`}</h1>
     <ul>

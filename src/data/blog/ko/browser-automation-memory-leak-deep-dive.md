@@ -190,7 +190,8 @@ async attach(sessionId: string): Promise<SessionHandle> {
 
 이 3가지 메커니즘이 어떻게 함께 작동하는지 시각화하면 다음과 같습니다:
 
-![System Architecture](/src/assets/images/system-architecture.svg)
+<img src="/src/assets/images/system-architecture-light.svg" alt="System Architecture" class="theme-img-light" />
+<img src="/src/assets/images/system-architecture-dark.svg" alt="System Architecture" class="theme-img-dark" />
 
 ---
 
@@ -351,7 +352,8 @@ Lock이 정리되지 않으면:
 
 아래 다이어그램은 정상 흐름과 Orphan이 되는 과정을 시각화한 것입니다:
 
-![Orphan Lock Lifecycle](/src/assets/images/orphan-lock-lifecycle.svg)
+<img src="/src/assets/images/orphan-lock-lifecycle-light.svg" alt="Orphan Lock Lifecycle" class="theme-img-light" />
+<img src="/src/assets/images/orphan-lock-lifecycle-dark.svg" alt="Orphan Lock Lifecycle" class="theme-img-dark" />
 
 ### 4.3 세 번째 신호: 메모리 증가
 
@@ -406,7 +408,8 @@ browser.on('disconnected', () => {
 
 이 3개의 경로를 시각화하면 다음과 같습니다:
 
-![Counter Decrement Paths](/src/assets/images/counter-decrement-paths.svg)
+<img src="/src/assets/images/counter-decrement-paths-light.svg" alt="Counter Decrement Paths" class="theme-img-light" />
+<img src="/src/assets/images/counter-decrement-paths-dark.svg" alt="Counter Decrement Paths" class="theme-img-dark" />
 
 ---
 
@@ -476,7 +479,8 @@ T=300s+1ms: Finally 블록 실행! 🚨
 
 이 타임라인을 그림으로 표현하면 더 명확해집니다:
 
-![Promise.race Timeline](/src/assets/images/promise-race-timeline.svg)
+<img src="/src/assets/images/promise-race-timeline-light.svg" alt="Promise.race Timeline" class="theme-img-light" />
+<img src="/src/assets/images/promise-race-timeline-dark.svg" alt="Promise.race Timeline" class="theme-img-dark" />
 
 ---
 
@@ -645,7 +649,8 @@ try {
 
 아래 다이어그램은 Ownership 문제를 시각화한 것입니다:
 
-![Resource Ownership Problem](/src/assets/images/resource-ownership-diagram.svg)
+<img src="/src/assets/images/resource-ownership-diagram-light.svg" alt="Resource Ownership Problem" class="theme-img-light" />
+<img src="/src/assets/images/resource-ownership-diagram-dark.svg" alt="Resource Ownership Problem" class="theme-img-dark" />
 
 ---
 

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" font-family="Virgil, 'Cascadia Code', monospace">
+  <!-- Title -->
+  <text x="400" y="30" font-size="20" font-weight="bold" text-anchor="middle" fill="#e2e8f0">
+    Promise.race + finally Block Timeline
+  </text>
+
+  <!-- Timeline vertical line -->
+  <line x1="100" y1="80" x2="100" y2="550" stroke="#94a3b8" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- T=0s: Start -->
+  <g>
+    <circle cx="100" cy="100" r="8" fill="#60a5fa" stroke="#93c5fd" stroke-width="2"/>
+    <text x="130" y="95" font-size="16" font-weight="bold" fill="#e2e8f0">T=0s: getReviews starts</text>
+    <rect x="130" y="105" width="600" height="80" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2" rx="8"/>
+    <text x="150" y="130" font-size="14" fill="#93c5fd">├─ counter++ (counter: 1)</text>
+    <text x="150" y="155" font-size="14" fill="#93c5fd">├─ lock.attach()</text>
+    <text x="150" y="180" font-size="14" fill="#93c5fd">└─ Promise.race([actualWork(), watchdog]) starts</text>
+  </g>
+
+  <!-- T=300s: Watchdog timeout -->
+  <g>
+    <circle cx="100" cy="280" r="8" fill="#f87171" stroke="#fca5a5" stroke-width="2"/>
+    <text x="130" y="275" font-size="16" font-weight="bold" fill="#f87171">T=300s: Watchdog timeout! 🔥</text>
+    <rect x="130" y="285" width="600" height="140" fill="#450a0a" stroke="#f87171" stroke-width="2" rx="8"/>
+    <text x="150" y="310" font-size="14" fill="#fca5a5">├─ timeout callback executes:</text>
+    <text x="170" y="335" font-size="14" fill="#fca5a5">├─ safeCloseSession() → counter--</text>
+    <text x="170" y="360" font-size="14" fill="#f87171">│   (counter: 0) ← 1st decrement</text>
+    <text x="170" y="385" font-size="14" fill="#fca5a5">├─ forceTerminate() → lock deleted</text>
+    <text x="170" y="410" font-size="14" fill="#fca5a5">└─ reject(TimeoutError)</text>
+  </g>
+
+  <!-- T=300s+1ms: Finally block -->
+  <g>
+    <circle cx="100" cy="490" r="8" fill="#fbbf24" stroke="#fcd34d" stroke-width="2"/>
+    <text x="130" y="485" font-size="16" font-weight="bold" fill="#fbbf24">T=300s+1ms: Finally block! 🚨</text>
+    <rect x="130" y="495" width="600" height="65" fill="#78350f" stroke="#fbbf24" stroke-width="2" rx="8"/>
+    <text x="150" y="520" font-size="14" fill="#fcd34d">├─ closeSession() → counter--</text>
+    <text x="150" y="545" font-size="14" font-weight="bold" fill="#f87171">│   (counter: -1) ← 2nd decrement! PROBLEM!</text>
+  </g>
+
+  <!-- Arrow annotations -->
+  <path d="M 750 350 L 750 470" stroke="#f87171" stroke-width="3" stroke-dasharray="5,5" marker-end="url(#arrowred)"/>
+  <text x="630" y="410" font-size="13" font-weight="bold" fill="#f87171">Double</text>
+  <text x="630" y="430" font-size="13" font-weight="bold" fill="#f87171">Cleanup!</text>
+
+  <!-- Arrow marker definition -->
+  <defs>
+    <marker id="arrowred" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f87171"/>
+    </marker>
+  </defs>
+</svg>

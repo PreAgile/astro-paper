@@ -25,7 +25,7 @@ const { page } = Astro.props;
 
 <Layout title={`${t(locale, "nav.posts")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.posts")} pageDesc="All the articles I've posted.">
+  <Main pageTitle={t(locale, "nav.posts")} pageDesc="A collection of everything I've written so far.">
     <ul>
       {page.data.map(data => <Card {...data} />)}
     </ul>

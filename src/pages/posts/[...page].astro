@@ -14,9 +14,9 @@ import { t } from "@/i18n/utils";
 const locale = "ko";
 
 export const getStaticPaths = (async ({ paginate }) => {
-  // 한국어 포스트 또는 언어 폴더가 없는 기존 포스트
+  // 한국어 포스트만 표시
   const posts = await getCollection("blog", ({ id, data }) =>
-    !data.draft && (id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/")))
+    !data.draft && id.startsWith("ko/")
   );
   return paginate(getSortedPosts(posts), { pageSize: SITE.postPerPage });
 }) satisfies GetStaticPaths;
@@ -26,7 +26,7 @@ const { page } = Astro.props;
 
 <Layout title={`${t(locale, "nav.posts")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.posts")} pageDesc="작성한 모든 글 목록입니다.">
+  <Main pageTitle={t(locale, "nav.posts")} pageDesc="지금까지 작성한 글들을 모아봤습니다.">
     <ul>
       {page.data.map(data => <Card {...data} />)}
     </ul>

@@ -17,7 +17,7 @@ let tags = getUniqueTags(posts);
 
 <Layout title={`${t(locale, "nav.tags")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.tags")} pageDesc="All the tags used in posts.">
+  <Main pageTitle={t(locale, "nav.tags")} pageDesc={t(locale, "tags.description")}>
     <ul class="flex flex-wrap gap-6">
       {tags.map(({ tag, tagName }) => <Tag {tag} {tagName} />)}
     </ul>

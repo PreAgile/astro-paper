@@ -103,3 +103,31 @@ html[data-theme="dark"] {
 :target {
   scroll-margin-block: 1rem;
 }
+
+/* Theme-aware images for Excalidraw diagrams */
+.theme-img-light,
+.theme-img-dark {
+  width: 100%;
+  height: auto;
+  margin: 1.5rem 0;
+}
+
+/* Light mode: show light image, hide dark image */
+:root .theme-img-light,
+html[data-theme="light"] .theme-img-light {
+  display: block;
+}
+
+:root .theme-img-dark,
+html[data-theme="light"] .theme-img-dark {
+  display: none;
+}
+
+/* Dark mode: show dark image, hide light image */
+html[data-theme="dark"] .theme-img-light {
+  display: none;
+}
+
+html[data-theme="dark"] .theme-img-dark {
+  display: block;
+}

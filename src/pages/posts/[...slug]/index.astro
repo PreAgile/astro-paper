@@ -9,9 +9,9 @@ type Props = {
 };
 
 export async function getStaticPaths() {
-  // 한국어 포스트 또는 언어 폴더가 없는 기존 포스트
+  // 한국어 포스트만 표시
   const posts = await getCollection("blog", ({ id, data }) =>
-    !data.draft && (id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/")))
+    !data.draft && id.startsWith("ko/")
   );
   const postResult = posts.map(post => ({
     params: { slug: getPath(post.id, post.filePath, false) },
@@ -23,10 +23,8 @@ export async function getStaticPaths() {
 
 const { post } = Astro.props;
 
-// 같은 언어의 포스트만 가져오기
-const posts = await getCollection("blog", ({ id }) =>
-  id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/"))
-);
+// 한국어 포스트만 가져오기
+const posts = await getCollection("blog", ({ id }) => id.startsWith("ko/"));
 const sortedPosts = getSortedPosts(posts);
 ---
 

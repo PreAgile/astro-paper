@@ -209,47 +209,56 @@ Akamai Bot Manager가 적용되면서...
 - 버전 관리 용이 (텍스트 기반)
 - 일관된 스타일 유지
 - 수정 및 유지보수 간편
+- **라이트/다크 모드 자동 지원** (테마 전환 시 자동 재렌더링)
+
+> **중요**: `%%{init: {'theme':'base'}}%%` 지시어는 사용하지 마세요!
+> 블로그가 자동으로 테마를 감지하여 라이트/다크 모드에 맞는 색상을 적용합니다.
+
+**다크 모드 자동 지원 원리:**
+
+블로그의 Mermaid 렌더러가 자동으로:
+1. 현재 테마 감지 (`data-theme` 속성)
+2. 라이트/다크 모드에 맞는 색상 팔레트 적용
+3. 테마 전환 시 다이어그램 자동 재렌더링
 
 **시각적 디자인 원칙:**
 
 ```markdown
-# 색상 시스템 (Tailwind 팔레트 기반)
-- 빨간색 (#ff6b6b): 문제/에러/Before
-- 노란색 (#ffd43b): 주의/경고/TODO
-- 초록색 (#51cf66): 해결책/After/성공
-- 파란색 (#4dabf7): 정상 흐름/질문
+# 인라인 style 사용 금지 (테마 자동 적용을 위해)
+- ❌ style A fill:#ff6b6b,color:#fff
+- ✅ 기본 노드/subgraph 스타일 사용
 
 # 이모지 사용 금지
 - ❌ 이모지 아이콘 사용 금지
 - ✅ 텍스트 레이블 사용: [문제], [결과], [OK], [WARN] 등
 
 # 시각적 계층
-- 굵은 선 (stroke-width:3-4px): 중요한 결정/결과
 - 점선 (-.): 개선 관계, 변환 관계
 - 화살표: 인과 관계, 프로세스 흐름
 ```
 
-**다이어그램 예시:**
+**다이어그램 예시 (권장):**
 
 ````markdown
 ```mermaid
-%%{init: {'theme':'base', 'themeVariables': { 'fontSize':'14px'}}}%%
 graph LR
     subgraph "Before"
-        A1["[문제] 레이턴시<br/><b>50ms</b>"]
+        A1["[문제] 레이턴시 50ms"]
     end
     subgraph "After"
-        B1["[해결] 레이턴시<br/><b>&lt;1ms</b>"]
+        B1["[해결] 레이턴시 &lt;1ms"]
     end
     A1 -.개선.-> B1
-    style A1 fill:#ff6b6b,stroke:#c92a2a,color:#fff
-    style B1 fill:#51cf66,stroke:#2b8a3e,color:#fff
 ```
 ````
+
+**참고**: 인라인 스타일 없이 작성하면 블로그가 자동으로 라이트/다크 테마에 맞는 색상을 적용합니다.
 
 ### Excalidraw — 정성스러운 다이어그램
 
 **ASCII 박스 다이어그램 대신 Excalidraw 사용**
+
+> **중요**: Excalidraw 다이어그램은 반드시 **라이트 모드용**과 **다크 모드용** 두 벌을 제작합니다.
 
 블로그에서 구조를 설명할 때, 코드 블록 안에 ASCII 문자로 그린 박스 다이어그램은 피합니다:
 
@@ -283,10 +292,11 @@ graph LR
    ```
    src/assets/images/
    └── innodb/
-       ├── page-structure.svg        # Page 내부 구조
-       ├── record-format.svg         # Record 저장 형식
-       ├── buffer-pool-hit-miss.svg  # Buffer Pool Hit/Miss 흐름
-       └── lru-young-old.svg         # LRU Sublist 구조
+       ├── page-structure-light.svg  # 라이트 모드용
+       ├── page-structure-dark.svg   # 다크 모드용
+       ├── record-format-light.svg
+       ├── record-format-dark.svg
+       └── ...
    ```
 
 2. **파일 형식**: SVG 우선 (PNG은 고해상도 필요 시)
@@ -294,33 +304,70 @@ graph LR
    - "Embed scene" 체크 (나중에 수정 가능하도록)
 
 3. **스타일 가이드**:
-   - **색상**: Tailwind 팔레트 사용 (Mermaid와 일관성)
-     - 빨간색 (#ff6b6b): 문제/에러/Before
-     - 노란색 (#ffd43b): 주의/경고/신규
-     - 초록색 (#51cf66): 해결책/After/성공
-     - 파란색 (#4dabf7): 정상 흐름/정보
-     - 회색 (#868e96): 비활성/콜드 데이터
+
+   **라이트 모드용 색상 팔레트:**
+   | 용도 | 색상 | HEX |
+   |------|------|-----|
+   | 배경 | 흰색/투명 | `transparent` 또는 `#ffffff` |
+   | 텍스트/선 | 진한 회색 | `#1e1e1e` |
+   | 문제/에러/Before | 빨간색 | `#e03131` |
+   | 주의/경고/신규 | 노란색 | `#f08c00` |
+   | 해결책/After/성공 | 초록색 | `#2f9e44` |
+   | 정상 흐름/정보 | 파란색 | `#1971c2` |
+   | 비활성/콜드 데이터 | 회색 | `#868e96` |
+
+   **다크 모드용 색상 팔레트:**
+   | 용도 | 색상 | HEX |
+   |------|------|-----|
+   | 배경 | 다크 배경 | `#212737` (블로그 다크 배경색) |
+   | 텍스트/선 | 밝은 회색 | `#eaedf3` |
+   | 문제/에러/Before | 연한 빨간색 | `#ff6b6b` |
+   | 주의/경고/신규 | 연한 노란색 | `#ffd43b` |
+   | 해결책/After/성공 | 연한 초록색 | `#51cf66` |
+   | 정상 흐름/정보 | 연한 파란색 | `#4dabf7` |
+   | 비활성/콜드 데이터 | 중간 회색 | `#adb5bd` |
+
    - **폰트**: Excalidraw 기본 손글씨 스타일 유지
    - **선 스타일**: 손으로 그린 느낌의 "Architect" 스타일
 
-4. **네이밍 규칙**: `{주제}-{내용}.svg`
-   - 예: `innodb-page-structure.svg`
-   - 예: `buffer-pool-lru-algorithm.svg`
+4. **네이밍 규칙**: `{내용}-{light|dark}.svg`
+   - 예: `page-structure-light.svg`, `page-structure-dark.svg`
+   - 예: `lru-algorithm-light.svg`, `lru-algorithm-dark.svg`
+   - **반드시 light/dark 쌍으로 생성**
 
-**블로그에서 사용:**
+**블로그에서 사용 (Markdown):**
 
-```markdown
-![InnoDB Page 내부 구조](/assets/images/innodb/page-structure.svg)
+마크다운 파일에서는 HTML 태그로 직접 사용:
+
+```html
+<img src="/src/assets/images/innodb/page-structure-light.svg" alt="InnoDB Page 내부 구조" class="theme-img-light" />
+<img src="/src/assets/images/innodb/page-structure-dark.svg" alt="InnoDB Page 내부 구조" class="theme-img-dark" />
 ```
 
-또는 Astro의 Image 컴포넌트 사용:
+**Astro 컴포넌트에서 사용:**
 
 ```astro
 ---
-import pageStructure from '@/assets/images/innodb/page-structure.svg';
+import ThemeImage from '@/components/ThemeImage.astro';
+import pageStructureLight from '@/assets/images/innodb/page-structure-light.svg';
+import pageStructureDark from '@/assets/images/innodb/page-structure-dark.svg';
 ---
-<Image src={pageStructure} alt="InnoDB Page 내부 구조" />
+<ThemeImage
+  lightSrc={pageStructureLight}
+  darkSrc={pageStructureDark}
+  alt="InnoDB Page 내부 구조"
+/>
 ```
+
+**작동 원리:**
+- 라이트 모드: `-light.svg` 표시, `-dark.svg` 숨김
+- 다크 모드: `-dark.svg` 표시, `-light.svg` 숨김
+- CSS `[data-theme]` 속성 기반으로 즉시 전환
+- 깜빡임 없이 부드러운 전환
+
+**CSS 클래스:**
+- `theme-img-light`: 라이트 모드에서만 표시
+- `theme-img-dark`: 다크 모드에서만 표시
 
 **Excalidraw로 대체해야 하는 것들:**
 

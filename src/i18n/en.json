@@ -15,10 +15,10 @@
   "home": {
     "greeting": "Hello",
     "description": "Recording for tomorrow — Learning, documenting, and sharing better engineering every day.",
-    "socialLinks": "Social Links:",
-    "featured": "Featured",
-    "recentPosts": "Recent Posts",
-    "allPosts": "All Posts"
+    "socialLinks": "Let's Connect:",
+    "featured": "Worth Reading",
+    "recentPosts": "Recently Written",
+    "allPosts": "View All"
   },
   "post": {
     "published": "Published",
@@ -38,12 +38,13 @@
   },
   "tags": {
     "title": "Tags",
+    "description": "Browse posts by topic.",
     "allTags": "All Tags",
-    "postsTaggedWith": "Posts tagged with:"
+    "postsTaggedWith": "Posts with this tag"
   },
   "archives": {
     "title": "Archives",
-    "description": "All posts organized chronologically."
+    "description": "Everything I've written so far, organized by date."
   },
   "about": {
     "title": "About"

@@ -17,7 +17,7 @@ if (!SITE.showArchives) {
 }
 
 const posts = await getCollection("blog", ({ id, data }) =>
-  !data.draft && (id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/")))
+  !data.draft && id.startsWith("ko/")
 );
 
 const months = [
@@ -38,7 +38,7 @@ const months = [
 
 <Layout title={`${t(locale, "nav.archives")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.archives")} pageDesc="보관된 모든 글 목록입니다.">
+  <Main pageTitle={t(locale, "nav.archives")} pageDesc={t(locale, "archives.description")}>
     {
       Object.entries(
         getPostsByGroupCondition(posts, post =>

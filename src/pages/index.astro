@@ -14,10 +14,8 @@ import { SOCIALS } from "@/constants";
 import { t } from "@/i18n/utils";
 
 const locale = "ko";
-// 한국어 포스트 또는 언어 폴더가 없는 기존 포스트 (ko/ 또는 en/으로 시작하지 않는 포스트)
-const posts = await getCollection("blog", ({ id }) =>
-  id.startsWith("ko/") || (!id.startsWith("en/") && !id.startsWith("ko/"))
-);
+// 한국어 포스트만 표시
+const posts = await getCollection("blog", ({ id }) => id.startsWith("ko/"));
 
 const sortedPosts = getSortedPosts(posts);
 const featuredPosts = sortedPosts.filter(({ data }) => data.featured);

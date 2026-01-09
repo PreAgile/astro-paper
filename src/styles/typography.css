@@ -116,4 +116,146 @@
       @apply rounded-sm border border-border px-0.5 py-px;
     }
   }
+
+  /* ===== Mermaid Dark Mode Styles ===== */
+  html[data-theme="dark"] .mermaid {
+    /* 배경색 투명하게 */
+    background: transparent !important;
+
+    /* subgraph 배경색 다크 모드용 */
+    .cluster rect {
+      fill: #1e293b !important;
+      stroke: #475569 !important;
+    }
+
+    /* subgraph 라벨 텍스트 */
+    .cluster-label {
+      fill: #e2e8f0 !important;
+    }
+
+    /* 노드 텍스트 */
+    .nodeLabel,
+    .label {
+      color: #e2e8f0 !important;
+      fill: #e2e8f0 !important;
+    }
+
+    /* 일반 텍스트 */
+    text {
+      fill: #e2e8f0 !important;
+    }
+
+    /* 노드 기본 스타일 (기본 노드들) */
+    .node rect,
+    .node circle,
+    .node ellipse,
+    .node polygon {
+      fill: #334155 !important;
+      stroke: #64748b !important;
+    }
+
+    /* 엣지 라인 */
+    .edgePath path.path {
+      stroke: #94a3b8 !important;
+    }
+
+    /* 화살표 마커 */
+    marker path {
+      fill: #94a3b8 !important;
+    }
+
+    /* 엣지 라벨 */
+    .edgeLabel {
+      background-color: #1e293b !important;
+      color: #cbd5e1 !important;
+    }
+
+    /* 시퀀스 다이어그램 */
+    .actor {
+      fill: #334155 !important;
+      stroke: #64748b !important;
+    }
+
+    .actor-line {
+      stroke: #64748b !important;
+    }
+
+    .messageLine0,
+    .messageLine1 {
+      stroke: #94a3b8 !important;
+    }
+
+    .messageText {
+      fill: #e2e8f0 !important;
+    }
+
+    .activation0,
+    .activation1,
+    .activation2 {
+      fill: #475569 !important;
+    }
+
+    /* Note 박스 */
+    .note {
+      fill: #78350f !important;
+      stroke: #fbbf24 !important;
+    }
+    .noteText {
+      fill: #fcd34d !important;
+    }
+
+    /* 커스텀 스타일 색상 오버라이드 - 더 부드러운 색상으로 */
+    /* 초록색 노드 (성공/정상) */
+    [style*="fill:#51cf66"],
+    [style*="fill: #51cf66"] {
+      fill: #166534 !important;
+      stroke: #4ade80 !important;
+    }
+    [style*="fill:#51cf66"] .nodeLabel,
+    [style*="fill: #51cf66"] .nodeLabel {
+      color: #86efac !important;
+    }
+
+    /* 노란색 노드 (경고) - 가장 눈 아픈 부분 수정 */
+    [style*="fill:#ffd43b"],
+    [style*="fill: #ffd43b"] {
+      fill: #78350f !important;
+      stroke: #fbbf24 !important;
+    }
+    [style*="fill:#ffd43b"] .nodeLabel,
+    [style*="fill: #ffd43b"] .nodeLabel,
+    [style*="color:#000"] {
+      color: #fcd34d !important;
+      fill: #fcd34d !important;
+    }
+
+    /* 빨간색 노드 (에러) */
+    [style*="fill:#ff6b6b"],
+    [style*="fill: #ff6b6b"] {
+      fill: #450a0a !important;
+      stroke: #f87171 !important;
+    }
+    [style*="fill:#ff6b6b"] .nodeLabel,
+    [style*="fill: #ff6b6b"] .nodeLabel {
+      color: #fca5a5 !important;
+    }
+
+    /* 파란색 노드 (정보) */
+    [style*="fill:#4dabf7"],
+    [style*="fill: #4dabf7"] {
+      fill: #1e3a5f !important;
+      stroke: #60a5fa !important;
+    }
+    [style*="fill:#4dabf7"] .nodeLabel,
+    [style*="fill: #4dabf7"] .nodeLabel {
+      color: #93c5fd !important;
+    }
+
+    /* 회색 노드 */
+    [style*="fill:#868e96"],
+    [style*="fill: #868e96"] {
+      fill: #334155 !important;
+      stroke: #64748b !important;
+    }
+  }
 }

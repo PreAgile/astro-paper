@@ -285,57 +285,157 @@ const nextPost =
     window.scrollTo({ left: 0, top: 0, behavior: "instant" })
   );
 
-  /* Initialize Mermaid diagrams */
-  async function initMermaid() {
-    // Find mermaid code blocks (Shiki adds data-language="mermaid")
+  /* Initialize Mermaid diagrams with theme support */
+  let mermaidInstance = null;
+  let mermaidCodes = new Map(); // Store original codes for re-rendering
+
+  async function initMermaid(forceRerender = false) {
+    // Find mermaid code blocks or existing diagrams
     const mermaidElements = document.querySelectorAll('pre[data-language="mermaid"]');
-    if (mermaidElements.length === 0) {
-      // No mermaid, just init lightbox for images
+    const existingDiagrams = document.querySelectorAll('.mermaid-diagram[data-mermaid-id]');
+
+    if (mermaidElements.length === 0 && existingDiagrams.length === 0) {
       initLightbox();
       return;
     }
 
-    // Dynamically import mermaid
-    const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+    // Dynamically import mermaid (pinned version for security)
+    if (!mermaidInstance) {
+      const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs");
+      mermaidInstance = mermaid;
+    }
 
     // Detect dark mode
-    const isDark = document.documentElement.getAttribute("data-theme") === "dark" ||
-                   document.documentElement.classList.contains("dark") ||
-                   window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
 
-    mermaid.initialize({
+    // Theme variables for light mode
+    const lightThemeVars = {
+      primaryColor: '#dbeafe',
+      primaryTextColor: '#1e40af',
+      primaryBorderColor: '#3b82f6',
+      secondaryColor: '#dcfce7',
+      secondaryTextColor: '#166534',
+      secondaryBorderColor: '#22c55e',
+      tertiaryColor: '#fef3c7',
+      tertiaryTextColor: '#92400e',
+      tertiaryBorderColor: '#f59e0b',
+      lineColor: '#64748b',
+      textColor: '#1e293b',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#94a3b8',
+      clusterBkg: '#f1f5f9',
+      clusterBorder: '#cbd5e1',
+      titleColor: '#1e293b',
+      edgeLabelBackground: '#ffffff',
+      nodeTextColor: '#1e293b',
+    };
+
+    // Theme variables for dark mode - softer, eye-friendly colors
+    const darkThemeVars = {
+      primaryColor: '#1e3a5f',
+      primaryTextColor: '#93c5fd',
+      primaryBorderColor: '#60a5fa',
+      secondaryColor: '#14532d',
+      secondaryTextColor: '#86efac',
+      secondaryBorderColor: '#4ade80',
+      tertiaryColor: '#78350f',
+      tertiaryTextColor: '#fcd34d',
+      tertiaryBorderColor: '#fbbf24',
+      lineColor: '#94a3b8',
+      textColor: '#e2e8f0',
+      mainBkg: '#1e293b',
+      nodeBorder: '#475569',
+      clusterBkg: '#334155',
+      clusterBorder: '#475569',
+      titleColor: '#e2e8f0',
+      edgeLabelBackground: '#1e293b',
+      nodeTextColor: '#e2e8f0',
+      noteBkgColor: '#78350f',
+      noteTextColor: '#fcd34d',
+      noteBorderColor: '#fbbf24',
+      actorBkg: '#334155',
+      actorBorder: '#64748b',
+      actorTextColor: '#e2e8f0',
+      signalColor: '#94a3b8',
+      signalTextColor: '#e2e8f0',
+    };
+
+    mermaidInstance.initialize({
       startOnLoad: false,
-      theme: isDark ? "dark" : "default",
+      theme: 'base',
+      themeVariables: isDark ? darkThemeVars : lightThemeVars,
+      // "loose" is safe here - blog content is author-controlled, not user-generated
+      // "strict" disables inline style directives which are needed for custom node colors
       securityLevel: "loose",
       fontFamily: "inherit",
     });
 
-    // Render each mermaid diagram
+    // Re-render existing diagrams on theme change
+    if (forceRerender && existingDiagrams.length > 0) {
+      for (const diagram of existingDiagrams) {
+        const mermaidId = diagram.getAttribute('data-mermaid-id');
+        const code = mermaidCodes.get(mermaidId);
+        if (code) {
+          const newId = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+          try {
+            // Remove %%{init...}%% directives to use our theme
+            const cleanCode = code.replace(/%%\{init:.*?\}%%/g, '').trim();
+            const { svg } = await mermaidInstance.render(newId, cleanCode);
+            diagram.innerHTML = svg;
+            diagram.setAttribute('data-mermaid-id', newId);
+            mermaidCodes.set(newId, code);
+            mermaidCodes.delete(mermaidId);
+          } catch (e) {
+            console.error("Mermaid re-rendering error:", e);
+          }
+        }
+      }
+      initLightbox();
+      return;
+    }
+
+    // Render new mermaid diagrams
     for (const element of mermaidElements) {
-      // Get code content from the code element inside pre
       const codeEl = element.querySelector("code");
       const code = codeEl ? codeEl.textContent || "" : element.textContent || "";
       const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
 
       try {
-        const { svg } = await mermaid.render(id, code);
+        // Remove %%{init...}%% directives to use our theme
+        const cleanCode = code.replace(/%%\{init:.*?\}%%/g, '').trim();
+        const { svg } = await mermaidInstance.render(id, cleanCode);
         const wrapper = document.createElement("div");
         wrapper.className = "mermaid-diagram my-4 flex justify-center overflow-x-auto";
+        wrapper.setAttribute('data-mermaid-id', id);
         wrapper.innerHTML = svg;
         element.replaceWith(wrapper);
+        // Store original code for re-rendering on theme change
+        mermaidCodes.set(id, code);
       } catch (e) {
         console.error("Mermaid rendering error:", e);
-        // Keep original code block visible on error
       }
     }
 
-    // Initialize lightbox AFTER mermaid diagrams are rendered
     initLightbox();
   }
   initMermaid();
 
-  // Re-init mermaid after page navigation
-  document.addEventListener("astro:after-swap", initMermaid);
+  // Re-init mermaid after page navigation (View Transitions)
+  document.addEventListener("astro:after-swap", () => {
+    mermaidCodes.clear();
+    initMermaid();
+  });
+
+  // Re-render mermaid on theme change
+  const themeObserver = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.attributeName === 'data-theme') {
+        initMermaid(true);
+        break;
+      }
+    }
+  });
+  themeObserver.observe(document.documentElement, { attributes: true });
 
   /* Custom Lightbox for images and SVG diagrams */
   function initLightbox() {
@@ -378,7 +478,11 @@ const nextPost =
       img.style.cursor = "zoom-in";
       img.addEventListener("click", () => {
         const body = overlay.querySelector(".lightbox-body");
-        body.innerHTML = `<img src="${img.src}" alt="${img.alt || ""}" />`;
+        body.textContent = ""; // Clear safely
+        const imgClone = document.createElement("img");
+        imgClone.src = img.src;
+        imgClone.alt = img.alt || "";
+        body.appendChild(imgClone);
         overlay.classList.add("active");
         document.body.style.overflow = "hidden";
       });
@@ -419,7 +523,7 @@ const nextPost =
 
         clonedSvg.style.maxWidth = "90vw";
         clonedSvg.style.maxHeight = "85vh";
-        body.innerHTML = "";
+        body.textContent = ""; // Clear safely
         body.appendChild(clonedSvg);
         overlay.classList.add("active");
         document.body.style.overflow = "hidden";

@@ -190,7 +190,8 @@ async attach(sessionId: string): Promise<SessionHandle> {
 
 Here's how these three mechanisms work together:
 
-![System Architecture](/src/assets/images/system-architecture.svg)
+<img src="/src/assets/images/system-architecture-light.svg" alt="System Architecture" class="theme-img-light" />
+<img src="/src/assets/images/system-architecture-dark.svg" alt="System Architecture" class="theme-img-dark" />
 
 ---
 
@@ -295,7 +296,8 @@ browser.on('disconnected', () => {
 
 Visualizing these three paths makes the problem clearer:
 
-![Counter Decrement Paths](/src/assets/images/counter-decrement-paths.svg)
+<img src="/src/assets/images/counter-decrement-paths-light.svg" alt="Counter Decrement Paths" class="theme-img-light" />
+<img src="/src/assets/images/counter-decrement-paths-dark.svg" alt="Counter Decrement Paths" class="theme-img-dark" />
 
 ---
 
@@ -365,7 +367,8 @@ Counter didn't go negative (due to Math.max(0, count - 1)), but the mismatch occ
 
 This timeline becomes much clearer with a diagram:
 
-![Promise.race Timeline](/src/assets/images/promise-race-timeline.svg)
+<img src="/src/assets/images/promise-race-timeline-light.svg" alt="Promise.race Timeline" class="theme-img-light" />
+<img src="/src/assets/images/promise-race-timeline-dark.svg" alt="Promise.race Timeline" class="theme-img-dark" />
 
 ---
 

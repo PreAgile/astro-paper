@@ -38,7 +38,7 @@ const months = [
 
 <Layout title={`${t(locale, "nav.archives")} | ${SITE.title}`}>
   <Header />
-  <Main pageTitle={t(locale, "nav.archives")} pageDesc="All the articles I've archived.">
+  <Main pageTitle={t(locale, "nav.archives")} pageDesc={t(locale, "archives.description")}>
     {
       Object.entries(
         getPostsByGroupCondition(posts, post =>
