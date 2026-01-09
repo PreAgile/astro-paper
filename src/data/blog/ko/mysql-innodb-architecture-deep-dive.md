@@ -635,10 +635,59 @@ graph TB
 | 랜덤 I/O | ~100 IOPS | ~10,000 IOPS |
 | 순차 I/O | ~100 MB/s | ~500 MB/s |
 
-**Redo Log의 마법:**
-- Buffer Pool의 Dirty 페이지를 바로 디스크에 쓰면 → **랜덤 I/O**
-- Redo Log는 append-only 구조 → **순차 I/O**
-- 나중에 Checkpoint에서 Dirty 페이지를 모아서 쓰기 → **배치 처리**
+### 왜 Dirty 페이지 직접 쓰기는 랜덤 I/O인가?
+
+데이터 페이지들은 테이블스페이스 파일(`.ibd`) 내에서 **논리적 순서**로 저장됩니다. 하지만 트랜잭션이 수정하는 페이지들은 **접근 순서**와 **저장 위치**가 전혀 다릅니다.
+
+```
+트랜잭션 실행 순서:
+1. UPDATE users SET name='...' WHERE id=5     → Page 100 수정
+2. UPDATE orders SET status='...' WHERE id=99 → Page 5000 수정
+3. UPDATE users SET email='...' WHERE id=3    → Page 98 수정
+4. INSERT INTO logs VALUES(...)               → Page 12000 수정
+
+디스크 쓰기 시 헤드 이동:
+[Page 100] -----(4900 페이지 점프)-----> [Page 5000]
+[Page 5000] ----(4902 페이지 점프)-----> [Page 98]
+[Page 98] -----(11902 페이지 점프)----> [Page 12000]
+```
+
+**HDD의 경우**: 디스크 헤드가 물리적으로 이동해야 합니다(Seek Time ~10ms). 위 예시에서 4번의 랜덤 접근 = 약 40ms 소요.
+
+**SSD의 경우**: Seek Time은 없지만, 랜덤 쓰기는 내부적으로 더 많은 연산이 필요합니다. 또한 SSD의 쓰기 증폭(Write Amplification) 문제가 발생할 수 있습니다.
+
+### 왜 Redo Log는 순차 I/O인가?
+
+Redo Log는 **Append-Only** 구조입니다. 새로운 로그 레코드는 항상 파일의 **끝에만 추가**됩니다.
+
+```
+Redo Log 쓰기 패턴:
+시간 →
+[LSN 1000][LSN 1001][LSN 1002][LSN 1003][LSN 1004]...
+     ↑         ↑         ↑         ↑         ↑
+   순차로 연속 쓰기 (디스크 헤드 이동 없음)
+
+내용:
+[Page 100 변경][Page 5000 변경][Page 98 변경][Page 12000 변경]
+     ↓              ↓              ↓              ↓
+  모두 같은 위치에 순서대로 기록됨
+```
+
+**핵심 차이점:**
+- **Dirty 페이지 쓰기**: "어디에" 쓸지가 데이터에 의해 결정됨 (Page 100은 파일의 100번째 위치에 써야 함)
+- **Redo Log 쓰기**: "어디에" 쓸지가 항상 "현재 끝"으로 고정됨
+
+| 비교 | Dirty 페이지 직접 쓰기 | Redo Log 쓰기 |
+|------|----------------------|---------------|
+| 쓰기 위치 | 각 페이지의 고유 위치 (분산) | 항상 파일 끝 (연속) |
+| I/O 패턴 | 랜덤 I/O | 순차 I/O |
+| HDD 성능 | ~100 IOPS (초당 100회) | ~100 MB/s |
+| 같은 데이터 4개 쓰기 | 40ms (4 × 10ms seek) | 0.1ms 미만 |
+
+**Redo Log의 마법 요약:**
+1. **즉시 쓰기**: 변경 내용을 Redo Log에 순차적으로 빠르게 기록 (COMMIT 보장)
+2. **지연 쓰기**: Dirty 페이지는 Buffer Pool에 유지하며 나중에 Checkpoint에서 배치로 쓰기
+3. **배치 처리**: 여러 Dirty 페이지를 모아서 한 번에 쓰면 디스크 헤드 이동 최소화
 
 ### Checkpoint: Dirty Page Flush
 
