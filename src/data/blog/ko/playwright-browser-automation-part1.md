@@ -108,7 +108,7 @@ Set-Cookie: _csrf=zzz; SameSite=Strict
 
 ### 2.2 동적 렌더링 페이지의 한계
 
-최신 웹 애플리케이션은 **SPA(Single Page Application)** 방식을 사용합니다:
+최신 웹 애플리케이션은 **SPA**(Single Page Application) 방식을 사용합니다:
 
 ```html
 <!-- 서버 응답 -->
@@ -159,7 +159,38 @@ A사의 보안 솔루션은 브라우저에서 JavaScript를 실행한 후 생�
 
 ## 3. Playwright 도입 배경
 
-### 3.1 브라우저 자동화 도구 비교
+### 3.1 브라우저 자동화란 무엇인가
+
+**브라우저 자동화**(Browser Automation)란 사람이 수동으로 하는 브라우저 조작—클릭, 입력, 페이지 이동, 스크롤 등—을 프로그래밍적으로 제어하는 것입니다.
+
+#### 왜 브라우저 자동화가 필요했나
+
+앞서 언급한 것처럼, API 호출만으로는 해결할 수 없는 문제들이 있었습니다:
+
+1. **Anti-Bot 솔루션 우회**: JavaScript 실행 후 생성되는 특수 쿠키(`_abck`, `bm_sv`) 획득
+2. **동적 렌더링 처리**: SPA에서 JavaScript가 실행되어야 보이는 데이터 수집
+3. **세션 관리 자동화**: 복잡한 토큰 체계(access_token, refresh_token, CSRF)를 브라우저가 자동 처리
+4. **브라우저 컨텍스트 활용**: `page.evaluate()`를 통해 실제 클라이언트 환경에서 API 호출 가능
+
+특히 4번이 핵심이었습니다. C사의 내부 API들은 브라우저 환경에서만 정상 동작하도록 설계되어 있었고, `page.evaluate()`를 통해 **실제 로그인된 페이지에서 JavaScript를 실행**해야만 데이터를 가져올 수 있었습니다.
+
+#### 브라우저 자동화 도구의 역사와 종류
+
+브라우저 자동화 도구는 크게 **세 세대**로 나눌 수 있습니다:
+
+| 세대 | 대표 도구 | 등장 시기 | 핵심 기술 |
+|------|----------|----------|----------|
+| **1세대** | Selenium, WebDriver | 2004~ | HTTP 기반 WebDriver 프로토콜 |
+| **2세대** | Puppeteer, Playwright | 2017~ | CDP(Chrome DevTools Protocol) 직접 통신 |
+| **3세대** | Playwright + Stealth | 2020~ | CDP + Anti-Detection 기법 |
+
+**1세대**: Selenium - 가장 오래되고 범용적이지만, HTTP 프로토콜 오버헤드가 존재
+
+**2세대**: Puppeteer/Playwright - Chrome 개발팀이 만든 CDP를 직접 사용하여 성능 대폭 개선
+
+**3세대**: Playwright + Stealth, **Camoufox** 등 - Anti-Bot 우회를 위한 브라우저 핑거프린트 위장 기능 추가
+
+### 3.2 브라우저 자동화 도구 비교
 
 브라우저를 프로그래밍적으로 제어하는 도구들을 검토했습니다. 단순 기능 비교가 아니라, **아키텍처 수준의 차이**를 이해해야 했습니다.
 
@@ -168,13 +199,17 @@ A사의 보안 솔루션은 브라우저에서 JavaScript를 실행한 후 생�
 Selenium은 **WebDriver 프로토콜**을 사용합니다:
 
 ```
-Node.js → HTTP → WebDriver Server → Browser
+┌─────────┐      ┌──────┐      ┌─────────────────┐      ┌─────────┐
+│ Node.js │ ───▶ │ HTTP │ ───▶ │ WebDriver Server│ ───▶ │ Browser │
+└─────────┘      └──────┘      └─────────────────┘      └─────────┘
 ```
 
-Playwright는 **CDP(Chrome DevTools Protocol)를 직접 사용**합니다:
+Playwright는 **CDP**(Chrome DevTools Protocol)를 직접 사용합니다:
 
 ```
-Node.js → WebSocket → Browser
+┌─────────┐      ┌───────────┐      ┌─────────┐
+│ Node.js │ ───▶ │ WebSocket │ ───▶ │ Browser │
+└─────────┘      └───────────┘      └─────────┘
 ```
 
 중간 레이어의 유무가 성능 차이를 만듭니다:
@@ -219,7 +254,7 @@ await expect(page.locator('.review-count')).toHaveText('15');
 
 **3. 멀티 브라우저 지원의 실제 가치**
 
-처음에는 "Chromium만 있으면 되지 않나?" 생각했습니다. 하지만 나중에 Anti-Bot 우회를 위해 **Firefox(Camoufox)**로 전환해야 했을 때, Playwright 덕분에 코드 변경이 최소화되었습니다. (이건 Part 4에서 자세히 다룹니다)
+처음에는 "Chromium만 있으면 되지 않나?" 생각했습니다. 하지만 나중에 Anti-Bot 우회를 위해 **Camoufox**(Firefox 기반)로 전환해야 했을 때, Playwright 덕분에 코드 변경이 최소화되었습니다. (이건 Part 4에서 자세히 다룹니다)
 
 #### 선택 요약
 
@@ -283,35 +318,103 @@ async function scrapeReviews(credentials: Credentials) {
 
 성능을 개선하려면 Playwright가 어떻게 동작하는지 이해해야 했습니다.
 
-### 4.1 계층 구조 이해
+### 4.1 Playwright의 Chromium 이해하기
+
+코드에서 자주 보이는 `chromium`은 무엇일까요?
+
+```typescript
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+```
+
+#### Chromium ≠ Chrome
+
+많은 개발자가 혼동하는 부분입니다:
+
+| 구분 | Chromium | Chrome |
+|------|----------|--------|
+| **성격** | 오픈소스 프로젝트 | Google 제품 |
+| **코드** | 공개 (BSD 라이선스) | Chromium + 독점 코드 |
+| **기능** | 핵심 브라우저 엔진 | + 자동 업데이트, DRM, 코덱 등 |
+| **용도** | 개발/테스트/자동화 | 일반 사용자 |
+
+Playwright가 Chromium을 사용하는 이유:
+1. **오픈소스**: 수정 및 패치 가능
+2. **일관성**: 버전 고정으로 테스트 재현성 보장
+3. **경량**: Chrome의 불필요한 기능 제외
+
+#### Playwright가 번들하는 브라우저
+
+```bash
+# Playwright 설치 시 자동 다운로드되는 브라우저들
+npx playwright install
+
+# 다운로드 위치 (macOS)
+~/Library/Caches/ms-playwright/
+├── chromium-1140/     # Playwright 전용 Chromium
+├── firefox-1438/      # Playwright 전용 Firefox
+└── webkit-2006/       # Playwright 전용 WebKit
+```
+
+**핵심 포인트**: Playwright는 시스템에 설치된 Chrome을 사용하지 않습니다. **자체 패치된 브라우저**를 번들합니다.
+
+```typescript
+// 시스템 Chrome 사용 (권장하지 않음)
+const browser = await chromium.launch({
+  channel: 'chrome',  // 시스템 Chrome
+});
+
+// Playwright 번들 Chromium 사용 (권장)
+const browser = await chromium.launch();  // 기본값
+```
+
+왜 번들 브라우저를 권장하는가:
+- **CDP 호환성**: Playwright 버전과 브라우저 버전이 맞지 않으면 API 동작이 달라질 수 있음
+- **재현성**: CI/CD에서 동일한 결과 보장
+- **패치 적용**: Playwright 팀이 자동화에 필요한 패치를 적용
+
+#### 우리가 Chromium을 선택한 이유
+
+세 가지 브라우저 중 Chromium을 주력으로 선택했습니다:
+
+| 브라우저 | 장점 | 단점 | 우리 상황 |
+|----------|------|------|----------|
+| **Chromium** | 가장 빠름, CDP 네이티브 | 탐지 당하기 쉬움 | 초기 개발에 적합 |
+| **Firefox** | 탐지 우회에 유리 | 상대적으로 느림 | 차단 시 대안 |
+| **WebKit** | Safari 테스트 | 기능 제한적 | 사용 안 함 |
+
+나중에 Anti-Bot 탐지가 심해지면서 **Camoufox**(Firefox 기반)로 전환했지만, 초기 아키텍처 검증은 Chromium으로 진행했습니다.
+
+### 4.2 계층 구조 이해
 
 Playwright의 객체 계층은 다음과 같습니다:
 
-```mermaid
-graph TB
-    subgraph "Playwright 객체 계층"
-        B["Browser<br/>(프로세스)"]
-        C1["BrowserContext 1<br/>(시크릿 모드와 유사)"]
-        C2["BrowserContext 2"]
-        P1["Page 1<br/>(탭)"]
-        P2["Page 2"]
-        P3["Page 3"]
-        F1["Frame<br/>(iframe)"]
-    end
-
-    B --> C1
-    B --> C2
-    C1 --> P1
-    C1 --> P2
-    C2 --> P3
-    P1 --> F1
-
-    style B fill:#4dabf7,stroke:#1971c2,color:#fff
-    style C1 fill:#51cf66,stroke:#2b8a3e,color:#fff
-    style C2 fill:#51cf66,stroke:#2b8a3e,color:#fff
-    style P1 fill:#ffd43b,stroke:#e67700
-    style P2 fill:#ffd43b,stroke:#e67700
-    style P3 fill:#ffd43b,stroke:#e67700
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Browser (프로세스)                     │
+│                      ~300MB, ~3초                        │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+            ┌───────────────┴───────────────┐
+            ▼                               ▼
+┌───────────────────────┐       ┌───────────────────────┐
+│   BrowserContext 1    │       │   BrowserContext 2    │
+│  (시크릿 모드와 유사)   │       │   ~10MB, ~100ms       │
+│   ~10MB, ~100ms       │       └───────────┬───────────┘
+└───────────┬───────────┘                   │
+            │                               ▼
+    ┌───────┴───────┐               ┌───────────────┐
+    ▼               ▼               │    Page 3     │
+┌─────────┐   ┌─────────┐           │     (탭)      │
+│ Page 1  │   │ Page 2  │           └───────────────┘
+│  (탭)   │   │  (탭)   │
+└────┬────┘   └─────────┘
+     │
+     ▼
+┌─────────┐
+│  Frame  │
+│(iframe) │
+└─────────┘
 ```
 
 **핵심 개념:**
@@ -573,125 +676,257 @@ graph TB
 - 메모리 2GB → MAX_SESSIONS = 3~5 권장
 - 공식: `MAX_SESSIONS ≈ (가용 메모리 - 1GB) / 300MB`
 
-### 5.3 락(Lock) 메커니즘 심화
+### 5.3 왜 분산 락을 도입하지 않았는가
 
-세션을 여러 요청이 동시에 사용하면 문제가 발생합니다:
+처음에는 세션 충돌을 막기 위해 **Redis 기반 분산 락**을 검토했습니다:
 
 ```typescript
-// 문제 시나리오
-// Request A: session-1에서 페이지 이동 중
-await page.goto('/reviews');
-
-// Request B: 같은 session-1에서 다른 페이지로 이동 시도!
-await page.goto('/orders'); // 충돌!
+// 일반적인 분산 락 접근법
+await redisLock.acquire(`session:${platformId}`);
+try {
+  await page.evaluate(() => fetchReviews());
+} finally {
+  await redisLock.release(`session:${platformId}`);
+}
 ```
 
-**Redis 기반 분산 락**을 도입했습니다:
+하지만 우리 상황에서 분산 락은 **오히려 문제를 악화**시켰습니다.
+
+#### 핵심 이해: page.evaluate()의 특성
+
+C사의 API를 호출하려면 `page.evaluate()`를 사용해야 합니다:
 
 ```typescript
-class DistributedLock {
-  private redis: Redis;
+// 브라우저 내부에서 JavaScript 실행
+const reviews = await page.evaluate(async () => {
+  // 이 코드는 실제 브라우저 컨텍스트에서 실행됨
+  const response = await fetch('/api/reviews', {
+    headers: { 'X-CSRF-Token': window.__CSRF_TOKEN__ }
+  });
+  return response.json();
+});
+```
 
-  async acquire(sessionId: string, ttl: number = 30000): Promise<boolean> {
-    // Redlock 알고리즘 적용
-    const key = `lock:session:${sessionId}`;
-    const token = uuid();
+**중요한 점**: `page.evaluate()`는 **이미 로그인된 Page 인스턴스**에서만 동작합니다. 새 Page를 만들면 로그인부터 다시 해야 합니다.
 
-    const result = await this.redis.set(key, token, 'PX', ttl, 'NX');
-    return result === 'OK';
+#### 멀티 인스턴스의 함정
+
+"트래픽이 많으면 서버를 늘리면 되지 않나?"
+
+```
+멀티 인스턴스 구조 (처음 시도):
+
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Instance 1 │     │  Instance 2 │     │  Instance 3 │
+│   Page A    │     │   Page A'   │     │   Page A''  │
+│  (사장님 A) │     │  (사장님 A) │     │  (사장님 A) │
+└─────────────┘     └─────────────┘     └─────────────┘
+      ↑                   ↑                   ↑
+      └───────────────────┼───────────────────┘
+                    Load Balancer
+                          ↑
+                   Request for A
+```
+
+**문제점:**
+1. **리소스 낭비**: 같은 사장님 A의 Page가 3개 인스턴스에 각각 띄워짐 (3배 메모리)
+2. **분산 락 필요**: 세 인스턴스가 동시에 같은 세션에 접근하면 충돌
+3. **세션 불일치**: 인스턴스마다 로그인 상태가 달라질 수 있음
+
+분산 락을 도입하면? → **락 경합으로 인한 대기 시간 증가** + **복잡도만 증가**
+
+#### 우리의 해결책: Sticky Session + 단일 Page 재사용
+
+발상을 전환했습니다. "분산시키지 말자. 같은 사장님 요청은 **같은 인스턴스, 같은 Page**에서 처리하자."
+
+```
+Sticky Session 구조:
+
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Instance 1 │     │  Instance 2 │     │  Instance 3 │
+│   Page A    │     │   Page B    │     │   Page C    │
+│  (사장님 A) │     │  (사장님 B) │     │  (사장님 C) │
+└─────────────┘     └─────────────┘     └─────────────┘
+      ↑                   ↑                   ↑
+      │                   │                   │
+┌─────┴───────────────────┴───────────────────┴─────┐
+│              ALB (Sticky Session)                  │
+│         platformId → 특정 인스턴스 고정             │
+└───────────────────────────────────────────────────┘
+```
+
+**AWS ALB 설정:**
+
+```yaml
+# Target Group 설정
+stickiness:
+  enabled: true
+  type: lb_cookie
+  duration_seconds: 86400  # 24시간
+```
+
+하지만 ALB의 기본 Sticky Session은 **쿠키 기반**입니다. API 요청에는 브라우저 쿠키가 없습니다.
+
+**해결책**: 커스텀 헤더 기반 라우팅
+
+```typescript
+// 클라이언트 요청
+const response = await fetch('/api/scrape', {
+  headers: {
+    'X-Platform-ID': 'shop-12345',  // 사장님 식별자
+  }
+});
+
+// ALB 리스너 규칙에서 해시 기반 라우팅
+// X-Platform-ID 해시값 → 특정 Target 그룹
+```
+
+실제로는 **EC2 인스턴스를 직접 운영**하면서, 앞단의 로드밸런서에서 `X-Platform-ID` 헤더를 기준으로 Consistent Hashing을 적용했습니다.
+
+#### Redis List로 요청 큐잉
+
+같은 `platformId`로 여러 요청이 동시에 들어오면 어떻게 할까요?
+
+```
+시나리오:
+- 사장님 A의 리뷰 조회 요청 3개가 동시에 도착
+- Page는 한 번에 하나의 page.evaluate()만 실행 가능
+```
+
+**Redis List를 큐로 활용:**
+
+```typescript
+class RequestQueue {
+  async enqueue(platformId: string, request: RequestData): Promise<string> {
+    const requestId = uuid();
+    await this.redis.rpush(
+      `queue:${platformId}`,
+      JSON.stringify({ requestId, ...request })
+    );
+    return requestId;
   }
 
-  async release(sessionId: string, token: string): Promise<void> {
-    // Compare-and-Delete로 안전하게 해제
-    const script = `
-      if redis.call("get", KEYS[1]) == ARGV[1] then
-        return redis.call("del", KEYS[1])
-      else
-        return 0
-      end
-    `;
-    await this.redis.eval(script, 1, `lock:session:${sessionId}`, token);
+  async dequeue(platformId: string): Promise<RequestData | null> {
+    const data = await this.redis.lpop(`queue:${platformId}`);
+    return data ? JSON.parse(data) : null;
   }
 }
 ```
 
-**락 흐름:**
+**요청 흐름:**
 
-```mermaid
-sequenceDiagram
-    participant ReqA as Request A
-    participant Lock as Redis Lock
-    participant Session as Session Pool
-    participant ReqB as Request B
-
-    ReqA->>Lock: acquire(session-1)
-    Lock-->>ReqA: OK (token: abc)
-    ReqA->>Session: 세션 사용 시작
-
-    ReqB->>Lock: acquire(session-1)
-    Lock-->>ReqB: FAIL (이미 잠김)
-    Note over ReqB: 대기...
-
-    ReqA->>Session: 작업 완료
-    ReqA->>Lock: release(session-1, abc)
-
-    Lock-->>ReqB: OK (token: xyz)
-    ReqB->>Session: 세션 사용 시작
+```
+Request 1 ─┐
+Request 2 ─┼──▶ Redis List [queue:shop-12345]
+Request 3 ─┘         │
+                     │ FIFO
+                     ▼
+              ┌─────────────┐
+              │    Page     │
+              │  (사장님 A) │
+              │             │
+              │ page.eval() │──▶ 순차 실행
+              │ page.eval() │
+              │ page.eval() │
+              └─────────────┘
 ```
 
-**데드락 방지:**
+#### Page 유지 전략: 60초 TTL + 연장
+
+Page를 매번 생성하면 로그인에 8초가 걸립니다. 하지만 무한정 유지하면 메모리 누수가 발생합니다.
+
+**해결책: 동적 TTL**
 
 ```typescript
-// TTL 설정: 비정상 종료 시 자동 해제
-await this.redis.set(key, token, 'PX', 30000, 'NX');
-//                                      ↑ 30초 후 자동 만료
+class PageManager {
+  private pages: Map<string, { page: Page; timer: NodeJS.Timeout }> = new Map();
+  private readonly PAGE_TTL = 60_000; // 60초
 
-// Heartbeat: 작업 중 TTL 갱신
-const heartbeat = setInterval(async () => {
-  await this.redis.pexpire(`lock:session:${sessionId}`, 30000);
-}, 10000); // 10초마다 갱신
-```
+  async getOrCreatePage(platformId: string): Promise<Page> {
+    const existing = this.pages.get(platformId);
 
-#### 분산 락 도입의 트레이드오프
+    if (existing) {
+      // 요청이 들어오면 TTL 연장
+      clearTimeout(existing.timer);
+      existing.timer = this.scheduleCleanup(platformId);
+      return existing.page;
+    }
 
-"왜 Redis 락이 필요한가?"라는 질문에 먼저 답해야 합니다.
+    // 새 Page 생성 + 로그인
+    const page = await this.createAndLogin(platformId);
+    this.pages.set(platformId, {
+      page,
+      timer: this.scheduleCleanup(platformId),
+    });
+    return page;
+  }
 
-**인메모리 락으로 충분하지 않은가?**
-
-단일 서버에서는 충분합니다:
-
-```typescript
-// 인메모리 락 (단일 서버)
-const locks = new Map<string, boolean>();
-
-async function acquire(sessionId: string) {
-  if (locks.get(sessionId)) return false;
-  locks.set(sessionId, true);
-  return true;
+  private scheduleCleanup(platformId: string): NodeJS.Timeout {
+    return setTimeout(async () => {
+      const entry = this.pages.get(platformId);
+      if (entry) {
+        await entry.page.close();
+        this.pages.delete(platformId);
+        console.log(`[PageManager] Page for ${platformId} closed after 60s idle`);
+      }
+    }, this.PAGE_TTL);
+  }
 }
 ```
 
-하지만 우리는 **3대 이상의 서버**로 수평 확장해야 했습니다. 서버 A의 인메모리 락은 서버 B가 모릅니다.
+**동작 시나리오:**
 
-**Redis 락으로 얻은 것:**
-- 수평 확장 가능 (서버 3대 → 30대)
-- 세션 충돌 0건 (락 없을 때 주 10건 발생)
+```
+t=0s   Request 1 도착 → Page 생성, 60초 타이머 시작
+t=30s  Request 2 도착 → 기존 Page 사용, 타이머 리셋 (60초 재시작)
+t=50s  Request 3 도착 → 기존 Page 사용, 타이머 리셋
+t=110s 타이머 만료 → Page 종료
+```
 
-**Redis 락으로 잃은 것:**
-- Redis SPOF (Single Point of Failure)
-- 락 획득 시 RTT 추가 (~5ms)
-- 운영 복잡도 증가
+**왜 60초인가?**
 
-**검토했지만 선택하지 않은 대안:**
+| TTL | 장점 | 단점 |
+|-----|------|------|
+| 30초 | 메모리 절약 | 빈번한 재로그인 (8초 × N) |
+| 60초 | 적절한 균형 | - |
+| 300초 | 재로그인 최소화 | 메모리 사용량 증가, 세션 만료 위험 |
 
-| 방식 | 장점 | 단점 | 선택 이유 |
-|------|------|------|----------|
-| 인메모리 락 | 빠름, 단순 | 분산 환경 불가 | ❌ 확장 필요 |
-| DB 락 (SELECT FOR UPDATE) | 별도 인프라 불필요 | 느림 (~50ms) | ❌ 레이턴시 |
-| ZooKeeper | 강한 일관성 | 운영 복잡도 높음 | ❌ 오버엔지니어링 |
-| Redis | 빠름, 이미 사용 중 | SPOF 위험 | ✅ 실용적 선택 |
+실험 결과, 사장님들의 요청 패턴을 분석했더니 **연속 요청 간 평균 간격이 45초**였습니다. 60초면 대부분의 연속 요청을 커버할 수 있었습니다.
 
-Redis를 선택한 결정적 이유: **이미 세션 상태 캐싱에 Redis를 사용하고 있었고**, Redis Sentinel로 HA 구성이 되어 있었기 때문입니다. 새로운 인프라를 추가하지 않아도 됐습니다.
+#### 최종 아키텍처
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       Load Balancer                          │
+│                (Consistent Hashing by platformId)            │
+└─────────────────────────────┬────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐     ┌───────────────┐     ┌───────────────┐
+│   EC2 #1      │     │   EC2 #2      │     │   EC2 #3      │
+│               │     │               │     │               │
+│ ┌───────────┐ │     │ ┌───────────┐ │     │ ┌───────────┐ │
+│ │Redis Queue│ │     │ │Redis Queue│ │     │ │Redis Queue│ │
+│ │ (Local)   │ │     │ │ (Local)   │ │     │ │ (Local)   │ │
+│ └─────┬─────┘ │     │ └─────┬─────┘ │     │ └─────┬─────┘ │
+│       │       │     │       │       │     │       │       │
+│ ┌─────▼─────┐ │     │ ┌─────▼─────┐ │     │ ┌─────▼─────┐ │
+│ │ PagePool  │ │     │ │ PagePool  │ │     │ │ PagePool  │ │
+│ │ (사장님들)│ │     │ │ (사장님들)│ │     │ │ (사장님들)│ │
+│ └───────────┘ │     │ └───────────┘ │     │ └───────────┘ │
+└───────────────┘     └───────────────┘     └───────────────┘
+```
+
+**이 구조의 장점:**
+- **분산 락 불필요**: 같은 platformId는 항상 같은 인스턴스로 라우팅
+- **Page 재사용 극대화**: 60초 TTL로 연속 요청 처리
+- **리소스 효율**: 각 사장님당 하나의 Page만 유지
+- **수평 확장**: EC2 인스턴스 추가 시 Consistent Hashing으로 자연스럽게 분산
+
+**트레이드오프:**
+- 특정 인스턴스 장애 시 해당 사장님들 영향 (Failover 필요)
+- Consistent Hashing 구현/운영 복잡도
 
 ---
 
@@ -951,7 +1186,7 @@ Page를 닫지 않으면 Renderer Process가 계속 살아있습니다.
 = 메모리 폭발
 ```
 
-**임시 대응 (새벽 3시에 급하게):**
+**임시 대응**: (새벽 3시에 급하게)
 
 ```typescript
 // 5분마다 강제 정리
@@ -968,7 +1203,7 @@ setInterval(async () => {
 }, 5 * 60 * 1000);
 ```
 
-**근본 해결 (다음날):**
+**근본 해결**: (다음날)
 
 ```typescript
 async function scrapeWithCleanup(context: BrowserContext) {

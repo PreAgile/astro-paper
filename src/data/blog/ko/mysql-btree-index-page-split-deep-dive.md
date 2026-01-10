@@ -1,7 +1,7 @@
 ---
 author: 김면수
 pubDatetime: 2026-01-09T10:00:00Z
-title: "B+-tree 인덱스와 Page Split: UUID가 당신의 INSERT를 죽이고 있다"
+title: "B+tree 인덱스와 Page Split: UUID가 당신의 INSERT를 죽이고 있다"
 featured: true
 draft: false
 tags:
@@ -11,27 +11,27 @@ tags:
   - Backend
   - Performance
   - Index
-description: "왜 복합 인덱스의 컬럼 순서가 중요할까? UUID PK가 왜 INSERT 성능을 망칠까? InnoDB B+-tree의 Page Split 메커니즘을 파고들어, '감'이 아닌 '원리'로 인덱스를 설계합니다."
+description: "왜 복합 인덱스의 컬럼 순서가 중요할까? UUID PK가 왜 INSERT 성능을 망칠까? InnoDB B+tree의 Page Split 메커니즘과 Big-O 시간복잡도를 파고들어, '감'이 아닌 '원리'로 인덱스를 설계합니다. Instagram, Shopify, 카카오, 배민의 실제 사례도 함께 다룹니다."
 ---
 
 ## 목차
 
-## 들어가며: 1,000 TPS의 벽
+## 들어가며: 데이터가 쌓일수록 느려지는 INSERT
 
-리뷰 수집 서비스를 운영하던 중, 갑자기 INSERT 성능이 급락하는 현상을 겪었습니다.
+리뷰 수집 서비스를 운영하면서, 데이터가 쌓일수록 INSERT 성능이 **점진적으로 저하**되는 현상을 겪었습니다.
 
 ```log
-[WARN] Slow Query: 850ms
+[WARN] Slow Query: 150ms+
 INSERT INTO reviews (id, shop_id, content, ...) VALUES (?, ?, ?, ...)
 ```
 
-특이한 점은 **데이터가 쌓일수록 느려진다**는 것이었습니다.
+초기에는 문제가 없었지만, **인덱스 크기가 Buffer Pool을 초과**하는 시점부터 성능 저하가 가속화되었습니다.
 
-| 데이터 크기 | INSERT TPS | 평균 응답 시간 |
-|------------|-----------|--------------|
-| 100만 건 | 2,500 | 2ms |
-| 500만 건 | 800 | 15ms |
-| 1,000만 건 | 200 | 85ms |
+| 데이터 크기 | INSERT TPS | P95 응답 시간 | Buffer Pool 상태 |
+|------------|-----------|--------------|------------------|
+| 100만 건 | 5,000+ | < 1ms | 인덱스 < BP |
+| 500만 건 | 1,500 | 5ms | 인덱스 ≈ BP |
+| 1,000만 건 | 400-800 | 20-50ms | **인덱스 > BP** |
 
 테이블 구조는 평범했습니다:
 
@@ -46,29 +46,36 @@ CREATE TABLE reviews (
 );
 ```
 
-범인은 **UUID v4 Primary Key**였습니다. 더 정확히 말하면, UUID의 **랜덤성**이 B+-tree의 **Page Split**을 폭발적으로 유발하고 있었습니다.
+범인은 **UUID v4 Primary Key**였습니다. 더 정확히 말하면, UUID의 **랜덤성**이 B+tree의 **Page Split**을 폭발적으로 유발하고 있었습니다.
 
-이 글에서는 B+-tree 인덱스의 내부 구조를 파고들어, **왜** 이런 일이 발생하는지, 그리고 **어떻게** 해결해야 하는지 설명하겠습니다.
+이 글에서는 B+tree 인덱스의 내부 구조를 파고들어, **왜** 이런 일이 발생하는지, 그리고 **어떻게** 해결해야 하는지 설명하겠습니다.
 
 ---
 
-## 1. B+-tree 인덱스 구조 이해하기
+## 1. B+tree 인덱스 구조 이해하기
 
 ### Clustered Index vs Secondary Index
 
-이전 글에서 InnoDB의 Page 개념을 다뤘습니다. 인덱스는 이 Page들을 **B+-tree 구조**로 연결한 것입니다.
+이전 글에서 InnoDB의 Page 개념을 다뤘습니다. 인덱스는 이 Page들을 **B+tree 구조**로 연결한 것입니다.
+
+**InnoDB Clustered Index (B+tree) 구조:**
 
 ```mermaid
-graph TB
-    subgraph "Clustered Index - B+-tree"
-        R[Root Page<br/>PK 범위 포인터]
+graph LR
+    subgraph "Root Level"
+        R["Root Page<br/>PK 범위 포인터"]
+    end
 
-        I1[Internal Page<br/>1-500 → Leaf1]
-        I2[Internal Page<br/>501-1000 → Leaf2]
+    subgraph "Internal Level"
+        I1["Internal<br/>PK 1-500"]
+        I2["Internal<br/>PK 501-1000"]
+    end
 
-        L1[Leaf Page 1<br/>실제 Row 데이터]
-        L2[Leaf Page 2<br/>실제 Row 데이터]
-        L3[Leaf Page 3<br/>실제 Row 데이터]
+    subgraph "Leaf Level - 실제 Row 데이터 저장"
+        L1["Leaf 1<br/>PK 1-100"]
+        L2["Leaf 2<br/>PK 101-500"]
+        L3["Leaf 3<br/>PK 501-700"]
+        L4["Leaf 4<br/>PK 701-1000"]
     end
 
     R --> I1
@@ -76,64 +83,263 @@ graph TB
     I1 --> L1
     I1 --> L2
     I2 --> L3
+    I2 --> L4
 
-    L1 <-.-> L2 <-.-> L3
+    L1 <-.->|"Linked List"| L2
+    L2 <-.-> L3
+    L3 <-.-> L4
 ```
 
-<img src="/images/btree-index/btree-structure-light.svg" alt="InnoDB B+-tree Clustered Index 구조" class="theme-img-light" />
-<img src="/images/btree-index/btree-structure-dark.svg" alt="InnoDB B+-tree Clustered Index 구조" class="theme-img-dark" />
+**구조 설명:**
+- **Root → Internal → Leaf** 순서로 트리 탐색
+- **Leaf 노드에만** 실제 데이터 저장 (B+tree 특징)
+- Leaf 노드끼리 **양방향 Linked List**로 연결 → 범위 검색에 유리
 
-**InnoDB의 두 가지 인덱스:**
+### Clustered Index: 테이블 그 자체
+
+**Clustered Index**는 일반적인 인덱스가 아닙니다. InnoDB에서 **테이블 데이터가 저장되는 방식 그 자체**입니다.
+
+**왜 테이블당 1개만 존재할까?**
+
+```mermaid
+graph LR
+    subgraph "Clustered Index = 테이블 물리적 구조"
+        direction TB
+        T["테이블 데이터"]
+        T --> P1["Page: PK 1-100<br/>Row 1, Row 2, ... Row 100"]
+        T --> P2["Page: PK 101-200<br/>Row 101, Row 102, ..."]
+        T --> P3["Page: PK 201-300<br/>Row 201, Row 202, ..."]
+    end
+```
+
+데이터는 **물리적으로 한 번만 저장**됩니다. Clustered Index는 이 데이터의 **정렬 순서**를 정의합니다.
+
+- 책의 내용이 페이지 순서대로 **한 번만** 인쇄되는 것과 같습니다
+- 같은 내용을 두 가지 순서로 인쇄하려면 책 두 권이 필요합니다
+- 따라서 Clustered Index는 **테이블당 1개**만 존재할 수 있습니다
+
+**Clustered Index 선택 규칙 (InnoDB):**
+
+1. **PRIMARY KEY**가 있으면 → PK가 Clustered Index
+2. PK가 없고 **NOT NULL UNIQUE Index**가 있으면 → 첫 번째 Unique Index 사용
+3. 둘 다 없으면 → InnoDB가 내부적으로 **6-byte Row ID** 생성
+
+```sql
+-- Case 1: PK가 Clustered Index
+CREATE TABLE users (
+  id BIGINT PRIMARY KEY,  -- ← Clustered Index
+  email VARCHAR(255) UNIQUE
+);
+
+-- Case 2: PK 없으면 첫 번째 NOT NULL UNIQUE가 Clustered
+CREATE TABLE logs (
+  log_id BIGINT NOT NULL UNIQUE,  -- ← Clustered Index
+  message TEXT
+);
+
+-- Case 3: 둘 다 없으면 숨겨진 Row ID 생성 (비권장)
+CREATE TABLE temp_data (
+  data TEXT
+);  -- InnoDB가 내부 Row ID로 Clustered Index 구성
+```
+
+### Secondary Index: PK를 가리키는 포인터
+
+**Secondary Index**는 Clustered Index와 다르게 **별도의 B+tree**로 구성됩니다.
+
+**왜 Secondary Index Leaf에는 PK가 저장될까?**
+
+```mermaid
+graph LR
+    subgraph "Secondary Index: idx_email"
+        direction TB
+        SI["Secondary Index<br/>B+tree"]
+        SI --> SL1["Leaf: aaa@...<br/>→ PK: 42"]
+        SI --> SL2["Leaf: bbb@...<br/>→ PK: 17"]
+        SI --> SL3["Leaf: zzz@...<br/>→ PK: 103"]
+    end
+
+    subgraph "Clustered Index: 테이블"
+        direction TB
+        CI["Clustered Index<br/>B+tree"]
+        CI --> CL1["Leaf: PK 1-50<br/>실제 Row 데이터"]
+        CI --> CL2["Leaf: PK 51-120<br/>실제 Row 데이터"]
+    end
+
+    SL1 -.->|"PK로 조회"| CL1
+    SL2 -.->|"PK로 조회"| CL1
+    SL3 -.->|"PK로 조회"| CL2
+```
+
+**두 가지 설계 대안과 InnoDB의 선택:**
+
+| 방식 | 장점 | 단점 |
+|------|------|------|
+| **물리 주소 저장** | 조회 빠름 (1회 접근) | 데이터 이동 시 모든 Secondary Index 갱신 필요 |
+| **PK 값 저장** (InnoDB) | 데이터 이동에 강함 | 조회 시 추가 탐색 필요 (2회 접근) |
+
+InnoDB는 **PK 값을 저장**하는 방식을 선택했습니다:
+
+- **Page Split, OPTIMIZE TABLE, 데이터 이동**이 발생해도 Secondary Index는 그대로
+- 대신 SELECT 시 **Clustered Index를 한 번 더 탐색** (이를 "bookmark lookup"이라 함)
+- 이 트레이드오프가 **INSERT 성능 vs SELECT 성능**에 영향을 줍니다
+
+**Secondary Index가 PK를 포함하는 또 다른 이유:**
+
+Secondary Index에서 **동일한 인덱스 키 값**을 가진 행들을 구분해야 합니다:
+
+```sql
+CREATE INDEX idx_status ON orders (status);
+
+-- status = 'PENDING'인 주문이 1000개라면?
+-- Secondary Index는 (status, PK) 쌍으로 구분
+-- (PENDING, 1), (PENDING, 2), ..., (PENDING, 1000)
+```
+
+### Leaf 노드에 저장되는 내용 비교
+
+| 인덱스 타입 | Leaf 노드 저장 내용 | 예시 |
+|------------|-------------------|------|
+| **Clustered Index** | **전체 Row 데이터** | `(id=1, name='Kim', email='kim@...', created_at=...)` |
+| **Secondary Index** | **인덱스 컬럼 + PK** | `(email='kim@...', id=1)` |
+
+```mermaid
+graph TB
+    subgraph "Clustered Index Leaf"
+        CL["PK: 1<br/>name: 'Kim'<br/>email: 'kim@...'<br/>created_at: 2024-01-01<br/>... 모든 컬럼"]
+    end
+
+    subgraph "Secondary Index Leaf - idx_email"
+        SL["email: 'kim@...'<br/>PK: 1"]
+    end
+
+    SL -.->|"PK로 전체 Row 조회"| CL
+```
+
+**실무적 의미:**
+
+1. **Clustered Index 크기** = 테이블 데이터 크기
+2. **Secondary Index 크기** = 인덱스 컬럼 + PK 크기
+3. **PK가 크면** (예: UUID 36 bytes) → 모든 Secondary Index도 커짐
+
+### InnoDB의 두 가지 인덱스 요약
 
 | 특징 | Clustered Index | Secondary Index |
 |------|-----------------|-----------------|
+| **정의** | 테이블 데이터 저장 구조 | 별도의 B+tree |
 | **구성** | PK + 전체 Row 데이터 | 인덱스 컬럼 + PK |
-| **개수** | 테이블당 1개 | 여러 개 가능 |
-| **Leaf 노드** | 실제 데이터 저장 | PK 값 저장 |
+| **개수** | 테이블당 **1개** (물리적 정렬은 하나뿐) | 여러 개 가능 |
+| **Leaf 노드** | 실제 데이터 저장 | PK 값만 저장 |
 | **정렬** | PK 순서로 물리적 정렬 | 인덱스 컬럼 순서로 정렬 |
+| **조회 비용** | O(log N) | O(log N) + Clustered 탐색 |
 
-**핵심 포인트**: InnoDB에서 테이블 자체가 Clustered Index입니다. 테이블이 곧 B+-tree입니다.
+**핵심 포인트**: InnoDB에서 테이블 자체가 Clustered Index입니다. 테이블이 곧 B+tree입니다.
 
-### B+-tree의 특징
+### Big-O 시간복잡도 비교
+
+데이터베이스 성능을 이해하려면 각 작업의 시간복잡도를 알아야 합니다. 먼저 핵심 용어를 정리하겠습니다.
+
+#### 용어 정리
+
+**Point Query (포인트 쿼리)**
+- **정의**: 정확히 **하나의 행**을 조회하는 쿼리
+- **예시**: `SELECT * FROM users WHERE id = 123`
+- **특징**: PK나 Unique Index를 사용, 결과는 0 또는 1개 행
+
+**Range Query (범위 쿼리)**
+- **정의**: **여러 행**을 범위로 조회하는 쿼리
+- **예시**: `SELECT * FROM orders WHERE created_at BETWEEN '2024-01-01' AND '2024-12-31'`
+- **특징**: 인덱스 범위 스캔, 결과는 K개 행
+
+**Covering Index (커버링 인덱스)**
+- **정의**: 쿼리에 필요한 **모든 컬럼이 인덱스에 포함**되어 있어, 테이블 접근 없이 인덱스만으로 쿼리를 완료하는 경우
+- **예시**: 인덱스가 `(user_id, created_at)`일 때 `SELECT user_id, created_at FROM orders WHERE user_id = 123`
+- **EXPLAIN 확인**: `Extra` 컬럼에 **"Using index"** 표시
+
+```sql
+-- Covering Index 예시
+CREATE INDEX idx_user_created ON orders (user_id, created_at);
+
+-- 이 쿼리는 Covering Index 사용 (테이블 접근 불필요)
+SELECT user_id, created_at FROM orders WHERE user_id = 123;
+-- EXPLAIN 결과: Extra = "Using index"
+
+-- 이 쿼리는 Non-Covering (테이블 접근 필요)
+SELECT user_id, created_at, total_amount FROM orders WHERE user_id = 123;
+-- total_amount가 인덱스에 없으므로 Clustered Index 재조회 필요
+```
+
+#### 시간복잡도 비교표
+
+| 작업 | Clustered Index | Secondary (Non-Covering) | Secondary (Covering) |
+|------|----------------|-------------------------|---------------------|
+| **Point Query** | **O(log N)** | 2 × O(log N) | O(log N) |
+| **Range Query (K rows)** | O(log N + K) | O(log N + K×log N) | O(log N + K) |
+| **INSERT (순차)** | O(log N) | O(log N) × M | - |
+| **INSERT (랜덤)** | O(log N) + Split | O(log N) × M + Split | - |
+| **UPDATE (비키 컬럼)** | O(log N) | 영향 없음 | - |
+| **UPDATE (키 컬럼)** | 2 × O(log N) | O(log N) × 2 | - |
+| **DELETE** | O(log N) × (M+1) | - | - |
+
+> **N** = 테이블 행 수, **M** = Secondary Index 개수, **K** = 반환 행 수
+
+#### 왜 Secondary Index가 2배 느린가?
+
+```mermaid
+graph LR
+    Q["SELECT * FROM orders<br/>WHERE user_id = 123"]
+    Q --> S1["1단계: Secondary Index 탐색<br/>user_id → PK 찾기<br/>O(log N)"]
+    S1 --> S2["2단계: Clustered Index 탐색<br/>PK → 실제 Row 조회<br/>O(log N)"]
+    S2 --> R["결과 반환"]
+```
+
+Secondary Index의 Leaf 노드에는 **PK 값만** 저장되어 있습니다. 따라서:
+
+1. **Secondary Index 탐색**: user_id로 PK 찾기 → O(log N)
+2. **Clustered Index 재탐색**: PK로 실제 Row 조회 → O(log N)
+3. **총 비용**: 2 × O(log N)
+
+**Covering Index를 사용하면** 2단계가 생략되어 O(log N)만으로 완료됩니다.
+
+### B+tree의 특징
 
 **일반 B-tree와의 차이:**
 
 ```mermaid
-graph TB
-    subgraph "B-tree"
-        BR[Root<br/>데이터 + 포인터]
-        BI1[Internal<br/>데이터 + 포인터]
-        BI2[Internal<br/>데이터 + 포인터]
-        BL1[Leaf]
-        BL2[Leaf]
-        BL3[Leaf]
-
-        BR --> BI1
-        BR --> BI2
-        BI1 --> BL1
-        BI1 --> BL2
-        BI2 --> BL3
-    end
-
-    subgraph "B+-tree"
-        PR[Root<br/>포인터만]
-        PI1[Internal<br/>포인터만]
-        PI2[Internal<br/>포인터만]
-        PL1[Leaf<br/>모든 데이터]
-        PL2[Leaf<br/>모든 데이터]
-        PL3[Leaf<br/>모든 데이터]
-
-        PR --> PI1
-        PR --> PI2
-        PI1 --> PL1
-        PI1 --> PL2
-        PI2 --> PL3
-
-        PL1 <-.->|Linked List| PL2 <-.-> PL3
+graph LR
+    subgraph "B-tree 구조"
+        BR["Root<br/>데이터 + 포인터"]
+        BR --> BI1["Internal<br/>데이터 + 포인터"]
+        BR --> BI2["Internal<br/>데이터 + 포인터"]
+        BI1 --> BL1["Leaf"]
+        BI1 --> BL2["Leaf"]
+        BI2 --> BL3["Leaf"]
     end
 ```
 
-| 특징 | B-tree | B+-tree |
+- 모든 노드에 데이터 저장
+- Leaf 노드 간 연결 없음
+- 범위 검색 시 트리 재탐색 필요
+
+```mermaid
+graph LR
+    subgraph "B+tree 구조"
+        PR["Root<br/>포인터만"]
+        PR --> PI1["Internal<br/>포인터만"]
+        PR --> PI2["Internal<br/>포인터만"]
+        PI1 --> PL1["Leaf<br/>모든 데이터"]
+        PI1 --> PL2["Leaf<br/>모든 데이터"]
+        PI2 --> PL3["Leaf<br/>모든 데이터"]
+        PL1 <-.->|"Linked List"| PL2
+        PL2 <-.-> PL3
+    end
+```
+
+- Internal 노드는 포인터만 저장 → Fan-out 증가
+- **Leaf 노드에만 데이터 저장**
+- Leaf 노드가 양방향 Linked List로 연결 → **범위 검색에 최적화**
+
+| 특징 | B-tree | B+tree |
 |------|--------|---------|
 | 데이터 위치 | 모든 노드 | **Leaf 노드만** |
 | Leaf 연결 | 연결 없음 | **양방향 Linked List** |
@@ -212,9 +418,6 @@ sequenceDiagram
     Note over Disk: 3배의 I/O 발생!
 ```
 
-<img src="/images/btree-index/page-split-light.svg" alt="Page Split 발생 과정 - Before/After" class="theme-img-light" />
-<img src="/images/btree-index/page-split-dark.svg" alt="Page Split 발생 과정 - Before/After" class="theme-img-dark" />
-
 **Page Split 비용:**
 
 | 작업 | 디스크 I/O | 메모리 작업 |
@@ -232,22 +435,22 @@ sequenceDiagram
 > - **무작위 삽입**: 페이지 활용률 **1/2 ~ 15/16 (50% ~ 93.75%)**
 
 ```mermaid
-graph LR
-    subgraph "Sequential Insert - Auto Increment"
-        S1["Page 1<br/>██████████████░<br/>93% Full"]
-        S2["Page 2<br/>██████████████░<br/>93% Full"]
-        S3["Page 3: 현재<br/>████░░░░░░░░░░░<br/>Writing..."]
+graph TB
+    subgraph SEQ["Sequential Insert - Auto Increment"]
+        direction LR
+        S1["Page 1<br/>93% Full"]
+        S2["Page 2<br/>93% Full"]
+        S3["Page 3<br/>Writing..."]
+        S1 --> S2 --> S3
     end
 
-    subgraph "Random Insert - UUID v4"
-        R1["Page 1<br/>████████░░░░░░░<br/>50% Full"]
-        R2["Page 2<br/>█████░░░░░░░░░░<br/>35% Full"]
-        R3["Page 3<br/>███████░░░░░░░░<br/>45% Full"]
+    subgraph RND["Random Insert - UUID v4"]
+        direction LR
+        R1["Page 1<br/>50% Full"]
+        R2["Page 2<br/>35% Full"]
+        R3["Page 3<br/>45% Full"]
     end
 ```
-
-<img src="/images/btree-index/sequential-vs-random-light.svg" alt="Sequential INSERT vs Random INSERT 비교" class="theme-img-light" />
-<img src="/images/btree-index/sequential-vs-random-dark.svg" alt="Sequential INSERT vs Random INSERT 비교" class="theme-img-dark" />
 
 **왜 Random Insert가 공간 효율이 낮을까?**
 
@@ -319,7 +522,7 @@ CREATE INDEX idx_shop ON reviews (shop_id);
 -- 38% 공간 절약!
 ```
 
-### 문제 2: B+-tree 높이 증가 가능성
+### 문제 2: B+tree 높이 증가 가능성
 
 PK 크기가 커지면 페이지당 Entry 수가 줄어듭니다:
 
@@ -338,19 +541,21 @@ UUID (BINARY 16) PK:
 ### 문제 3: 캐시 효율성 저하
 
 ```mermaid
-graph TB
-    subgraph "Auto Increment - Hot Spot at Right Edge"
-        A1["Page 1<br/>Cold: 오래된 데이터"]
-        A2[Page 2<br/>Cold]
-        A3[Page 999<br/>Cold]
-        A4["Page 1000<br/>HOT: 최신 삽입"]
+graph LR
+    subgraph AUTO["Auto Increment - Hot Spot at Right Edge"]
+        A1["Page 1<br/>Cold"]
+        A2["Page 2<br/>Cold"]
+        A3["..."]
+        A4["Page 1000<br/>HOT"]
+        A1 --- A2 --- A3 --- A4
     end
 
-    subgraph "UUID - 전체가 Hot"
-        U1[Page 1<br/>Hot]
-        U2[Page 2<br/>Hot]
-        U3[Page 999<br/>Hot]
-        U4[Page 1000<br/>Hot]
+    subgraph UUID["UUID v4 - 전체가 Hot"]
+        U1["Page 1<br/>Hot"]
+        U2["Page 2<br/>Hot"]
+        U3["..."]
+        U4["Page 1000<br/>Hot"]
+        U1 --- U2 --- U3 --- U4
     end
 ```
 
@@ -380,17 +585,21 @@ InnoDB의 **Change Buffer**는 Secondary Index의 Random Write를 버퍼링하�
 
 ```mermaid
 graph LR
-    subgraph "Secondary Index INSERT"
-        S1[INSERT] --> S2{페이지가<br/>Buffer Pool에?}
-        S2 -->|No| S3[Change Buffer에<br/>기록]
+    subgraph SEC["Secondary Index INSERT"]
+        direction TB
+        S1[INSERT] --> S2{Buffer Pool에<br/>페이지 있음?}
+        S2 -->|No| S3[Change Buffer<br/>기록]
         S2 -->|Yes| S4[직접 수정]
-        S3 -->|나중에 Merge| S4
+        S3 -.->|"나중에 Merge"| S4
     end
 
-    subgraph "Clustered Index INSERT"
-        C1[INSERT] --> C2[무조건<br/>즉시 처리!]
-        C2 --> C3[Page Split 발생 가능]
+    subgraph CLU["Clustered Index INSERT"]
+        direction TB
+        C1[INSERT] --> C2[무조건 즉시 처리]
+        C2 --> C3[Page Split 가능]
     end
+
+    SEC ~~~ CLU
 ```
 
 **실무 영향**: UUID PK의 Random INSERT는 **Change Buffer로 해결 불가능**합니다. 이것이 UUID가 Secondary Index보다 PK에서 더 치명적인 이유입니다.
@@ -465,7 +674,7 @@ CREATE INDEX idx_composite ON orders (
 | `status = 'DONE'` | ❌ | **없음** |
 | `customer_id = 1 AND status = 'DONE'` | ⚠️ | customer_id만 |
 
-### B+-tree 저장 방식 시각화
+### B+tree 저장 방식 시각화
 
 복합 인덱스는 **컬럼을 연결한 값**으로 정렬됩니다:
 
@@ -728,6 +937,21 @@ CREATE TABLE orders (
 - 같은 shop의 데이터가 물리적으로 인접
 - 샤딩 시 자연스러운 파티션 키
 - JOIN 성능 향상
+- **쿼리 성능 5~6배 개선**
+
+```sql
+-- 변경 전: Index Seek → Key Lookup 반복
+SELECT * FROM orders WHERE shop_id = 123 ORDER BY id DESC LIMIT 50;
+-- Logical Reads: 1,250
+-- Time: 45ms
+
+-- 변경 후: 단일 Index Scan
+-- Logical Reads: 50
+-- Time: 8ms (5.6배 개선)
+```
+
+> "Data that is accessed together should be stored together."
+> — Shopify Engineering
 
 ### Stripe: Prefixed Object ID
 
@@ -744,6 +968,44 @@ evt_1A2B3C4D5E6F7G8H → Event (시간 기반 컴포넌트 포함)
 - ID만 보고 객체 타입 식별 가능
 - 디버깅 용이
 - 최대 255자까지 허용 (확장성 확보)
+
+### 한국 기업 사례
+
+#### 우아한형제들 (배민): 샤딩 전략
+
+배민은 워크로드 특성에 따라 두 가지 샤딩 전략을 사용합니다.
+
+**모듈러 샤딩** (실시간 배송 추적):
+```java
+// 24시간 TTL 데이터에 적합
+int shardId = userId % NUM_SHARDS;
+```
+- 장점: 데이터 균등 분산
+- 단점: 샤드 증설 시 재분배 필요
+
+**레인지 샤딩** (주문 이력):
+```java
+// 지속 증가하는 데이터에 적합
+if (userId < 1_000_000) return shard1;
+else if (userId < 2_000_000) return shard2;
+```
+- 장점: 증설 시 재분배 불필요 (새 범위 추가만)
+- 단점: Hot Shard 발생 가능성
+
+#### 카카오: ADT 기반 무중단 샤드 재분배
+
+기존 샤딩 방식의 한계를 ADT(Asynchronous Data Transfer)로 해결:
+
+```
+TableCrawlHandler: 기존 데이터 → INSERT IGNORE
+BinlogHandler: 실시간 변경 → REPLACE/DELETE
+
+동시 실행으로 무중단 마이그레이션 가능
+```
+
+**검증 전략:**
+- 운영 중 PK 범위별 SELECT 비교
+- 100% 신뢰도 요구 시 전수 조사 병행
 
 ---
 
@@ -963,7 +1225,7 @@ WHERE table_schema = DATABASE();
 
 이제 답할 수 있습니다:
 
-1. **UUID v4의 랜덤성**으로 B+-tree 전체에 삽입 분산
+1. **UUID v4의 랜덤성**으로 B+tree 전체에 삽입 분산
 2. **Page Split 폭발**로 I/O 3배 증가
 3. **Buffer Pool 경쟁**으로 디스크 접근 급증
 4. **50% Page Fill**로 공간 낭비
@@ -1003,6 +1265,10 @@ WHERE table_schema = DATABASE();
 - [Flickr Engineering - Ticket Servers: Distributed Unique Primary Keys on the Cheap](https://code.flickr.net/2010/02/08/ticket-servers-distributed-unique-primary-keys-on-the-cheap/)
 - [Shopify Engineering - How to Introduce Composite Primary Keys in Rails](https://shopify.engineering/how-to-introduce-composite-primary-keys-in-rails)
 - [Stripe - Object IDs Gist](https://gist.github.com/fnky/76f533366f75cf75802c8052b577e2a5)
+
+### 한국 기업 기술 블로그
+- [우아한형제들 - DB분산처리를 위한 sharding](https://woowabros.github.io/experience/2020/07/06/db-sharding.html)
+- [카카오 - ADT 활용 예제: MySQL Shard 데이터 재분배](https://tech.kakao.com/2016/07/01/adt-mysql-shard-rebalancing/)
 
 ### UUID/ULID 표준
 - [IETF RFC 9562 - UUIDv7 Specification](https://www.rfc-editor.org/rfc/rfc9562.html)
