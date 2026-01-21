@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" style="font-family: 'Segoe UI', system-ui, sans-serif;">
+  <defs>
+    <marker id="a-d" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#eaedf3"/>
+    </marker>
+    <filter id="s-d" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="2" stdDeviation="2" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="450" fill="#212737"/>
+
+  <!-- Title -->
+  <text x="400" y="30" text-anchor="middle" font-size="18" font-weight="600" fill="#eaedf3">Aurora MySQL Cluster - MDL 영향 범위</text>
+
+  <!-- Cluster boundary -->
+  <rect x="50" y="50" width="700" height="340" rx="15" fill="#2d3548" stroke="#4b5563" stroke-width="2"/>
+  <text x="70" y="75" font-size="12" font-weight="600" fill="#9ca3af">Aurora Cluster</text>
+
+  <!-- Writer Instance -->
+  <g filter="url(#s-d)">
+    <rect x="100" y="100" width="250" height="140" rx="12" fill="#5c4813" stroke="#ffd43b" stroke-width="3"/>
+    <text x="225" y="130" text-anchor="middle" font-size="14" font-weight="700" fill="#ffd43b">Writer Instance</text>
+    <text x="225" y="150" text-anchor="middle" font-size="11" fill="#ffe066">db.r7g.xlarge</text>
+    <line x1="120" y1="165" x2="330" y2="165" stroke="#fcc419" stroke-width="1"/>
+    <text x="130" y="185" font-size="10" fill="#ffe066">✓ 읽기/쓰기 가능</text>
+    <text x="130" y="202" font-size="10" fill="#ffe066">✓ DDL 실행 가능</text>
+    <text x="130" y="219" font-size="10" font-weight="600" fill="#ff6b6b">⚠️ MDL 발생 지점!</text>
+  </g>
+
+  <!-- Reader Instance -->
+  <g filter="url(#s-d)">
+    <rect x="450" y="100" width="250" height="140" rx="12" fill="#14532d" stroke="#51cf66" stroke-width="2"/>
+    <text x="575" y="130" text-anchor="middle" font-size="14" font-weight="700" fill="#51cf66">Reader Instance</text>
+    <text x="575" y="150" text-anchor="middle" font-size="11" fill="#69db7c">db.r7g.xlarge</text>
+    <line x1="470" y1="165" x2="680" y2="165" stroke="#51cf66" stroke-width="1"/>
+    <text x="480" y="185" font-size="10" fill="#69db7c">📖 읽기 전용</text>
+    <text x="480" y="202" font-size="10" fill="#69db7c">✗ DDL 실행 불가</text>
+    <text x="480" y="219" font-size="10" font-weight="600" fill="#51cf66">✓ MDL 영향 없음!</text>
+  </g>
+
+  <!-- Replication arrow -->
+  <line x1="350" y1="170" x2="440" y2="170" stroke="#adb5bd" stroke-width="2" stroke-dasharray="5,3" marker-end="url(#a-d)"/>
+  <text x="395" y="160" text-anchor="middle" font-size="9" fill="#adb5bd">Replication</text>
+  <text x="395" y="190" text-anchor="middle" font-size="9" fill="#adb5bd">10-100ms lag</text>
+
+  <!-- Shared Storage Layer -->
+  <g filter="url(#s-d)">
+    <rect x="100" y="270" width="600" height="100" rx="12" fill="#312e81" stroke="#a5b4fc" stroke-width="2"/>
+    <text x="400" y="300" text-anchor="middle" font-size="13" font-weight="600" fill="#c7d2fe">Shared Storage Layer</text>
+    <text x="400" y="320" text-anchor="middle" font-size="11" fill="#a5b4fc">6 copies across 3 Availability Zones</text>
+
+    <!-- Storage copies -->
+    <g transform="translate(130, 335)">
+      <rect width="70" height="25" rx="4" fill="#4338ca" stroke="#818cf8"/>
+      <text x="35" y="17" text-anchor="middle" font-size="9" fill="#e0e7ff">AZ-a (2)</text>
+    </g>
+    <g transform="translate(230, 335)">
+      <rect width="70" height="25" rx="4" fill="#4338ca" stroke="#818cf8"/>
+      <text x="35" y="17" text-anchor="middle" font-size="9" fill="#e0e7ff">AZ-b (2)</text>
+    </g>
+    <g transform="translate(330, 335)">
+      <rect width="70" height="25" rx="4" fill="#4338ca" stroke="#818cf8"/>
+      <text x="35" y="17" text-anchor="middle" font-size="9" fill="#e0e7ff">AZ-c (2)</text>
+    </g>
+  </g>
+
+  <!-- Connections to storage -->
+  <line x1="225" y1="240" x2="225" y2="265" stroke="#a5b4fc" stroke-width="1.5"/>
+  <line x1="575" y1="240" x2="575" y2="265" stroke="#a5b4fc" stroke-width="1.5"/>
+
+  <!-- Key insight -->
+  <rect x="450" y="395" width="300" height="45" rx="8" fill="#14532d" stroke="#51cf66" stroke-width="2"/>
+  <text x="600" y="415" text-anchor="middle" font-size="11" font-weight="600" fill="#51cf66">💡 핵심: Reader로 읽기 분산 시</text>
+  <text x="600" y="432" text-anchor="middle" font-size="10" fill="#69db7c">Writer MDL 문제 영향 최소화!</text>
+</svg>
