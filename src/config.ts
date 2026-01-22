@@ -1,5 +1,5 @@
 export const SITE = {
-  website: "https://example.com/", // 배포 후 도메인으로 변경하세요
+  website: "https://astro-paper-23v.pages.dev/",
   author: "김면수",
   profile: "https://github.com/preAgile",
   desc: "내일을 위한 기록 — 더 나은 엔지니어링을 향해",
