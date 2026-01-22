@@ -1,0 +1,77 @@
+---
+import IconEye from "@/assets/icons/IconEye.svg";
+
+type Props = {
+  slug: string;
+  class?: string;
+};
+
+const { slug, class: className = "" } = Astro.props;
+
+// API endpoint - 배포 후 실제 Worker URL로 변경
+const API_URL = import.meta.env.PUBLIC_VIEW_COUNT_API || "";
+---
+
+<div
+  class:list={["view-count flex items-center gap-x-1 opacity-80", className]}
+  data-slug={slug}
+  data-api={API_URL}
+>
+  <IconEye class="inline-block size-5 min-w-4.5" />
+  <span class="view-number text-sm">-</span>
+  <span class="text-sm">views</span>
+</div>
+
+<script>
+  function initViewCount() {
+    const viewCountElements = document.querySelectorAll(".view-count");
+
+    viewCountElements.forEach(async (element) => {
+      const slug = element.getAttribute("data-slug");
+      const apiUrl = element.getAttribute("data-api");
+      const numberEl = element.querySelector(".view-number");
+
+      if (!slug || !numberEl) return;
+
+      // API가 설정되지 않은 경우 로컬 스토리지 사용 (개발용)
+      if (!apiUrl) {
+        const stored = localStorage.getItem(`views:${slug}`);
+        const count = stored ? parseInt(stored, 10) + 1 : 1;
+        localStorage.setItem(`views:${slug}`, count.toString());
+        numberEl.textContent = formatNumber(count);
+        return;
+      }
+
+      try {
+        // 조회수 증가 및 가져오기
+        const response = await fetch(`${apiUrl}/view/${encodeURIComponent(slug)}`, {
+          method: "POST",
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          numberEl.textContent = formatNumber(data.count);
+        }
+      } catch (error) {
+        console.error("Failed to fetch view count:", error);
+        numberEl.textContent = "-";
+      }
+    });
+  }
+
+  function formatNumber(num: number): string {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + "M";
+    }
+    if (num >= 1000) {
+      return (num / 1000).toFixed(1) + "K";
+    }
+    return num.toString();
+  }
+
+  // 페이지 로드 시 실행
+  initViewCount();
+
+  // View Transitions 지원
+  document.addEventListener("astro:page-load", initViewCount);
+</script>

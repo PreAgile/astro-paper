@@ -10,6 +10,7 @@ import ShareLinks from "@/components/ShareLinks.astro";
 import BackButton from "@/components/BackButton.astro";
 import BackToTopButton from "@/components/BackToTopButton.astro";
 import TableOfContents from "@/components/TableOfContents.astro";
+import ViewCount from "@/components/ViewCount.astro";
 import { getPath } from "@/utils/getPath";
 import { slugifyStr } from "@/utils/slugify";
 import IconChevronLeft from "@/assets/icons/IconChevronLeft.svg";
@@ -98,12 +99,14 @@ const nextPost =
     >
       {title}
     </h1>
-    <div class="my-2 flex items-center gap-2">
+    <div class="my-2 flex flex-wrap items-center gap-2">
       <Datetime {pubDatetime} {modDatetime} {timezone} size="lg" />
+      <span aria-hidden="true" class="opacity-50">|</span>
+      <ViewCount slug={post.id} />
       <span
         aria-hidden="true"
         class:list={[
-          "max-sm:hidden",
+          "max-sm:hidden opacity-50",
           { hidden: !SITE.editPost.enabled || hideEditPost },
         ]}>|</span
       >
