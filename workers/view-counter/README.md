@@ -2,7 +2,26 @@
 
 블로그 조회수 카운터 API. 백엔드 교체가 쉽도록 추상화되어 있습니다.
 
-## 지원 백엔드
+**블로그 호스팅과 API 호스팅은 완전히 분리되어 있어서, 블로그를 어디로 옮기든 API URL만 설정하면 됩니다.**
+
+## 지원 플랫폼
+
+### 블로그 호스팅 (어디든 가능)
+- GitHub Pages
+- Cloudflare Pages
+- Vercel
+- Netlify
+- 기타 정적 호스팅
+
+### API 호스팅
+
+| 플랫폼 | 파일 | 스토리지 | 무료 티어 |
+|--------|------|----------|----------|
+| **Cloudflare Workers** | `index.js` | KV | 100K reads/day |
+| **Vercel Functions** | `platforms/vercel.js` | Vercel KV | 30K req/month |
+| **Netlify Functions** | `platforms/netlify.js` | Upstash | 10K cmd/day |
+
+### 스토리지 백엔드
 
 | 백엔드 | 무료 티어 | 특징 |
 |--------|----------|------|
