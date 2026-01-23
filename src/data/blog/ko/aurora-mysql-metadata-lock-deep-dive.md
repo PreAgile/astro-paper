@@ -907,6 +907,8 @@ INSTANT:
 └────────────────────────────────────────┘
 ```
 
+> **실전 가이드**: INSTANT DDL 실행 시 MDL timeout이 발생했다면 ["INSTANT DDL인데 왜 timeout?"](/posts/mysql-instant-ddl-mdl-troubleshooting)에서 2-세션 진단 방법과 안전한 KILL 판단 기준을 확인하세요.
+
 ## 10. 결론
 
 ### 배운 것들
