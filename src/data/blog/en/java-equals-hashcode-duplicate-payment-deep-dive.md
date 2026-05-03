@@ -10,6 +10,7 @@ tags:
   - equals-hashcode
   - production-incident
   - kafka
+  - JVM Java Mastery
 description: "A deep dive into how forgetting to override hashCode() while implementing equals() caused duplicate payments. Includes Kafka TopicPartition analysis, HashMap internals, and code review checklists."
 ---
 
@@ -28,6 +29,15 @@ In my second year as a developer, I was assigned to the payment system for the f
 Honestly, I initially thought it was a network timeout issue. I assumed retries after failed requests caused the duplicates. But looking at the logs, `processedPayments.contains(paymentId)` was returning **false**. Even though we had processed the exact same order just a minute ago.
 
 It took me 4 hours to find the root cause. The reason I'm writing this is so that you can spot this problem in **4 minutes**, not 4 hours. And for those who, like me, were once confined to their own bubble, I'll also share how Apache Kafka developers prevented the same mistake.
+
+> This post is **Part 5 of the JVM/Java Mastery series**. Sister posts:
+> - [#1 — Diagnosing HikariCP pool exhaustion via Thread Dump](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/)
+> - (#2 Java concurrency primitives — coming soon)
+> - (#3 JVM memory layout — coming soon)
+>
+> Depth: **L3-L4** ([JVM/Java Mastery series mapping](https://github.com/PreAgile/portfolio-docs/blob/main/docs/blog-series/jvm-java-mastery/INDEX.md))
+>
+> Built on the same payment-domain measurement asset (W1 EXP-01 — duplicate-payment reproduction; W4 measurement pending / hypothesis stage), this revision adds the equals 5-contract, the HashMap bucket/chain mechanism, and direct OpenJDK source citations for senior-level depth.
 
 ---
 
@@ -235,6 +245,50 @@ At first glance, it looks fine. `equals()` is properly implemented, and we're us
 > ```
 >
 > This post focuses on the hashCode issue for simplicity, but concurrency and distributed environments must also be considered.
+
+<details>
+<summary><b>The 5 contracts of equals — Effective Java Item 10</b> (expand)</summary>
+
+Joshua Bloch's Effective Java Item 10 defines five contracts:
+
+- **Reflexivity**: `x.equals(x) == true`
+- **Symmetry**: `x.equals(y) == y.equals(x)`
+- **Transitivity**: `x.equals(y) && y.equals(z) → x.equals(z)`
+- **Consistency**: repeated calls to `x.equals(y)` return the same result if neither object is mutated
+- **Non-null**: `x.equals(null) == false`
+
+Among these, transitivity is the one that breaks most often when inheritance adds extra fields. The payment incident in this post is one step beyond that — `equals` did satisfy transitivity, but its partner `hashCode` did not even exist, so the HashMap bucket itself was misaligned. Satisfying the equals contract is meaningless if the hashCode contract is violated; the hash-based collection silently treats logically equal objects as different.
+
+</details>
+
+<details>
+<summary><b>The hashCode contract — equals's partner</b> (expand)</summary>
+
+- **If `a.equals(b) == true` then `a.hashCode() == b.hashCode()` MUST hold.**
+- The reverse does not have to hold (hash collisions are allowed — see `"Aa".hashCode() == "BB".hashCode()` for a classic case).
+- If you override `Object.equals()` but not `hashCode()`, equality is broken inside any hash-based collection (HashMap / HashSet).
+
+The incident in this post: a `PaymentId` whose `equals` was overridden but whose `hashCode` was not landed in different HashMap buckets, so the same payment was processed twice. Note that equals has 5 contracts, while hashCode has only 1. Break that single contract and every equality check inside the HashMap is invalid.
+
+</details>
+
+<details>
+<summary><b>HashMap bucket / chain — why hashCode is decisive</b> (expand)</summary>
+
+JDK HashMap (OpenJDK 21):
+
+1. On `put(key, value)`, compute `key.hashCode()` and derive a bucket index (`hash & (n - 1)` bit-mask).
+2. Walk the entries in that bucket and compare them with `equals()`.
+3. If a matching entry exists, update it; otherwise append a new entry to the chain.
+4. If the chain length exceeds 8, it is converted into a red-black tree (Java 8+).
+
+→ `hashCode` decides the bucket location. If two keys end up in different buckets, equals is never even consulted.
+
+The incident in this post: two `PaymentId` instances that were logically equal landed in different buckets, were both inserted as new entries, and the HashMap ended up containing duplicate entries — leading to the payment being executed twice. `equals` was perfectly capable of returning `true`; the call site was just never reached.
+
+OpenJDK source: [`HashMap.java` `getNode`](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java) — the line `(p = tab[(n - 1) & hash]) != null` selects the bucket, and the line `if (p.hash == hash && ((k = p.key) == key || (key != null && key.equals(k))))` is where equals is finally called.
+
+</details>
 
 ### Re-reading Object.hashCode() JavaDoc
 
@@ -922,6 +976,20 @@ Items to check during code review. Add to your team wiki:
 - [ ] **Are there unit tests? (especially equals symmetry/transitivity)**
 ```
 
+### PR Review Checklist — Things to verify whenever equals is overridden
+
+A reinforced version of the checklist above, synthesised with the operational retrospective and Effective Java citations of series #5:
+
+- [ ] Was `hashCode` overridden together with `equals`?
+- [ ] Are all 5 equals contracts satisfied (reflexivity / symmetry / transitivity / consistency / non-null)?
+- [ ] In an inheritance hierarchy, are there extra fields that could break transitivity (the classic `Point` vs `ColorPoint` pattern)?
+- [ ] Does equals only use immutable fields? (Mutable fields can make HashMap entries silently disappear.)
+- [ ] Did the IDE auto-generation tool (IntelliJ / Eclipse) generate both methods?
+- [ ] When using Lombok `@EqualsAndHashCode`, are `@EqualsAndHashCode.Include` annotations correct? Does `callSuper` match the intent?
+- [ ] Could a Java record replace this class? (Records auto-generate equals/hashCode correctly.)
+- [ ] Is hash-collision behaviour validated by a unit test that hashes 10K samples (regression guard against the constant-hashCode pattern of KAFKA-1194)?
+- [ ] If this class is used as a payment / idempotency / session identifier, is it paired with an external idempotency store (Redis SETNX / DB UNIQUE) for verification?
+
 ### SpotBugs Rule
 
 ```xml
@@ -983,19 +1051,41 @@ Even with working equals/hashCode, sharing mutable objects across threads starts
 
 ---
 
+## Other posts in this series
+
+This post is **Part 5 of the JVM/Java Mastery series**.
+
+- [#1 — Diagnosing HikariCP pool exhaustion via Thread Dump](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) — series flagship, starts from the operational graph
+- (#2 Java concurrency — `synchronized` / `Lock` / `Atomic` / `LongAdder` — coming soon)
+- (#3 JVM memory layout — Heap / Metaspace / Direct Memory / Stack — coming soon)
+- (#4 GC algorithms — G1 / ZGC / Shenandoah / Parallel — coming soon)
+- **#5 — equals/hashCode — payment-domain pitfall (this post)**
+- (#6 Optional / null — Brian Goetz's intent vs reality — coming soon)
+- (#11 Virtual Thread (Loom) vs Coroutines — coming soon)
+
+See the [JVM/Java Mastery series INDEX](https://github.com/PreAgile/portfolio-docs/blob/main/docs/blog-series/jvm-java-mastery/INDEX.md) for the full mapping.
+
+---
+
 ## 13. References
 
 ### Official Documentation
 - [Object.hashCode() JavaDoc](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/Object.html#hashCode())
-- [Effective Java Item 11: Always override hashCode when you override equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/)
+- [Effective Java Item 10: Obey the general contract when overriding equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/) — Joshua Bloch
+- [Effective Java Item 11: Always override hashCode when you override equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/) — Joshua Bloch
+- [JLS §15.21 Equality Operators](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21)
 
 ### Open Source Code
-- [Kafka TopicPartition.java](https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/TopicPartition.java)
+- [Kafka TopicPartition.java](https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/TopicPartition.java) — cached hashCode pattern
 - [Guava Objects.hashCode()](https://github.com/google/guava/blob/master/guava/src/com/google/common/base/Objects.java)
-- [OpenJDK HashMap Implementation](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java)
+- [OpenJDK HashMap — `getNode` / `putVal`](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java) — bucket index resolution and chain traversal
+
+### Payment-domain idempotency (big-tech references)
+- [Stripe — Idempotency in Distributed Systems](https://stripe.com/blog/idempotency) — canonical idempotency-key pattern
+- [Toss Payments — What is idempotency?](https://docs.tosspayments.com/blog/what-is-idempotency) — Korean-language payment-domain idempotency guide
 
 ### Related Issues
-- [KAFKA-1194: TopicAndPartition hashCode issue](https://issues.apache.org/jira/browse/KAFKA-1194)
+- [KAFKA-1194: TopicAndPartition hashCode issue](https://issues.apache.org/jira/browse/KAFKA-1194) — a constant hashCode forced every entry into the same bucket
 
 ---
 

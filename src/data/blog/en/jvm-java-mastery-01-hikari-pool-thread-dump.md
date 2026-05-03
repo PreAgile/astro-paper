@@ -48,7 +48,7 @@ This post takes that dump apart **line by line**.
 
 - The **sister post** — [Spring Transactions and External API Calls — Reproducing Pool Exhaustion and Comparing Three Remedies (Simple Split, Saga, Outbox) by Measurement](/en/posts/spring-transaction-external-api-pool-exhaustion/) — covered the same incident from a **business pattern** angle (Saga / Outbox). This post replays **the same transaction-with-external-call pool-exhaustion measurements through a JVM lens — Thread Dump / Thread State / HikariCP internals / LockSupport / GC**. The two posts are paired.
 - Input: the transaction-with-external-call pool-exhaustion measurement [measured — Java/Spring] (timeout 5s = 100% pass / P99 6.3s, timeout 1s = 16.7% pass / 50 timeouts) + the three-prescription comparison's 9-scenario matrix.
-- Depth: **L3-L4** ([JVM/Java Mastery series](/en/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) Part 1 — **measurement + JVM mechanics + big-tech operations + interview answers**).
+- Depth: **L3-L4** ([JVM/Java Mastery series](/en/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) Part 1 — **measurement + JVM mechanics + big-tech operations + recap questions**).
 
 ---
 
@@ -224,7 +224,7 @@ BLOCKED          0
 
 ## 4. HikariCP Internals — JVM-Side View of ConcurrentBag and SynchronousQueue {#hikaricp-internals}
 
-Now I unpack §3's stack trace at the **code level**. **Why** does HikariCP behave this way?
+Now I unpack Section 3's stack trace at the **code level**. **Why** does HikariCP behave this way?
 
 ### 4.1 ConcurrentBag — The Core Data Structure of the Connection Pool
 
@@ -273,7 +273,7 @@ public T borrow(long timeout, TimeUnit timeUnit) throws InterruptedException {
 }
 ```
 
-The threads at pool exhaustion are stuck inside **Step 3**, in `handoffQueue.poll(timeout, NANOSECONDS)`. The `handoffQueue` is a `SynchronousQueue` — see §4.2.
+The threads at pool exhaustion are stuck inside **Step 3**, in `handoffQueue.poll(timeout, NANOSECONDS)`. The `handoffQueue` is a `SynchronousQueue` — see Section 4.2.
 
 ### 4.2 SynchronousQueue — A **Zero-Capacity** Hand-Off Queue
 
@@ -387,7 +387,7 @@ For the pool-exhaustion measurement's Run #2 (timeout 1s), the 50 workers all ca
 
 Operational traps:
 
-- A `connectionTimeout` **too long** (60s+) makes pool exhaustion show up as **latency** and slip past monitoring (the "silent latency" pattern from §1.2 in the sister post).
+- A `connectionTimeout` **too long** (60s+) makes pool exhaustion show up as **latency** and slip past monitoring (the "silent latency" pattern from Section 1.2 in the sister post).
 - A `connectionTimeout` **too short** (≤1s) causes fail-fast cascades on routine external spikes.
 - Practical recommendation: 30s (Hikari default) — but **always paired with an `awaitingConnection > 0` alert**.
 
@@ -527,7 +527,7 @@ A separate thread loops every 5 seconds and runs an `UPDATE`. In the dump:
 
 ### 6.4 The Dump-Side View of the three-prescription comparison's A/OFF awaiting=57 [measured]
 
-In §3.1 of the sister post, we measured **"after sleep(3,000ms) ends, 60 workers issue INSERTs simultaneously → pool of 10 saturated → awaiting=50+ spike"**.
+In Section 3.1 of the sister post, we measured **"after sleep(3,000ms) ends, 60 workers issue INSERTs simultaneously → pool of 10 saturated → awaiting=50+ spike"**.
 
 A dump captured **at that instant**:
 
@@ -538,7 +538,7 @@ TIMED_WAITING    █████████████████████
 Duration: ~50ms (10 INSERTs × 5ms each)
 ```
 
-A **momentary spike**. After 50ms the pool drains and the dump returns to normal. Whether you catch it depends on **capture timing luck** — which is exactly why §2.3 stresses **three captures**.
+A **momentary spike**. After 50ms the pool drains and the dump returns to normal. Whether you catch it depends on **capture timing luck** — which is exactly why Section 2.3 stresses **three captures**.
 
 ---
 
@@ -565,7 +565,7 @@ hikaricp_pending_threads > 0 for 30s
   AND hikaricp_active_connections == hikaricp_max
 ```
 
-→ Ignore **momentary spikes** (50ms); alert only on **30-second persistence**. This threshold also naturally filters out the A/OFF spike from §6.4.
+→ Ignore **momentary spikes** (50ms); alert only on **30-second persistence**. This threshold also naturally filters out the A/OFF spike from Section 6.4.
 
 ### 7.2 Automated Thread Dump Capture — Pull Dumps at Alert Trigger
 
@@ -679,7 +679,7 @@ GC log analysis:
                                                            ↑ abnormal — Full GC fired, suspect Old fragmentation
 ```
 
-If Full GCs occur **back to back**, heap is short → bump `-Xmx` or chase the leak (§8.2).
+If Full GCs occur **back to back**, heap is short → bump `-Xmx` or chase the leak (Section 8.2).
 
 ---
 
@@ -715,7 +715,7 @@ The same mechanism as "pool occupancy = duration of external call". `readOnly` i
 - Four flame graphs: CPU / wall-clock / lock contention / allocation
 - The key insight beyond a thread dump is the **time axis** — **how often** you sit in this frame
 
-This is exactly the **async-profiler** tool from §2.1, generalized as a production-wide best practice.
+This is exactly the **async-profiler** tool from Section 2.1, generalized as a production-wide best practice.
 
 ### 9.4 Uber — JVM Profiler (Open Source)
 
@@ -725,7 +725,7 @@ This is exactly the **async-profiler** tool from §2.1, generalized as a product
 - Unified collection of thread dumps + GC + memory + CPU
 - Publishes to Kafka → centralized analysis
 
-The §7.2 "automated dump capture" pattern, scaled out for distributed environments.
+The Section 7.2 "automated dump capture" pattern, scaled out for distributed environments.
 
 ### 9.5 Datadog — Continuous Profiling for Java
 
@@ -733,7 +733,7 @@ The §7.2 "automated dump capture" pattern, scaled out for distributed environme
 
 - **Wall Time** view: **how long each method waits** — directly identifies pool exhaustion
 - **Lock Hold Time** view: lock-hold time — directly surfaces `synchronized` contention
-- 5-minute window auto-retained at alert time — option (3) in §7.2
+- 5-minute window auto-retained at alert time — option (3) in Section 7.2
 
 This post's dump analysis, fully automated and continuous. A cost-vs-operational-burden trade-off.
 
@@ -749,23 +749,25 @@ A different take on this post's lesson that "the DB Connection becomes a synchro
 
 ---
 
-## 10. Interview Answers {#interview-answers}
+## 10. Recap — putting this article in your own words {#interview-answers}
 
-### Q1. "When the pool exhaustion alert fires, what do you capture first?"
+If someone who just finished this article were to summarize it through four core questions, here's how the measurements answer them.
 
-> "I take a thread dump **3 times at 5-second intervals** (`jcmd <pid> Thread.print`). A single dump can't distinguish **momentary** from **persistent**. If the same threads sit in the same stack frames across all three, they are genuinely stuck. Then I look at the thread state distribution — if TIMED_WAITING (parked) spikes, pool exhaustion; if BLOCKED spikes, `synchronized` contention; if RUNNABLE with `socketRead0` on top of stack, external I/O wait. In the transaction-with-external-call pool-exhaustion measurement [measured] Run #2, all 50 workers shared a `LockSupport.parkNanos` and `ConcurrentBag.borrow` stack — pool exhaustion confirmed from a single dump."
+### Q. "When the pool exhaustion alert fires, what do you capture first?"
 
-### Q2. "What does the PARKED state in a thread dump actually mean?"
+What this article showed by measurement is — take a thread dump **3 times at 5-second intervals** (`jcmd <pid> Thread.print`). A single dump can't distinguish **momentary** from **persistent**. If the same threads sit in the same stack frames across all three, they are genuinely stuck. Then look at the thread state distribution — if TIMED_WAITING (parked) spikes, pool exhaustion; if BLOCKED spikes, `synchronized` contention; if RUNNABLE with `socketRead0` on top of stack, external I/O wait. In this article's transaction-with-external-call pool-exhaustion measurement [measured] Run #2, all 50 workers shared a `LockSupport.parkNanos` and `ConcurrentBag.borrow` stack — pool exhaustion confirmed from a single dump.
 
-> "It's a substate of TIMED_WAITING in the JVM's 6-state model. You enter it via `LockSupport.parkNanos(blocker, nanos)`. Internally that calls `Unsafe.park(false, nanos)` — **the OS thread is genuinely scheduled out**. CPU usage drops to 0. The wake conditions are (a) timeout, (b) another thread calls `unpark(thread)`, (c) interrupt, (d) spurious wakeup. For HikariCP it's (a) or (b) — if a connection is returned, (b) wakes you up to RUNNABLE; if not, (a) wakes you up only to throw `SQLTransientConnectionException`. The `parking to wait for <0x...>` line in the dump tells you **which object** is the blocker — for HikariCP it's `SynchronousQueue$TransferStack`. Those two pieces confirm pool exhaustion."
+### Q. "What does the PARKED state in a thread dump actually mean?"
 
-### Q3. "Why does HikariCP use SynchronousQueue?"
+What this article defined is — it's a substate of TIMED_WAITING in the JVM's 6-state model. You enter it via `LockSupport.parkNanos(blocker, nanos)`. Internally that calls `Unsafe.park(false, nanos)` — **the OS thread is genuinely scheduled out**. CPU usage drops to 0. The wake conditions are (a) timeout, (b) another thread calls `unpark(thread)`, (c) interrupt, (d) spurious wakeup. For HikariCP it's (a) or (b) — if a connection is returned, (b) wakes you up to RUNNABLE; if not, (a) wakes you up only to throw `SQLTransientConnectionException`. The `parking to wait for <0x...>` line in the dump tells you **which object** is the blocker — for HikariCP it's `SynchronousQueue$TransferStack`. Those two pieces confirm pool exhaustion.
 
-> "SynchronousQueue is a BlockingQueue with capacity 0. `put()` waits for **another thread to take()**, and `take()` waits for **another thread to put()** — nothing is ever stored in the queue. That's exactly the right shape for handing off a connection. First, zero-copy hand-off — connections are never stored, so zero GC pressure. Second, with `SynchronousQueue(true)` you get FIFO fairness — the first thread to wait gets served first. Third, `poll(0)` returns null immediately on an empty queue — the common path (pool not empty) stays fast. Even in the pool-exhaustion measurement the 50 awaiting threads all parked precisely inside `SynchronousQueue.poll(timeout, NANOSECONDS)`."
+### Q. "Why does HikariCP use SynchronousQueue?"
 
-### Q4. "What can a thread dump **not** tell you?"
+What this article traced is — SynchronousQueue is a BlockingQueue with capacity 0. `put()` waits for **another thread to take()**, and `take()` waits for **another thread to put()** — nothing is ever stored in the queue. That's exactly the right shape for handing off a connection. First, zero-copy hand-off — connections are never stored, so zero GC pressure. Second, with `SynchronousQueue(true)` you get FIFO fairness — the first thread to wait gets served first. Third, `poll(0)` returns null immediately on an empty queue — the common path (pool not empty) stays fast. Even in the pool-exhaustion measurement the 50 awaiting threads all parked precisely inside `SynchronousQueue.poll(timeout, NANOSECONDS)`.
 
-> "Three things. First, **GC pauses** — during STW all threads pause, and you can't take a dump in that instant either. You need `-Xlog:gc*` and a separate GC log. Second, **memory leaks** — a dump doesn't tell you **which objects** are held in the heap. You need `jmap -dump` (heap dump) or JFR Old Object Sample. Third, **the time axis** — a dump is a **single snapshot**. **How often** you sit in a frame is invisible. A wall-clock profiler like async-profiler or Datadog Continuous Profiling shows the **time fraction**. In production we run dump + GC log + JFR + APM in concert — any single tool always leaves a blind spot."
+### Q. "What can a thread dump **not** tell you?"
+
+What this article catalogued as blind spots are three things. First, **GC pauses** — during STW all threads pause, and you can't take a dump in that instant either. You need `-Xlog:gc*` and a separate GC log. Second, **memory leaks** — a dump doesn't tell you **which objects** are held in the heap. You need `jmap -dump` (heap dump) or JFR Old Object Sample. Third, **the time axis** — a dump is a **single snapshot**. **How often** you sit in a frame is invisible. A wall-clock profiler like async-profiler or Datadog Continuous Profiling shows the **time fraction**. In production you run dump + GC log + JFR + APM in concert — any single tool always leaves a blind spot.
 
 ---
 
@@ -788,9 +790,9 @@ Part 1 (the flagship) of the [JVM/Java Mastery series](/en/posts/jvm-java-master
 
 - **Part 2 — Java Concurrency** (`synchronized` / `Lock` / `Atomic` / `LongAdder`) — extending this post's lesson that **the DB Connection becomes a synchronization resource** into explicit synchronization primitives
 - **Part 3 — JVM Memory Layout** (Heap / Metaspace / Direct / Stack) — broadening this post's **60MB of thread stacks** into the full memory geography
-- **Part 4 — GC Algorithms** (G1 / ZGC / Shenandoah) — the proper measurement of §8.3's **GC pause co-occurrence** scenario
+- **Part 4 — GC Algorithms** (G1 / ZGC / Shenandoah) — the proper measurement of Section 8.3's **GC pause co-occurrence** scenario
 - **Part 8 — CompletableFuture** — async fan-out measurements for the **Outbox poller** in this post
-- **Part 10 — JFR / async-profiler** — the full-blown version of §7-8's monitoring + automated dump capture
+- **Part 10 — JFR / async-profiler** — the full-blown version of Section 7~Section 8's monitoring + automated dump capture
 - **Part 11 — Virtual Threads (Loom)** — what happens to **parkNanos** under carrier thread pinning
 
 ---

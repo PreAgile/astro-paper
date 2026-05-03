@@ -48,7 +48,7 @@ dump 한 장에 답이 있습니다. **모든 worker thread** 가 HikariCP 의 `
 
 - **자매글** [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) 이 **비즈니스 패턴 (Saga / Outbox)** 측면에서 같은 사건을 다뤘다면, 본 글은 **같은 트랜잭션-안-외부-호출 풀 고갈 [실측] 을 JVM 측면 — Thread Dump / Thread State / HikariCP 내부 / LockSupport / GC** 로 다시 봅니다. 두 글이 짝.
 - 본 글의 입력 자산: 트랜잭션-안-외부-호출 풀 고갈 측정 [실측 — Java/Spring] (timeout 5s 100% 통과 / P99 6.3s, timeout 1s 16.7% 통과 / 50건 timeout) + 처방 비교 측정의 9 시나리오 매트릭스.
-- 본 글의 깊이: **L3-L4** ([JVM/Java Mastery 시리즈](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) 1편 — **측정 + JVM 메커니즘 + 빅테크 운영 회고 + 면접 답변**).
+- 본 글의 깊이: **L3-L4** ([JVM/Java Mastery 시리즈](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) 1편 — **측정 + JVM 메커니즘 + 빅테크 운영 회고 + 정리 질문**).
 
 ---
 
@@ -224,7 +224,7 @@ BLOCKED          0
 
 ## 4. HikariCP 내부 동작 — ConcurrentBag / SynchronousQueue 의 JVM 측면 {#hikaricp-internals}
 
-§3 의 stack trace 를 **코드 레벨** 로 풀어봅니다. HikariCP 가 **왜 이렇게 동작하는가**.
+3장의 stack trace 를 **코드 레벨** 로 풀어봅니다. HikariCP 가 **왜 이렇게 동작하는가**.
 
 ### 4.1 ConcurrentBag — connection 풀의 핵심 자료구조
 
@@ -273,7 +273,7 @@ public T borrow(long timeout, TimeUnit timeUnit) throws InterruptedException {
 }
 ```
 
-→ 풀 고갈 시점의 thread 는 **Step 3** 안의 `handoffQueue.poll(timeout, NANOSECONDS)` 에 갇혀 있습니다. `handoffQueue` 의 정체는 `SynchronousQueue` — 다음 §4.2.
+→ 풀 고갈 시점의 thread 는 **Step 3** 안의 `handoffQueue.poll(timeout, NANOSECONDS)` 에 갇혀 있습니다. `handoffQueue` 의 정체는 `SynchronousQueue` — 다음 4.2장.
 
 ### 4.2 SynchronousQueue — **0 capacity** hand-off 큐
 
@@ -387,7 +387,7 @@ public static void parkNanos(Object blocker, long nanos) {
 
 운영 함정:
 
-- `connectionTimeout` 을 **너무 길게** (60s+) 잡으면 풀 고갈이 **지연**으로 발현되어 monitoring 미감지 (자매글 §1.2 의 "silent latency 폭발")
+- `connectionTimeout` 을 **너무 길게** (60s+) 잡으면 풀 고갈이 **지연**으로 발현되어 monitoring 미감지 (자매글 1.2장의 "silent latency 폭발")
 - `connectionTimeout` 을 **너무 짧게** (1s 이하) 잡으면 평소 외부 호출 spike 시에도 fail-fast cascade
 - 실무 권장: 30s (Hikari 기본) — 단, **`awaitingConnection > 0` 알람을 **반드시** 함께** 운영
 
@@ -527,7 +527,7 @@ Outbox (60 worker 즉시 ACK):
 
 ### 6.4 처방 비교 측정의 A/OFF awaiting=57 의 dump 측면 [실측]
 
-자매글 §3.1 에서 **"외부 호출 sleep(3000ms) 끝난 직후 60 worker 가 동시에 INSERT 요청 → 풀 10 가득 → awaiting=50+ spike"** 측정.
+자매글 3.1장에서 **"외부 호출 sleep(3000ms) 끝난 직후 60 worker 가 동시에 INSERT 요청 → 풀 10 가득 → awaiting=50+ spike"** 측정.
 
 이 **순간**의 dump 를 채취하면:
 
@@ -538,7 +538,7 @@ TIMED_WAITING    █████████████████████
 지속 시간: 약 50ms (10 INSERT × 5ms)
 ```
 
-→ **순간적 spike**. 50ms 지속 후 풀이 비워지면서 dump 가 정상으로 돌아감. **dump 채취 타이밍 운**에 따라 보일 수도, 안 보일 수도 — 그래서 §2.3 의 **3회 채취** 가 중요.
+→ **순간적 spike**. 50ms 지속 후 풀이 비워지면서 dump 가 정상으로 돌아감. **dump 채취 타이밍 운**에 따라 보일 수도, 안 보일 수도 — 그래서 2.3장의 **3회 채취** 가 중요.
 
 ---
 
@@ -565,7 +565,7 @@ hikaricp_pending_threads > 0 for 30s
   AND hikaricp_active_connections == hikaricp_max
 ```
 
-→ **순간 spike** (50ms) 는 무시, **30초 지속** 만 알람. 이 임계값이 §6.4 의 처방 비교 측정 A/OFF spike 도 자연스럽게 거름.
+→ **순간 spike** (50ms) 는 무시, **30초 지속** 만 알람. 이 임계값이 6.4장의 처방 비교 측정 A/OFF spike 도 자연스럽게 거름.
 
 ### 7.2 Thread Dump 자동 수집 — 알람 trigger 시 dump 채취
 
@@ -679,7 +679,7 @@ GC log 분석:
                                                            ↑ 비정상 — Full GC 발생, Old 단편화 의심
 ```
 
-→ Full GC 가 **여러 번 연속**이면 heap 부족 → `-Xmx` 증설 또는 leak 추적 (§8.2).
+→ Full GC 가 **여러 번 연속**이면 heap 부족 → `-Xmx` 증설 또는 leak 추적 (8.2장).
 
 ---
 
@@ -715,7 +715,7 @@ GC log 분석:
 - CPU / wall-clock / lock contention / allocation 4 종 flame graph
 - thread dump 보다 **시간 축** 까지 보이는 게 핵심 — **얼마나 자주 거기서 멈추는가**
 
-→ 본 글 §2.1 의 **async-profiler** 가 그것. 운영 환경 일반화의 best practice.
+→ 본 글 2.1장의 **async-profiler** 가 그것. 운영 환경 일반화의 best practice.
 
 ### 9.4 Uber — JVM Profiler (Open Source)
 
@@ -725,7 +725,7 @@ GC log 분석:
 - thread dump + GC + memory + CPU 통합 수집
 - Kafka 로 publish → 중앙 분석
 
-→ 본 글 §7.2 의 "thread dump 자동 수집" 의 분산 환경 확장.
+→ 본 글 7.2장의 "thread dump 자동 수집" 의 분산 환경 확장.
 
 ### 9.5 Datadog — Continuous Profiling for Java
 
@@ -733,7 +733,7 @@ GC log 분석:
 
 - **Wall Time** view: 각 method 가 **얼마나 wait 했는가** — 풀 고갈을 직접 식별
 - **Lock Hold Time** view: lock 보유 시간 — `synchronized` 경합 직접 식별
-- 알람 시점 5분 자동 보존 — §7.2 의 (3) 옵션
+- 알람 시점 5분 자동 보존 — 7.2장의 (3) 옵션
 
 → 본 글의 dump 분석을 **상시 자동화** 한 형태. 비용 vs 운영 부담 trade-off.
 
@@ -749,23 +749,25 @@ GC log 분석:
 
 ---
 
-## 10. 면접 답변 {#interview-answers}
+## 10. 정리 — 이 글의 답을 자기 말로 {#interview-answers}
 
-### Q1. "풀 고갈 알람을 받으면 무엇부터 채취하나요?"
+이 글을 다 읽은 누군가가 **핵심 4가지 질문** 으로 정리해본다면 — 측정으로 풀었던 답을 자기 말로 풀면 다음과 같습니다.
 
-> "thread dump 를 **3회 5초 간격** 으로 먼저 받습니다 (`jcmd <pid> Thread.print`). 1회만 받으면 **순간 상태**인지 **지속**인지 구분 안 되거든요. 3회 모두 같은 thread 가 같은 stack frame 에 있으면 진짜 stuck. dump 의 thread state 분포를 보고 — TIMED_WAITING (parked) 가 spike 면 풀 고갈, BLOCKED 가 spike 면 `synchronized` 경합, RUNNABLE 인데 stack 최상단이 `socketRead0` 이면 외부 I/O 대기. 트랜잭션-안-외부-호출 풀 고갈 [실측] Run #2 측정에서 50 worker 모두 `LockSupport.parkNanos` 와 `ConcurrentBag.borrow` stack 으로 dump 한 장에 풀 고갈을 확정했습니다."
+### Q. "풀 고갈 알람을 받으면 무엇부터 채취하나요?"
 
-### Q2. "Thread Dump 의 PARKED 상태는 정확히 무엇인가요?"
+이 글이 측정으로 보여준 첫 동선은 — thread dump 를 **3회 5초 간격** 으로 먼저 받는 것입니다 (`jcmd <pid> Thread.print`). 1회만 받으면 **순간 상태**인지 **지속**인지 구분 안 됨. 3회 모두 같은 thread 가 같은 stack frame 에 있으면 진짜 stuck. dump 의 thread state 분포를 보고 — TIMED_WAITING (parked) 가 spike 면 풀 고갈, BLOCKED 가 spike 면 `synchronized` 경합, RUNNABLE 인데 stack 최상단이 `socketRead0` 이면 외부 I/O 대기. 이 글의 트랜잭션-안-외부-호출 풀 고갈 [실측] Run #2 측정에서 50 worker 모두 `LockSupport.parkNanos` 와 `ConcurrentBag.borrow` stack 으로 dump 한 장에 풀 고갈을 확정한 사례.
 
-> "JVM 의 6 thread state 중 TIMED_WAITING 의 substate 입니다. `LockSupport.parkNanos(blocker, nanos)` 호출로 들어가요. 내부적으로는 `Unsafe.park(false, nanos)` — **진짜로 OS thread 가 schedule out 됩니다**. CPU 사용 0. 깨어나는 조건은 (a) nanos 만료, (b) 다른 thread 가 `unpark(thread)` 호출, (c) 인터럽트, (d) spurious wakeup. HikariCP 의 경우 (a) 또는 (b) — connection 반환받으면 (b) 로 깨어나서 RUNNABLE, 못 받으면 (a) 로 깨어나서 `SQLTransientConnectionException`. dump 의 `parking to wait for <0x...>` 라인이 **어떤 객체에서 wait 하는지** 알려주는데, HikariCP 면 `SynchronousQueue$TransferStack`. 이 두 정보로 풀 고갈 확정."
+### Q. "Thread Dump 의 PARKED 상태는 정확히 무엇인가요?"
 
-### Q3. "HikariCP 가 SynchronousQueue 를 쓰는 이유?"
+이 글이 정리한 정의는 — JVM 의 6 thread state 중 TIMED_WAITING 의 substate 입니다. `LockSupport.parkNanos(blocker, nanos)` 호출로 들어감. 내부적으로는 `Unsafe.park(false, nanos)` — **진짜로 OS thread 가 schedule out 됩니다**. CPU 사용 0. 깨어나는 조건은 (a) nanos 만료, (b) 다른 thread 가 `unpark(thread)` 호출, (c) 인터럽트, (d) spurious wakeup. HikariCP 의 경우 (a) 또는 (b) — connection 반환받으면 (b) 로 깨어나서 RUNNABLE, 못 받으면 (a) 로 깨어나서 `SQLTransientConnectionException`. dump 의 `parking to wait for <0x...>` 라인이 **어떤 객체에서 wait 하는지** 알려주는데, HikariCP 면 `SynchronousQueue$TransferStack`. 이 두 정보로 풀 고갈 확정.
 
-> "SynchronousQueue 는 capacity 0 의 BlockingQueue 입니다. `put()` 은 **다른 thread 가 take()** 할 때까지 대기, `take()` 은 **다른 thread 가 put()** 할 때까지 대기 — 큐 안에 **원소를 보관 안 함**. HikariCP 는 connection 객체를 hand-off 하는 데 이게 정확히 맞습니다. 첫째, 0-copy hand-off — connection 을 큐에 저장 안 하니 GC pressure 0. 둘째, `SynchronousQueue(true)` 면 FIFO 공정성 — 먼저 빌리려고 기다린 thread 가 먼저 받음. 셋째, `poll(0)` 은 빈 큐에 즉시 null 반환 — 풀이 비어있는 일반 path 가 빠름. 트랜잭션-안-외부-호출 풀 고갈 측정에서도 awaiting=50 thread 모두 정확히 `SynchronousQueue.poll(timeout, NANOSECONDS)` 안에서 park 됐습니다."
+### Q. "HikariCP 가 SynchronousQueue 를 쓰는 이유?"
 
-### Q4. "Thread Dump 만으로는 부족한 케이스?"
+이 글이 측정으로 풀어본 본질은 — SynchronousQueue 는 capacity 0 의 BlockingQueue 입니다. `put()` 은 **다른 thread 가 take()** 할 때까지 대기, `take()` 은 **다른 thread 가 put()** 할 때까지 대기 — 큐 안에 **원소를 보관 안 함**. HikariCP 는 connection 객체를 hand-off 하는 데 이게 정확히 맞음. 첫째, 0-copy hand-off — connection 을 큐에 저장 안 하니 GC pressure 0. 둘째, `SynchronousQueue(true)` 면 FIFO 공정성 — 먼저 빌리려고 기다린 thread 가 먼저 받음. 셋째, `poll(0)` 은 빈 큐에 즉시 null 반환 — 풀이 비어있는 일반 path 가 빠름. 트랜잭션-안-외부-호출 풀 고갈 측정에서도 awaiting=50 thread 모두 정확히 `SynchronousQueue.poll(timeout, NANOSECONDS)` 안에서 park 됐다는 게 그 증거.
 
-> "세 가지가 dump 로 안 보입니다. 첫째, **GC pause** — STW 동안 모든 thread 가 멈추는데 dump 도 그 시점엔 못 받음. `-Xlog:gc*` 로 GC log 별도 분석 필요. 둘째, **memory leak** — heap 안 어떤 객체가 **보유**돼 있는지는 dump 안에 없음. heap dump (`jmap -dump`) 또는 JFR Old Object Sample 필요. 셋째, **시간 축** — dump 는 **순간 snapshot**. **얼마나 자주** 그 frame 에 머무는가는 안 보임. async-profiler / Datadog Continuous Profiling 같은 wall-clock profiler 가 **시간 비율**을 보여줌. 운영에선 dump + GC log + JFR + APM 4종을 같이 운영합니다 — 하나만으로는 늘 사각지대 있음."
+### Q. "Thread Dump 만으로는 부족한 케이스?"
+
+이 글이 정리한 사각지대는 세 가지입니다. 첫째, **GC pause** — STW 동안 모든 thread 가 멈추는데 dump 도 그 시점엔 못 받음. `-Xlog:gc*` 로 GC log 별도 분석 필요. 둘째, **memory leak** — heap 안 어떤 객체가 **보유**돼 있는지는 dump 안에 없음. heap dump (`jmap -dump`) 또는 JFR Old Object Sample 필요. 셋째, **시간 축** — dump 는 **순간 snapshot**. **얼마나 자주** 그 frame 에 머무는가는 안 보임. async-profiler / Datadog Continuous Profiling 같은 wall-clock profiler 가 **시간 비율**을 보여줌. 운영에선 dump + GC log + JFR + APM 4종을 같이 운영해야 함 — 하나만으로는 늘 사각지대 있음.
 
 ---
 
@@ -788,9 +790,9 @@ GC log 분석:
 
 - **2편 — Java 동시성** (`synchronized` / `Lock` / `Atomic` / `LongAdder`) — 본 글에서 **DB Connection 이 동기화 자원** 이라는 lesson 을 **명시적 동기화 primitive** 로 확장
 - **3편 — JVM 메모리 구조** (Heap / Metaspace / Direct / Stack) — 본 글의 **thread stack 60MB** 같은 구체 수치를 메모리 영역 전체로
-- **4편 — GC 알고리즘** (G1 / ZGC / Shenandoah) — 본 글 §8.3 의 **GC pause 동반 시나리오** 의 본격 측정
+- **4편 — GC 알고리즘** (G1 / ZGC / Shenandoah) — 본 글 8.3장의 **GC pause 동반 시나리오** 의 본격 측정
 - **8편 — CompletableFuture** — 본 글의 **Outbox poller** 의 비동기 fan-out 측정
-- **10편 — JFR / async-profiler** — 본 글 §7-8 의 모니터링 + 자동 dump 수집의 본격편
+- **10편 — JFR / async-profiler** — 본 글 7장~8장의 모니터링 + 자동 dump 수집의 본격편
 - **11편 — Virtual Thread (Loom)** — 본 글의 **parkNanos** 가 carrier thread pinning 으로 어떻게 변하는가
 
 ---

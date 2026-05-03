@@ -271,7 +271,7 @@ COMMIT;
 
 그리고 **Session B 의 INSERT 자체는 **즉시** commit** (lock wait 없음). RR 은 **물리 commit 은 즉시 / 논리적 격리** 를 같이 달성합니다.
 
-이게 "MySQL InnoDB RR ≈ Snapshot Isolation" 의 핵심 — 다음 §5 에서 메커니즘 분해.
+이게 "MySQL InnoDB RR ≈ Snapshot Isolation" 의 핵심 — 다음 5장에서 메커니즘 분해.
 
 ### 4.5 SERIALIZABLE — INSERT 자체가 wait
 
@@ -413,7 +413,7 @@ Session A (RR) 가 SELECT 할 때:
 
 undo log 는 **active 한 트랜잭션** 이 **과거 버전** 을 볼 수 있어야 하므로, **가장 오래된 트랜잭션이 끝날 때까지 보관**됩니다. RR 트랜잭션이 1시간 살아 있으면 그 1시간 동안의 모든 row 변경의 undo log 가 쌓입니다.
 
-→ 운영 모니터링 대상 (§9 에서 다룸).
+→ 운영 모니터링 대상 (9장에서 다룸).
 
 ### 5.4 세 메커니즘 종합
 
@@ -424,8 +424,8 @@ graph LR
         GL[Gap Lock<br/>locking read 시]
         MV[MVCC Undo Log<br/>과거 버전 저장]
     end
-    SR -.기반.-> MV
-    GL -.보조.-> SR
+    SR -.->|기반| MV
+    GL -.->|보조| SR
     SR --> P1[Phantom 차단<br/>일반 SELECT]
     GL --> P2[INSERT 차단<br/>FOR UPDATE 시]
     MV --> P3[과거 버전 읽기<br/>일관성 보장]
@@ -443,7 +443,7 @@ graph LR
 
 ## 6. SERIALIZABLE 의 동시성 비용 — INSERT wait 1.56초 {#serializable-cost}
 
-§4.5 에서 확인한 SERIALIZABLE 의 INSERT wait 1.56초를 깊이 봅니다. 이게 RR 과 SERIALIZABLE 의 **결정적** 차이입니다.
+4.5장에서 확인한 SERIALIZABLE 의 INSERT wait 1.56초를 깊이 봅니다. 이게 RR 과 SERIALIZABLE 의 **결정적** 차이입니다.
 
 ### 6.1 메커니즘 — Shared Lock + Exclusive Lock
 
@@ -475,8 +475,8 @@ graph LR
         A1[Session A SELECT]
         A2[Session B INSERT 즉시 commit]
         A3[Session A 두번째 SELECT — snapshot]
-        A1 -.SLEEP.-> A3
-        A2 -.즉시.-> A3
+        A1 -.->|SLEEP| A3
+        A2 -.->|즉시| A3
     end
     subgraph "SERIALIZABLE — 물리 동시성 자체 차단"
         B1[Session A SELECT — S-lock]
@@ -484,7 +484,7 @@ graph LR
         B3[B wait 1.56초]
         B4[Session A COMMIT — S-lock 풀림]
         B5[B INSERT 진행]
-        B1 -.SLEEP.-> B4
+        B1 -.->|SLEEP| B4
         B2 -->|wait| B3
         B4 --> B5
     end
@@ -548,20 +548,20 @@ RR 의 consistent read snapshot 은 **읽기** 시점의 일관성만 보장합�
 | **낙관락** (version 컬럼) | UPDATE 시 `WHERE version=?` 체크. 충돌 시 retry | application 복잡도 ↑ |
 | **분산락** (Redisson 등) | application level 에서 lock 획득 | 외부 의존성 ↑ |
 
-본 repo 에서는 결제 도메인은 **RR + 비관락**, 멱등키 전이는 **RR + 분산락** 으로 보강 (격리수준 결정 사항의 §4.2). PostgreSQL 은 SSI (Serializable Snapshot Isolation) 가 write skew 를 자동 detect 하지만 — MySQL 은 application 레이어에서 보강해야.
+본 repo 에서는 결제 도메인은 **RR + 비관락**, 멱등키 전이는 **RR + 분산락** 으로 보강 (격리수준 결정 사항의 4.2장). PostgreSQL 은 SSI (Serializable Snapshot Isolation) 가 write skew 를 자동 detect 하지만 — MySQL 은 application 레이어에서 보강해야.
 
-→ **RR 의 한계를 인정하고 보강하는 게 면접 답변의 *깊이***. "RR 이면 모든 anomaly 차단" 은 **틀린 답**.
+→ **RR 의 한계를 인정하고 보강하는 것이 깊이의 본질**. "RR 이면 모든 anomaly 차단" 은 **틀린 답**.
 
 ---
 
 ## 8. 도메인별 매핑 — 어떤 격리수준을 어디 쓰나 {#domain-mapping}
 
-격리수준 결정 사항의 §4.2 도메인 매핑을 측정값과 함께 봅니다.
+격리수준 결정 사항의 4.2장 도메인 매핑을 측정값과 함께 봅니다.
 
 | 도메인 | 격리수준 | 보강 | 근거 |
 |---|---|---|---|
-| **결제 confirm / 환불** | **RR** (기본) | — | 같은 tx 안 잔액 조회 일관성 + phantom 차단. SERIALIZABLE 까지 갈 필요 없음 (§4.4 [실측]) |
-| **크레딧 차감** | **RR** | + 비관락 (`SELECT FOR UPDATE`) | RR 만으론 write skew 못 막음 (§7) → 추가 보호 |
+| **결제 confirm / 환불** | **RR** (기본) | — | 같은 tx 안 잔액 조회 일관성 + phantom 차단. SERIALIZABLE 까지 갈 필요 없음 (4.4장 [실측]) |
+| **크레딧 차감** | **RR** | + 비관락 (`SELECT FOR UPDATE`) | RR 만으론 write skew 못 막음 (7장) → 추가 보호 |
 | **사장님 대시보드** (read-only) | **RC** (명시) | — | snapshot 비용 절감 + 약간 stale OK. RR 의 long-running snapshot 부담 회피 |
 | **주문 목록 페이지네이션** | **RC** (명시) | — | Eventual OK. 페이지 넘기는 사이 새 주문 생겨도 사용자 경험상 자연스러움 |
 | **정산 배치** (대량 read) | **RC** (명시) | — | 트랜잭션 짧게 + snapshot 비용 절감 |
@@ -585,13 +585,13 @@ RR 의 consistent read snapshot 은 **읽기** 시점의 일관성만 보장합�
 
 ### 8.3 SERIALIZABLE 은 거의 안 씀
 
-§4.5 / §6 에서 봤듯 SERIALIZABLE 은 **짧은 critical** 만. 본 repo 에서는 사실상 안 씀 — 대부분의 케이스는 RR + 비관락 / 분산락 으로 충분.
+4.5장 / 6장에서 봤듯 SERIALIZABLE 은 **짧은 critical** 만. 본 repo 에서는 사실상 안 씀 — 대부분의 케이스는 RR + 비관락 / 분산락 으로 충분.
 
 ---
 
 ## 9. 운영 모니터링 {#monitoring}
 
-RR 격리수준 채택 시 운영에서 봐야 할 메트릭들. §5.3 의 undo log 비용이 핵심 모니터링 대상.
+RR 격리수준 채택 시 운영에서 봐야 할 메트릭들. 5.3장의 undo log 비용이 핵심 모니터링 대상.
 
 ### 9.1 현재 격리수준 확인
 
@@ -626,7 +626,7 @@ WHERE trx_started < NOW() - INTERVAL 30 SECOND
 ORDER BY trx_started ASC;
 ```
 
-이게 §5.3 의 undo log 폭증의 **원인 식별** 쿼리. RR 트랜잭션이 길게 살면 **과거 버전 undo log** 가 그 트랜잭션 종료까지 쌓입니다.
+이게 5.3장의 undo log 폭증의 **원인 식별** 쿼리. RR 트랜잭션이 길게 살면 **과거 버전 undo log** 가 그 트랜잭션 종료까지 쌓입니다.
 
 → 발견 시 동선:
 1. `trx_query` 로 어떤 쿼리가 lock 잡고 있는지 확인
@@ -696,13 +696,13 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 > "A consistent read means that InnoDB uses multi-versioning to present to a query a snapshot of the database at a point in time. The query sees the changes made by transactions that committed before that point in time, and no changes made by later or uncommitted transactions."
 
-핵심: **snapshot at a point in time**. 이게 §5.1 의 read view.
+핵심: **snapshot at a point in time**. 이게 5.1장의 read view.
 
 [MySQL 8.0 — Phantom Rows](https://dev.mysql.com/doc/refman/8.0/en/innodb-next-key-locking.html):
 
 > "InnoDB uses an algorithm called next-key locking that combines index-row locking with gap locking. ... When InnoDB searches or scans an index, it can set shared or exclusive locks on the index records it encounters. Thus, the row-level locks are actually index-record locks. In addition, a next-key lock on an index record also affects the gap before that index record."
 
-핵심: **next-key lock = record lock + gap lock**. 이게 §5.2 의 gap lock.
+핵심: **next-key lock = record lock + gap lock**. 이게 5.2장의 gap lock.
 
 ### 10.2 PostgreSQL 비교 — 같은 RR 인데 phantom 가능
 
@@ -720,7 +720,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 > "Multi-Version Concurrency Control (MVCC) is a technique used to provide isolation in concurrent transactions, while preventing the readers from blocking the writers and vice versa."
 
-핵심: **readers 가 writers 를 block 안 함, vice versa**. 이게 §5.1 의 "동시성 비용 0" 의 본질. SERIALIZABLE 은 readers 와 writers 가 **서로 block 함** — 그래서 throughput 폭락.
+핵심: **readers 가 writers 를 block 안 함, vice versa**. 이게 5.1장의 "동시성 비용 0" 의 본질. SERIALIZABLE 은 readers 와 writers 가 **서로 block 함** — 그래서 throughput 폭락.
 
 ### 10.4 Hermitage — 격리수준 anomaly 종합 측정
 
@@ -774,7 +774,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 | 사용자 영향 | 결제 응답 지연. `lock wait timeout` 발생 시 일부 거래 실패 |
 | 롤백 가능성 | 코드 수정 후 재배포. 트랜잭션 분리 / saga 패턴 검토 |
 
-흔한 함정: **SERIALIZABLE 을 **짧은 critical** 이 아닌 곳에 사용**. 1초 이상 트랜잭션엔 절대 X — wait 시간이 트랜잭션 길이에 정비례 (§6.2).
+흔한 함정: **SERIALIZABLE 을 **짧은 critical** 이 아닌 곳에 사용**. 1초 이상 트랜잭션엔 절대 X — wait 시간이 트랜잭션 길이에 정비례 (6.2장).
 
 ---
 
@@ -783,9 +783,9 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 ### 12.1 측정으로 깨진 가정들
 
 - "RR 이면 phantom 안 일어난다" → **반쪽 답**. ANSI 표준 RR 은 phantom 허용. **MySQL InnoDB RR 만** 차단. PostgreSQL RR 은 phantom 가능
-- "phantom 차단하려면 SERIALIZABLE 필요" → **NO**. MySQL RR 의 consistent read snapshot 으로 충분 (§4.4 [실측])
-- "RR 이면 모든 anomaly 차단" → **NO**. Write skew 는 RR 로 못 막음 (§7). 비관락 / 낙관락 / 분산락 보강 필요
-- "SERIALIZABLE 이 가장 안전하다" → **반쪽 답**. **물리 동시성 자체** 차단 → throughput 폭락 (§6.2 [실측] 1.56초 wait)
+- "phantom 차단하려면 SERIALIZABLE 필요" → **NO**. MySQL RR 의 consistent read snapshot 으로 충분 (4.4장 [실측])
+- "RR 이면 모든 anomaly 차단" → **NO**. Write skew 는 RR 로 못 막음 (7장). 비관락 / 낙관락 / 분산락 보강 필요
+- "SERIALIZABLE 이 가장 안전하다" → **반쪽 답**. **물리 동시성 자체** 차단 → throughput 폭락 (6.2장 [실측] 1.56초 wait)
 
 ### 12.2 측정값이 만드는 **후속 학습 동기**
 
@@ -793,11 +793,11 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 | 측정 | 후속 결정 |
 |---|---|
-| RU/RC phantom 발생 (§4.2~4.3) | 결제 도메인 RU/RC 사용 금지 룰 (격리수준 결정 사항의 §4.2) |
-| RR phantom 차단 (§4.4) | 본 repo 기본 격리수준 RR 채택 (격리수준 결정 사항의 §4.1) |
-| SERIALIZABLE INSERT wait 1.56초 (§4.5) | SERIALIZABLE 짧은 critical 만 룰 (§4.3 강제 동반 룰) |
-| Write skew RR 로 못 막음 (§7) | 크레딧 차감 RR + 비관락 보강 (격리수준 결정 사항의 §4.2) |
-| Long-running RR + undo log 폭증 (§11.1) | 운영 모니터링 임계 알람 설계 (§9.3) |
+| RU/RC phantom 발생 (4.2장~4.3장) | 결제 도메인 RU/RC 사용 금지 룰 (격리수준 결정 사항의 4.2장) |
+| RR phantom 차단 (4.4장) | 본 repo 기본 격리수준 RR 채택 (격리수준 결정 사항의 4.1장) |
+| SERIALIZABLE INSERT wait 1.56초 (4.5장) | SERIALIZABLE 짧은 critical 만 룰 (4.3장 강제 동반 룰) |
+| Write skew RR 로 못 막음 (7장) | 크레딧 차감 RR + 비관락 보강 (격리수준 결정 사항의 4.2장) |
+| Long-running RR + undo log 폭증 (11.1장) | 운영 모니터링 임계 알람 설계 (9.3장) |
 
 ### 12.3 핵심 한 줄
 
@@ -809,27 +809,29 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ---
 
-## 13. 면접 답변 {#interview-answers}
+## 13. 정리 — 이 글의 답을 자기 말로 {#interview-answers}
 
-### Q1. "MySQL 격리수준 어떻게 정하셨나요?"
+이 글을 다 읽은 누군가가 **핵심 5가지 질문** 으로 정리해본다면 — 측정으로 풀었던 답을 자기 말로 풀면 다음과 같습니다.
 
-> "phantom read 재현 [실측] 4 격리수준 측정 결과 기반입니다. 같은 시나리오에서 — Session A 가 SELECT 두 번, 사이에 Session B 가 INSERT — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 결제 / 크레딧 도메인은 **같은 트랜잭션 안 동일 쿼리 일관성** 이 깨지면 비즈니스 로직이 깨지므로 **MySQL InnoDB 기본 RR** 로 결정. SERIALIZABLE 까지 갈 필요 없는 게 측정값으로 명확합니다."
+### Q. "MySQL 격리수준 어떻게 정하셨나요?"
 
-### Q2. "MySQL 의 RR 과 PostgreSQL 의 RR 이 다른가요?"
+이 글이 측정으로 보여준 결정 근거는 — phantom read 재현 [실측] 4 격리수준 측정 결과입니다. 같은 시나리오에서 — Session A 가 SELECT 두 번, 사이에 Session B 가 INSERT — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 결제 / 크레딧 도메인은 **같은 트랜잭션 안 동일 쿼리 일관성** 이 깨지면 비즈니스 로직이 깨지므로 **MySQL InnoDB 기본 RR** 로 결정. SERIALIZABLE 까지 갈 필요 없는 게 측정값으로 명확합니다.
 
-> "다릅니다. ANSI SQL 표준의 RR 은 phantom 차단을 **보장하지 않음** — 그래서 PostgreSQL 의 RR 은 표준대로 phantom 가능합니다. 그런데 MySQL InnoDB 는 RR 에서 (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log 의 세 메커니즘으로 phantom 까지 차단 — 사실상 Snapshot Isolation 에 가깝습니다. 그래서 MySQL → PostgreSQL 마이그레이션 시 격리수준 동작을 **재측정** 해야 한다는 게 격리수준 결정 사항의 **틀렸다고 판단할 기준** 중 하나입니다."
+### Q. "MySQL 의 RR 과 PostgreSQL 의 RR 이 다른가요?"
 
-### Q3. "그럼 SERIALIZABLE 은 언제 쓰나요?"
+이 글이 정리한 차이는 — 두 RR 은 다릅니다. ANSI SQL 표준의 RR 은 phantom 차단을 **보장하지 않음** — 그래서 PostgreSQL 의 RR 은 표준대로 phantom 가능. 그런데 MySQL InnoDB 는 RR 에서 (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log 의 세 메커니즘으로 phantom 까지 차단 — 사실상 Snapshot Isolation 에 가깝습니다. 그래서 MySQL → PostgreSQL 마이그레이션 시 격리수준 동작을 **재측정** 해야 한다는 게 격리수준 결정 사항의 **틀렸다고 판단할 기준** 중 하나.
 
-> "본 repo 에서는 **짧은 critical** 트랜잭션에만 — 잔액 차감의 한 단계 또는 멱등키 INIT → PROCESSING 전이. 1초 이상 트랜잭션엔 절대 X 입니다. 이유는 [실측] — Session A 가 SLEEP 3초 동안 Session B 의 INSERT 가 1.56초 wait. wait 시간이 트랜잭션 길이에 **정비례** 하기 때문에 throughput 폭락. 대부분의 케이스는 RR + 비관락 또는 RR + 분산락으로 충분합니다."
+### Q. "그럼 SERIALIZABLE 은 언제 쓰나요?"
 
-### Q4. "RR 도 못 막는 anomaly 는?"
+이 글이 측정으로 정리한 운영 룰은 — 본 repo 에서는 **짧은 critical** 트랜잭션에만 (잔액 차감의 한 단계 또는 멱등키 INIT → PROCESSING 전이). 1초 이상 트랜잭션엔 절대 X. 이유는 [실측] — Session A 가 SLEEP 3초 동안 Session B 의 INSERT 가 1.56초 wait. wait 시간이 트랜잭션 길이에 **정비례** 하기 때문에 throughput 폭락. 대부분의 케이스는 RR + 비관락 또는 RR + 분산락으로 충분합니다.
 
-> "Write skew 입니다. 같은 row 두 개를 **각자** 읽고 **서로 모르고** update 하는 경우 — 둘 다 **자기 입장에선 일관성 OK** 인데 합쳐 보면 invariant 깨짐. RR 의 consistent read snapshot 은 **읽기** 시점 일관성만 보장하고, **서로 다른 row** 를 update 하면 lock 충돌도 안 나므로 detect 불가. 본 repo 는 크레딧 차감에 RR + 비관락 (`SELECT FOR UPDATE`), 멱등키 전이에 RR + 분산락 (Redisson) 으로 보강합니다 (격리수준 결정 사항의 §4.2). PostgreSQL 은 SSI 가 자동 detect 하지만 MySQL 은 application 레이어 보강 필요."
+### Q. "RR 도 못 막는 anomaly 는?"
 
-### Q5. "운영에서 RR 격리수준은 어떻게 모니터링하시나요?"
+이 글이 측정 한계로 짚은 것은 Write skew 입니다. 같은 row 두 개를 **각자** 읽고 **서로 모르고** update 하는 경우 — 둘 다 **자기 입장에선 일관성 OK** 인데 합쳐 보면 invariant 깨짐. RR 의 consistent read snapshot 은 **읽기** 시점 일관성만 보장하고, **서로 다른 row** 를 update 하면 lock 충돌도 안 나므로 detect 불가. 본 repo 는 크레딧 차감에 RR + 비관락 (`SELECT FOR UPDATE`), 멱등키 전이에 RR + 분산락 (Redisson) 으로 보강 (격리수준 결정 사항의 4.2장). PostgreSQL 은 SSI 가 자동 detect 하지만 MySQL 은 application 레이어 보강 필요.
 
-> "세 가지를 봅니다. 첫째, `Innodb_history_list_length` — undo log 깊이. RR 트랜잭션이 길면 **과거 버전** 보관 비용이 그 트랜잭션 종료까지 쌓입니다. 100,000 이상이면 알람. 둘째, `information_schema.innodb_trx` 의 `trx_started < NOW() - INTERVAL 30 SECOND` — long-running 트랜잭션 식별. 발견 시 `KILL` 후 application 코드 추적 (외부 호출이 트랜잭션 안에 있나?). 셋째, `performance_schema.data_lock_waits` — 비관락 / SERIALIZABLE 사용 시 lock wait 모니터링. 이 세 메트릭이 RR 의 **기반인 MVCC** 가 정상 동작하는지의 **직접 신호** 입니다."
+### Q. "운영에서 RR 격리수준은 어떻게 모니터링하시나요?"
+
+이 글이 정리한 모니터링 메트릭은 세 가지입니다. 첫째, `Innodb_history_list_length` — undo log 깊이. RR 트랜잭션이 길면 **과거 버전** 보관 비용이 그 트랜잭션 종료까지 쌓입니다. 100,000 이상이면 알람. 둘째, `information_schema.innodb_trx` 의 `trx_started < NOW() - INTERVAL 30 SECOND` — long-running 트랜잭션 식별. 발견 시 `KILL` 후 application 코드 추적 (외부 호출이 트랜잭션 안에 있나?). 셋째, `performance_schema.data_lock_waits` — 비관락 / SERIALIZABLE 사용 시 lock wait 모니터링. 이 세 메트릭이 RR 의 **기반인 MVCC** 가 정상 동작하는지의 **직접 신호** 입니다.
 
 ---
 

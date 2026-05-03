@@ -126,7 +126,7 @@ Diagram 1 — information difference between EXPLAIN and EXPLAIN ANALYZE:
 
 When EXPLAIN's `cost` and EXPLAIN ANALYZE's `actual time` **differ wildly**, that's a signal that **stats are stale** or that **cost-model assumptions break down**.
 
-Try `ANALYZE TABLE orders_w2` to refresh cardinality. If the gap remains, use `optimizer_trace` to inspect the optimizer's decision process (see §11).
+Try `ANALYZE TABLE orders_w2` to refresh cardinality. If the gap remains, use `optimizer_trace` to inspect the optimizer's decision process (see Section 11).
 
 This post uses EXPLAIN ANALYZE actual time for every measurement. Not estimates — measurements.
 
@@ -174,7 +174,7 @@ graph TB
 
 ### 2.4 The key word — `Filter:` should make you suspect a push-down failure
 
-The most important word. When `Filter: cond` shows up in the tree, that cond **failed to push down into the index** and is being **post-processed** after the upstream operator forwards rows. If the upstream sends 1M rows, that's 1M evaluations. This is the heart of §3.
+The most important word. When `Filter: cond` shows up in the tree, that cond **failed to push down into the index** and is being **post-processed** after the upstream operator forwards rows. If the upstream sends 1M rows, that's 1M evaluations. This is the heart of Section 3.
 
 ---
 
@@ -231,7 +231,7 @@ Q3 (`ORDER BY created_at DESC LIMIT 20`):
 | Before (no index) | Sort + Table scan + Filter | 9,708,696 | **1,609 ms** |
 | After (idx_created_at_id) | Limit + Covering index range scan reverse | 20 | **0.65 ms** |
 
-**2,476x difference**. The essence is the two patterns from §3.1. Before sends all 9.7M rows up, then sorts and slices. After walks 20 rows in the index leaves.
+**2,476x difference**. The essence is the two patterns from Section 3.1. Before sends all 9.7M rows up, then sorts and slices. After walks 20 rows in the index leaves.
 
 ---
 
@@ -445,7 +445,7 @@ Pure prioritization:
 - Adding row-constructor → OR conversion logic interacts with other parts of the optimizer → regression risk
 - Other databases like PostgreSQL push down correctly → "this is MySQL's specific quirk"
 
-→ Conclusion: **Don't use row constructor in MySQL**. Same as the No-Offset pagination decision §4.3 rule 5.
+→ Conclusion: **Don't use row constructor in MySQL**. Same as the No-Offset pagination decision Section 4.3 rule 5.
 
 ---
 
@@ -472,11 +472,11 @@ PostgreSQL's optimizer ("planner") **automatically converts** row-constructor co
 
 → The ANSI SQL standard defines the **semantics**, but **implementations differ across DBs**. The same standard SQL gives a 500x latency difference depending on the optimizer implementation.
 
-### 7.3 Implication — the optimizer is a DB characteristic
+### 7.3 What this means — the optimizer is a DB characteristic
 
 > **"Standard SQL = works the same everywhere" is a myth. Same meaning, different optimizers, different plans, different latencies. Write in the form that suits your DB — and verify with EXPLAIN ANALYZE every time. That's the standard workflow.**
 
-The No-Offset pagination decision §4.4 ("If the DB switches to PostgreSQL — Option B becomes simpler") is precisely this implication.
+The No-Offset pagination decision Section 4.4 ("If the DB switches to PostgreSQL — Option B becomes simpler") is precisely what this means in practice.
 
 ---
 
@@ -569,7 +569,7 @@ WHERE state = 'CONFIRMED' ORDER BY created_at DESC LIMIT 5;
 
 > **The optimizer is cost-based estimation + statistics + heuristics. It is not right 100% of the time. Especially: (1) very small LIMITs, (2) cardinality estimation errors, (3) ORDER BY + LIMIT combinations — the optimizer's weak spots. Always confirm with EXPLAIN ANALYZE.**
 
-Combined with the companion post [RDB Mastery #1](/en/posts/rdb-mastery-01-innodb-index-internals/) §11 ("full table scan = clustered index full scan"), full scan + LIMIT early termination is sometimes surprisingly efficient.
+Combined with the companion post [RDB Mastery #1](/en/posts/rdb-mastery-01-innodb-index-internals/) Section 11 ("full table scan = clustered index full scan"), full scan + LIMIT early termination is sometimes surprisingly efficient.
 
 ---
 
@@ -598,7 +598,7 @@ graph TB
     P3 --> Min
 ```
 
-→ Diagram 7-B reading (Diagram 7-A is the Q2 cost comparison in §8.4). Plan candidates are typically 5~20. Compute each cost, pick the minimum.
+→ Diagram 7-B reading (Diagram 7-A is the Q2 cost comparison in Section 8.4). Plan candidates are typically 5~20. Compute each cost, pick the minimum.
 
 ### 9.2 Cost model — rows × per-row cost
 
@@ -649,7 +649,7 @@ When INSERT/DELETE shifts the distribution significantly, statistics go **stale*
 
 Remedies:
 1. Run `ANALYZE TABLE <table>` periodically (or set `innodb_stats_auto_recalc=ON`)
-2. Use `optimizer_trace` to inspect the optimizer's decisions (§11)
+2. Use `optimizer_trace` to inspect the optimizer's decisions (Section 11)
 3. If cardinality looks unrealistic even after `ANALYZE TABLE`, increase sampling: `CREATE INDEX ... STATS_PERSISTENT=1, STATS_SAMPLE_PAGES=N`
 
 ### 9.5 [Measured — Java/Spring] — The five indexes + the optimizer's choices
@@ -659,7 +659,7 @@ Re-reading the five-index results from the optimizer's angle:
 | Q | Index picked | Why (cost view) |
 |---|---|---|
 | Q1 (`WHERE id=5M`) | PRIMARY | const 1 row → cost dominates |
-| Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) | idx_state_created (wrong, §8) | est_rows(336K) × cost — LIMIT 5 effect not modeled |
+| Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) | idx_state_created (wrong, Section 8) | est_rows(336K) × cost — LIMIT 5 effect not modeled |
 | Q3 (`ORDER BY created_at DESC LIMIT 20`) | idx_created_at_id (covering reverse) | covering = no clustered lookup; reverse + LIMIT 20 ends fast |
 | Q4 (`GROUP BY region_code`) | idx_region_code (covering) | full index scan but tiny (cardinality 4) |
 | Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`) | idx_owner_state_created | composite leftmost prefix + reverse — almost perfect |
@@ -889,59 +889,61 @@ Output is JSON containing every plan considered, each plan's cost, and the final
 
 ### 11.5 ADR-ize — operational rules from this post
 
-Generalizing the No-Offset pagination decision's §4.3:
+Generalizing the No-Offset pagination decision's Section 4.3:
 
 1. **Ban row constructor `(a, b) <` / `(a, b) >`** — block at PR review. Workaround: OR-decompose or single-column cursor
 2. **If using functions (`LOWER(col)` / `DATE(created_at)`), require a functional index alongside**
 3. **No implicit casts** — match column types and comparison value types
 4. **ORDER BY + LIMIT combos require attached EXPLAIN ANALYZE** — confirm whether Sort intervenes and index sort is leveraged
 5. **Index hints come with an ADR** — when using USE INDEX / FORCE INDEX, document the rationale and removal criteria
-6. **Every PR adding an index attaches EXPLAIN ANALYZE Before/After** — see companion post [No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) §6
+6. **Every PR adding an index attaches EXPLAIN ANALYZE Before/After** — see companion post [No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) Section 6
 
 ---
 
-## 12. Big-tech references + interview answers {#bigtech-references}
+## 12. Big-tech references + recap questions {#bigtech-references}
 
 ### 12.1 Big-tech references (≥ 6 verified URLs)
 
-| Source | Highlight | Linked § |
+| Source | Highlight | Linked section |
 |---|---|---|
-| [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | Visualize type / rows / Filter | §2 operator tree, §10 line-by-line |
-| [Toss SLASH22 — Broker / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) | JPA OptimisticLock + MVCC measurements | §11 operational diagnosis |
-| [Toss SLASH24 — Next core banking](https://haon.blog/article/toss-slash/next-core-banking/) | Oracle→MySQL transition + optimizer differences | §7 PostgreSQL comparison (DB-specific optimizers) |
+| [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | Visualize type / rows / Filter | Section 2 operator tree, Section 10 line-by-line |
+| [Toss SLASH22 — Broker / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) | JPA OptimisticLock + MVCC measurements | Section 11 operational diagnosis |
+| [Toss SLASH24 — Next core banking](https://haon.blog/article/toss-slash/next-core-banking/) | Oracle→MySQL transition + optimizer differences | Section 7 PostgreSQL comparison (DB-specific optimizers) |
 | [Vlad Mihalcea — Database query optimization](https://vladmihalcea.com/) | Hibernate + EXPLAIN operational patterns | Throughout |
-| [Vlad Mihalcea — Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | cardinality / histograms | §9.3 statistics |
-| [Use The Index, Luke! — Operations](https://use-the-index-luke.com/sql/explain-plan) | EXPLAIN type column meaning | §2 operators |
-| [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) | OFFSET anti-pattern | §10.1 |
-| [Percona — Index Hints](https://www.percona.com/blog/) | Hint operational guidelines | §11.4 |
-| [PostgreSQL — Row-wise Comparison](https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON) | Row constructors push down properly | §7 |
-| [PostgreSQL — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) | Composite index push-down comparison | §7 |
-| [MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) | Row-constructor push-down limitation (long-standing known limitation, currently marked duplicate in the tracker) | §6 |
-| [MySQL — Range Optimization](https://dev.mysql.com/doc/refman/8.0/en/range-optimization.html) | Recognized range patterns | §5 whitelist |
-| [MySQL — EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.0/en/explain.html#explain-analyze) | actual time | §1 |
-| [MySQL — Optimizer Cost Model](https://dev.mysql.com/doc/refman/8.0/en/cost-model.html) | Cost units | §9.2 |
+| [Vlad Mihalcea — Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | cardinality / histograms | Section 9.3 statistics |
+| [Use The Index, Luke! — Operations](https://use-the-index-luke.com/sql/explain-plan) | EXPLAIN type column meaning | Section 2 operators |
+| [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) | OFFSET anti-pattern | Section 10.1 |
+| [Percona — Index Hints](https://www.percona.com/blog/) | Hint operational guidelines | Section 11.4 |
+| [PostgreSQL — Row-wise Comparison](https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON) | Row constructors push down properly | Section 7 |
+| [PostgreSQL — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) | Composite index push-down comparison | Section 7 |
+| [MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) | Row-constructor push-down limitation (long-standing known limitation, currently marked duplicate in the tracker) | Section 6 |
+| [MySQL — Range Optimization](https://dev.mysql.com/doc/refman/8.0/en/range-optimization.html) | Recognized range patterns | Section 5 whitelist |
+| [MySQL — EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.0/en/explain.html#explain-analyze) | actual time | Section 1 |
+| [MySQL — Optimizer Cost Model](https://dev.mysql.com/doc/refman/8.0/en/cost-model.html) | Cost units | Section 9.2 |
 
-### 12.2 Five interview answers
+### 12.2 Recap — putting this article in your own words
 
-#### Q1. "What's the difference between `Filter:` and `Index Range Scan over` in EXPLAIN ANALYZE?"
+If someone who just finished this article were to summarize it through five core questions, here's how the measurements answer them.
 
-> "**`Filter:`** appearing in the tree is a **push-down failure** signal. The child operator forwards every row, and Filter evaluates cond per row — O(N). **`Index Range Scan over (cond)`** means cond was **converted to an in-index range** — binary search + leaf walk — O(log N + matching). In our measurements, the row constructor `(a,b)<(?,?)` ran at 154ms via Filter (1M-row scan); the OR-decomposed form ran at 0.30ms via Range Scan over (20-row scan) — about a **500x difference**. Two SQL statements with the same meaning split 500x apart on **a single line in the operator tree** ([Measured — Java/Spring])."
+#### Q. "What's the difference between `Filter:` and `Index Range Scan over` in EXPLAIN ANALYZE?"
 
-#### Q2. "What is push down and why does it matter?"
+What this article showed by measurement is — **`Filter:`** appearing in the tree is a **push-down failure** signal. The child operator forwards every row, and Filter evaluates cond per row — O(N). **`Index Range Scan over (cond)`** means cond was **converted to an in-index range** — binary search + leaf walk — O(log N + matching). In this article's measurements, the row constructor `(a,b)<(?,?)` ran at 154ms via Filter (1M-row scan); the OR-decomposed form ran at 0.30ms via Range Scan over (20-row scan) — about a **500x difference**. Two SQL statements with the same meaning split 500x apart on **a single line in the operator tree** ([Measured — Java/Spring]).
 
-> "**Push Down** is the optimizer's transformation that **pushes a WHERE condition down to be evaluated inside the index**. On success, cond becomes a **B-tree primitive** (binary search + leaf range walk) — O(log N + matching). On failure, the child sends every row up and Filter post-processes — O(N). On 10M rows, that N difference is the latency difference — **even with an index, push-down failure makes the index useless**. Hence the `Filter:` keyword in EXPLAIN ANALYZE is the primary diagnosis signal. Push-down has two gates: (1) the optimizer's recognized-pattern whitelist, (2) leftmost prefix matching of the index."
+#### Q. "What is push down and why does it matter?"
 
-#### Q3. "Why can't the MySQL optimizer push down a row constructor?"
+What this article defined is — **Push Down** is the optimizer's transformation that **pushes a WHERE condition down to be evaluated inside the index**. On success, cond becomes a **B-tree primitive** (binary search + leaf range walk) — O(log N + matching). On failure, the child sends every row up and Filter post-processes — O(N). On 10M rows, that N difference is the latency difference — **even with an index, push-down failure makes the index useless**. Hence the `Filter:` keyword in EXPLAIN ANALYZE is the primary diagnosis signal. Push-down has two gates: (1) the optimizer's recognized-pattern whitelist, (2) leftmost prefix matching of the index.
 
-> "The ANSI SQL standard's `(a, b) < (?, ?)` is **mathematically equivalent** to `a < ? OR (a = ? AND b < ?)` — straight from lexicographic ordering. But the MySQL optimizer **lacks the row-constructor → OR conversion logic**. It does pattern matching, doesn't recognize the row constructor itself as a range, and falls back to Filter. **MySQL Bug #16247** — filed in 2006, a long-standing known limitation (currently marked duplicate in the tracker). Because a clear workaround (OR-decompose) exists, fix priority is low. Other DBs like PostgreSQL / Oracle push down correctly — **the standard SQL meaning is the same, but optimizer implementations differ across DBs**. The No-Offset pagination decision's rule 5: PR-block row constructors."
+#### Q. "Why can't the MySQL optimizer push down a row constructor?"
 
-#### Q4. "Have you ever added an index and made things slower? How did you diagnose it?"
+What this article traced is — the ANSI SQL standard's `(a, b) < (?, ?)` is **mathematically equivalent** to `a < ? OR (a = ? AND b < ?)` — straight from lexicographic ordering. But the MySQL optimizer **lacks the row-constructor → OR conversion logic**. It does pattern matching, doesn't recognize the row constructor itself as a range, and falls back to Filter. **MySQL Bug #16247** — filed in 2006, a long-standing known limitation (currently marked duplicate in the tracker). Because a clear workaround (OR-decompose) exists, fix priority is low. Other DBs like PostgreSQL / Oracle push down correctly — **the standard SQL meaning is the same, but optimizer implementations differ across DBs**. The No-Offset pagination decision's rule 5: PR-block row constructors.
 
-> "Found via Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) ([Measured — Java/Spring]). Before adding the state index: 0.658ms → after: 13.5ms — **20x slower**. Comparing EXPLAIN ANALYZE — Before showed `Table scan rows=25` (LIMIT 5 pressure stops at 25 rows), After showed `Sort + Index lookup rows=336K` (used the index, but couldn't model the LIMIT 5 early-termination effect in the cost model). Diagnosis: the optimizer is **cost-based estimation + statistics + heuristics** — weak spots include very small LIMITs, large cardinality estimation errors, and ORDER BY + LIMIT combinations. `USE INDEX(PRIMARY)` recovered to 0.65ms. Lesson: **always confirm with EXPLAIN ANALYZE**, document hints in an ADR."
+#### Q. "Have you ever added an index and made things slower? How did you diagnose it?"
 
-#### Q5. "Can you make index decisions without looking at EXPLAIN ANALYZE?"
+What this article surfaced as the canonical case is Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) ([Measured — Java/Spring]). Before adding the state index: 0.658ms → after: 13.5ms — **20x slower**. Comparing EXPLAIN ANALYZE — Before showed `Table scan rows=25` (LIMIT 5 pressure stops at 25 rows), After showed `Sort + Index lookup rows=336K` (used the index, but couldn't model the LIMIT 5 early-termination effect in the cost model). Diagnosis: the optimizer is **cost-based estimation + statistics + heuristics** — weak spots include very small LIMITs, large cardinality estimation errors, and ORDER BY + LIMIT combinations. `USE INDEX(PRIMARY)` recovered to 0.65ms. Lesson: **always confirm with EXPLAIN ANALYZE**, document hints in an ADR.
 
-> "**No.** The optimizer makes cost-based decisions, and cost depends on statistics (cardinality / histograms) and heuristics. **It is not right 100% of the time** — when stats are stale or cost-model assumptions break, it picks the wrong plan. The Q2 paradox in this post is one example. On top of that, push-down can be diagnosed precisely **only by looking at the `Filter:` keyword in EXPLAIN ANALYZE**. The operational workflow — SLOW LOG → EXPLAIN ANALYZE → push-down diagnosis → query rewrite or hint → ADR-ize. Mandatory: every index PR attaches EXPLAIN ANALYZE Before/After. 'Adding an index speeds it up' is a **hypothesis** — only measurement verifies it."
+#### Q. "Can you make index decisions without looking at EXPLAIN ANALYZE?"
+
+What this article concluded by measurement is **no**. The optimizer makes cost-based decisions, and cost depends on statistics (cardinality / histograms) and heuristics. **It is not right 100% of the time** — when stats are stale or cost-model assumptions break, it picks the wrong plan. The Q2 paradox in this post is one example. On top of that, push-down can be diagnosed precisely **only by looking at the `Filter:` keyword in EXPLAIN ANALYZE**. The operational workflow — SLOW LOG → EXPLAIN ANALYZE → push-down diagnosis → query rewrite or hint → ADR-ize. Mandatory: every index PR attaches EXPLAIN ANALYZE Before/After. "Adding an index speeds it up" is a **hypothesis** — only measurement verifies it.
 
 ---
 
@@ -965,10 +967,10 @@ Generalizing the No-Offset pagination decision's §4.3:
 This post is **RDB Mastery Series #3 — the flagship**. The **optimizer's perception and push-down** angle. Sibling posts:
 
 - **#1** [InnoDB Index Internals](/en/posts/rdb-mastery-01-innodb-index-internals/) — B-tree / clustered / secondary / covering. This post sits **on top** of that, asking how the optimizer operates
-- **#2 — Index Types** (B-tree / Hash / Covering / Multi-valued / Functional). The functional index in §5 whitelist is detailed there
-- **#4 — Safe Operational ALTER Patterns** (Online DDL / pt-osc / gh-ost). Operational angle of §11 ADR-ization
-- **#5 — Limits of 1:N Joins** (N+1 / EntityGraph). How §3 Index Range Scan amplifies on top of an ORM
-- **#6 — Index Diet**. Operational reclamation of §9 Index Selection
+- **#2 — Index Types** (B-tree / Hash / Covering / Multi-valued / Functional). The functional index in Section 5 whitelist is detailed there
+- **#4 — Safe Operational ALTER Patterns** (Online DDL / pt-osc / gh-ost). Operational angle of Section 11 ADR-ization
+- **#5 — Limits of 1:N Joins** (N+1 / EntityGraph). How Section 3 Index Range Scan amplifies on top of an ORM
+- **#6 — Index Diet**. Operational reclamation of Section 9 Index Selection
 
 Companion single posts:
 - [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) — same measurements, **page-level operational prescription** (cursor standard / token encoding / PR gate)

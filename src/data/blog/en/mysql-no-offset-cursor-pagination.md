@@ -528,7 +528,7 @@ The PR author writes it thinking **this is the ANSI SQL standard, so it's correc
 | Stage | Signal |
 |---|---|
 | **First alert** | (Before any production impact) at code review |
-| **First 5 minutes** | 1) Lint blocks automatically (§5.4)<br/>2) If lint misses, reviewer cites §4 rule and blocks |
+| **First 5 minutes** | 1) Lint blocks automatically (Section 5.4)<br/>2) If lint misses, reviewer cites Section 4 rule and blocks |
 | **User impact** | 0 (blocked pre-emptively) |
 
 → Not post-hoc monitoring but **PR-time blocking** is the key. Once a row constructor reaches production, it's **invisible without EXPLAIN ANALYZE** (because the semantics are equivalent).
@@ -556,7 +556,7 @@ The PR author writes it thinking **this is the ANSI SQL standard, so it's correc
 
 ### 8.3 The single line
 
-> **OFFSET's cost is the *number of rows read and discarded***. At 10M rows: OFFSET 1M = 171ms / cursor = 0.30ms — **about 570x**. But **how you write the cursor code** is the real point — the row-constructor form can't be pushed down by MySQL's optimizer, so it's 154ms (about the same as OFFSET). The single-line difference between `Filter:` and `Covering index range scan over` in EXPLAIN ANALYZE is the source of the 500x latency gap.
+> **OFFSET's cost is the number of rows read and discarded**. At 10M rows: OFFSET 1M = 171ms / cursor = 0.30ms — **about 570x**. But **how you write the cursor code** is the real point — the row-constructor form can't be pushed down by MySQL's optimizer, so it's 154ms (about the same as OFFSET). The single-line difference between `Filter:` and `Covering index range scan over` in EXPLAIN ANALYZE is the source of the 500x latency gap.
 
 ---
 
@@ -566,19 +566,19 @@ If someone who just finished this article asked, "so what was that all about?" �
 
 ### Q. "Why does OFFSET pagination break down at 10M rows?"
 
-OFFSET cost scales **exactly with the number of rows read and discarded** — [measured] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. Having an index doesn't help, even a covering one. **InnoDB's B+-tree index doesn't store *ordinal-position* metadata**, so there's no way to jump straight to the Nth row — you have to read rows 1 through N sequentially and throw away the unwanted ones. PostgreSQL, Oracle, and SQL Server use the same general B-tree index structure, so the same constraint applies. That's why cursor pagination is *the widely-adopted standard pattern for high-volume sequential traversal APIs*.
+OFFSET cost scales **exactly with the number of rows read and discarded** — [measured] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. Having an index doesn't help, even a covering one. **InnoDB's B+-tree index doesn't store ordinal-position metadata**, so there's no way to jump straight to the Nth row — you have to read rows 1 through N sequentially and throw away the unwanted ones. PostgreSQL, Oracle, and SQL Server use the same general B-tree index structure, so the same constraint applies. That's why cursor pagination is **the widely-adopted standard pattern for high-volume sequential traversal APIs**.
 
 ### Q. "Row constructor `(a,b) < (?,?)` and the OR-split form mean the same thing — why a 500x gap?"
 
-Mathematically they're a lexicographic comparison and return the same set of rows. The catch is that **MySQL's optimizer has a structural limit: it can't push a row constructor down to an *index range scan*** — Bug #16247, filed in 2006, is a long-standing known limitation (currently marked duplicate in the tracker). EXPLAIN ANALYZE shows it on a single line: the row constructor lands as `Filter:` and scans 1,000,000 rows (154ms), while the OR-split runs as `Covering index range scan over` and scans only rows=20 (0.30ms). PostgreSQL pushes the *same SQL* down correctly — the real lesson is that **how each DB's optimizer interprets the ANSI SQL standard is what actually decides the cost**.
+Mathematically they're a lexicographic comparison and return the same set of rows. The catch is that **MySQL's optimizer has a structural limit: it can't push a row constructor down to an index range scan** — Bug #16247, filed in 2006, is a long-standing known limitation (currently marked duplicate in the tracker). EXPLAIN ANALYZE shows it on a single line: the row constructor lands as `Filter:` and scans 1,000,000 rows (154ms), while the OR-split runs as `Covering index range scan over` and scans only rows=20 (0.30ms). PostgreSQL pushes the same SQL down correctly — the real lesson is that **how each DB's optimizer interprets the ANSI SQL standard is what actually decides the cost**.
 
 ### Q. "Simple cursor `created_at < ?` vs OR-split — which is the production default?"
 
-Performance is essentially identical — 0.27 vs 0.30ms. The difference is *operational safety*: when many rows share the same `created_at` (bulk INSERT batches, migrations), the simple cursor *drops rows*. If 100 rows are inserted at the same millisecond and you cursor on that ms, the next page skips part of them. **The OR-split compares (created_at, id) together to guarantee a *correct page boundary***. Unless your domain *proves* that same-instant duplicates are rare, the production default is OR-split.
+Performance is essentially identical — 0.27 vs 0.30ms. The difference is **operational safety**: when many rows share the same `created_at` (bulk INSERT batches, migrations), the simple cursor drops rows. If 100 rows are inserted at the same millisecond and you cursor on that ms, the next page skips part of them. **The OR-split compares (created_at, id) together to guarantee a correct page boundary**. Unless your domain proves that same-instant duplicates are rare, the production default is OR-split.
 
 ### Q. "So you never use OFFSET pagination?"
 
-The [measured] take: **small OFFSETs (≤ 1,000) are fine** — 0.443ms is plenty fast. Internal admin tools, sample first pages — places with *bounded usage* — are easier to read with OFFSET than a cursor. But never for deep pages on user-facing surfaces — OFFSET 5M = 765ms. The rule this article lands on: an ADR-level cap of **"OFFSET only when N ≤ 1,000"**, enforced at PR review.
+The [measured] take: **small OFFSETs (≤ 1,000) are fine** — 0.443ms is plenty fast. Internal admin tools, sample first pages — places with bounded usage — are easier to read with OFFSET than a cursor. But never for deep pages on user-facing surfaces — OFFSET 5M = 765ms. The rule this article lands on: an ADR-level cap of **"OFFSET only when N ≤ 1,000"**, enforced at PR review.
 
 ---
 

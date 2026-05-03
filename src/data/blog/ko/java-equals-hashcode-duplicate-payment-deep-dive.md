@@ -11,6 +11,7 @@ tags:
   - equals-hashcode
   - production-incident
   - kafka
+  - JVM Java Mastery
 description: "equals()만 재정의하고 hashCode()를 빠뜨려 중복 결제 장애를 겪은 경험. Kafka TopicPartition 분석과 함께 HashMap 내부 동작부터 코드 리뷰 체크리스트까지."
 ---
 
@@ -29,6 +30,15 @@ description: "equals()만 재정의하고 hashCode()를 빠뜨려 중복 결제 
 처음엔 네트워크 타임아웃 문제라고 생각했습니다. 결제 요청이 실패한 줄 알고 재시도하면서 중복이 발생했겠거니 했죠. 하지만 로그를 보니 `processedPayments.contains(paymentId)`가 **false**를 반환하고 있었습니다. 분명 1분 전에 같은 주문으로 결제했는데 말이죠.
 
 원인을 찾는 데 4시간이 걸렸습니다. 지금 이 글을 쓰는 이유는, 여러분은 4시간이 아니라 **4분 만에** 이 문제를 발견할 수 있도록 돕고 싶어서입니다. 그리고 저처럼 우물 안 개구리였던 분들에게, Apache Kafka 개발자들은 같은 실수를 어떻게 방지했는지도 함께 공유하려 합니다.
+
+> 본 글은 **JVM/Java Mastery 시리즈 5편**. 자매글:
+> - [#1 — HikariCP 풀 고갈을 Thread Dump 로 분해](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/)
+> - (#2 Java 동시성 — 예정)
+> - (#3 JVM 메모리 구조 — 예정)
+>
+> 깊이: **L3-L4** ([JVM/Java Mastery 시리즈 매핑](https://github.com/PreAgile/portfolio-docs/blob/main/docs/blog-series/jvm-java-mastery/INDEX.md))
+>
+> 같은 결제 도메인 [실측] 자산 (W1 EXP-01 — 더블 결제 재현, W4 측정 예정 / 가설 단계) 위에 equals 의 5가지 contract, HashMap bucket/chain 메커니즘, OpenJDK 소스 인용을 합성한 시니어 깊이 정렬판입니다.
 
 ---
 
@@ -236,6 +246,50 @@ public boolean processPayment(PaymentId paymentId, Money amount) {
 ```
 
 이 글에서는 hashCode 문제에 집중하기 위해 단순화했지만, 동시성과 분산 환경도 반드시 고려해야 합니다.
+
+<details>
+<summary><b>equals 의 5가지 contract — Effective Java Item 10</b> (펼치기)</summary>
+
+Joshua Bloch 의 Effective Java Item 10 에서 정의한 5가지:
+
+- **반사성 (Reflexivity)**: `x.equals(x) == true`
+- **대칭성 (Symmetry)**: `x.equals(y) == y.equals(x)`
+- **추이성 (Transitivity)**: `x.equals(y) && y.equals(z) → x.equals(z)`
+- **일관성 (Consistency)**: `x.equals(y)` 가 여러 번 호출돼도 결과 동일 (객체 변경 없으면)
+- **non-null**: `x.equals(null) == false`
+
+이 중 추이성이 상속 + 추가 필드 시 가장 자주 깨집니다. 본 글의 결제 사고는 정확히 이 케이스에서 한 단계 더 나아간 것 — `equals` 는 추이성을 만족했지만, `hashCode` 가 짝이 안 맞아 HashMap bucket 자체가 어긋났습니다. equals contract 를 만족해도 hashCode contract 가 깨지면 해시 컬렉션은 무용지물.
+
+</details>
+
+<details>
+<summary><b>hashCode contract — equals 와 짝</b> (펼치기)</summary>
+
+- **`a.equals(b) == true` 면 반드시 `a.hashCode() == b.hashCode()`**
+- 역은 성립 안 해도 됨 (hash collision 허용 — `"Aa"` 와 `"BB"` 가 같은 hashCode 를 가지는 사례)
+- `Object.equals()` 만 override 하고 `hashCode()` 안 하면 — 해시 기반 컬렉션 (HashMap / HashSet) 에서 동등성이 깨짐
+
+본 글의 결제 사고: equals 만 override 한 PaymentId 가 HashMap 의 다른 bucket 에 들어가서 같은 결제가 두 번 처리됐습니다. equals 의 contract 는 5개지만, hashCode 의 contract 는 단 1개. 그 1개가 어긋나면 HashMap 안의 모든 동등성 검사가 무효.
+
+</details>
+
+<details>
+<summary><b>HashMap 의 bucket / chain — 왜 hashCode 가 결정적인가</b> (펼치기)</summary>
+
+JDK HashMap (OpenJDK 21):
+
+1. `put(key, value)` 시 `key.hashCode()` 계산 → bucket index 결정 (`hash & (n - 1)` 비트 마스킹)
+2. 같은 bucket 의 entry 들과 `equals()` 로 비교
+3. equals 일치하는 entry 가 있으면 update, 없으면 chain 끝에 추가
+4. chain 길이가 8 초과면 red-black tree 로 변환 (Java 8+)
+
+→ `hashCode` 가 bucket 위치를 결정합니다. 다른 bucket 에 가면 equals 비교 자체가 안 됩니다.
+
+본 글의 사고: 같은 의미의 PaymentId 두 개가 다른 bucket 에 들어가서 둘 다 새 entry 로 추가 → HashMap 안에 중복 entry 가 동시 존재 → 결제 두 번 발생. equals 가 true 를 반환할 능력이 있어도, 호출되는 시점이 영영 오지 않았던 것.
+
+OpenJDK 소스: [`HashMap.java` `getNode` 메서드](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java) — `(p = tab[(n - 1) & hash]) != null` 줄에서 bucket index 결정 후 `if (p.hash == hash && ((k = p.key) == key || (key != null && key.equals(k))))` 줄에서 equals 호출.
+
+</details>
 
 ### Object.hashCode()의 JavaDoc을 다시 읽어봤습니다
 
@@ -903,6 +957,20 @@ public class PaymentId {
 - null 처리가 일관성 있게 되어 있는가?
 - 단위 테스트가 있는가? (특히 equals 대칭성/전이성)
 
+### PR 리뷰 체크리스트 — equals 재정의 시 반드시 확인
+
+위 체크리스트의 보강판입니다. 시리즈 5편의 운영 회고 + Effective Java 인용을 합성한 PR 리뷰 게이트:
+
+- [ ] `hashCode` 도 같이 override 했나?
+- [ ] equals 의 5 contract 만족? (반사 / 대칭 / 추이 / 일관 / non-null)
+- [ ] 상속 구조에서 추이성 깨질 수 있는 추가 필드 없는가? (`Point` vs `ColorPoint` 패턴)
+- [ ] equals 가 불변 필드만 사용하나? (가변 필드 사용 시 HashMap 안에서 entry 분실)
+- [ ] IDE 자동 생성 (IntelliJ / Eclipse) — 둘 다 같이 생성?
+- [ ] Lombok `@EqualsAndHashCode` 사용 시 `@EqualsAndHashCode.Include` 정확? `callSuper` 의도와 맞는가?
+- [ ] Java record 로 마이그레이션 가능? (record 는 자동으로 equals/hashCode 정확히 생성)
+- [ ] 해시 충돌 빈도 검증 — 단위 테스트로 1만 건 hashCode 분포 확인 (constant value 회귀 방지, KAFKA-1194 패턴)
+- [ ] 해당 클래스가 결제·멱등·세션 키 등 도메인 식별자로 쓰이면 — 외부 멱등성 저장소 (Redis SETNX / DB UNIQUE) 와 짝으로 검증?
+
 ### SpotBugs 룰
 
 ```xml
@@ -964,19 +1032,41 @@ equals/hashCode가 정상 동작해도, 가변 객체를 여러 스레드가 공
 
 ---
 
+## 시리즈 다른 편
+
+본 글은 **JVM/Java Mastery 시리즈 5편**입니다.
+
+- [#1 — HikariCP 풀 고갈을 Thread Dump 로 분해](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) — 운영 그래프에서 출발하는 시리즈 플래그십
+- (#2 Java 동시성 — `synchronized` / `Lock` / `Atomic` / `LongAdder` — 예정)
+- (#3 JVM 메모리 구조 — Heap / Metaspace / Direct Memory / Stack — 예정)
+- (#4 GC 알고리즘 — G1 / ZGC / Shenandoah / Parallel — 예정)
+- **#5 — equals/hashCode — 결제 도메인 함정 (본 글)**
+- (#6 Optional / null — Brian Goetz 의도 vs 실제 — 예정)
+- (#11 Virtual Thread (Loom) vs Coroutines — 예정)
+
+시리즈 매핑은 [JVM/Java Mastery 시리즈 INDEX](https://github.com/PreAgile/portfolio-docs/blob/main/docs/blog-series/jvm-java-mastery/INDEX.md) 참고.
+
+---
+
 ## 13. 참고자료
 
 ### 공식 문서
 - [Object.hashCode() JavaDoc](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/Object.html#hashCode())
-- [Effective Java Item 11: Always override hashCode when you override equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/)
+- [Effective Java Item 10: Obey the general contract when overriding equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/) — Joshua Bloch
+- [Effective Java Item 11: Always override hashCode when you override equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/) — Joshua Bloch
+- [JLS §15.21 Equality Operators](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21)
 
 ### 오픈소스 코드
-- [Kafka TopicPartition.java](https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/TopicPartition.java)
+- [Kafka TopicPartition.java](https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/TopicPartition.java) — 캐싱된 hashCode 패턴
 - [Guava Objects.hashCode()](https://github.com/google/guava/blob/master/guava/src/com/google/common/base/Objects.java)
-- [OpenJDK HashMap 구현](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java)
+- [OpenJDK HashMap 구현 — `getNode` / `putVal`](https://github.com/openjdk/jdk/blob/master/src/java.base/share/classes/java/util/HashMap.java) — bucket index 결정 + chain traversal 라인
+
+### 결제 도메인 멱등성 (빅테크 사례)
+- [Stripe — Idempotency in Distributed Systems](https://stripe.com/blog/idempotency) — 멱등성 키 표준 패턴
+- [토스페이먼츠 — 멱등성이 뭔가요?](https://docs.tosspayments.com/blog/what-is-idempotency) — 한국 결제 도메인 멱등성 가이드
 
 ### 관련 이슈
-- [KAFKA-1194: TopicAndPartition hashCode issue](https://issues.apache.org/jira/browse/KAFKA-1194)
+- [KAFKA-1194: TopicAndPartition hashCode issue](https://issues.apache.org/jira/browse/KAFKA-1194) — 상수 hashCode 로 모든 entry 가 같은 bucket 에 들어간 사고
 
 ---
 

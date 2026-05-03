@@ -126,7 +126,7 @@ ORDER BY created_at DESC LIMIT 20;
 
 EXPLAIN 의 `cost` 와 EXPLAIN ANALYZE 의 `actual time` 이 **크게 다르면** — 옵티마이저의 **통계가 stale** 하거나 **cost model 가정이 깨진** 신호.
 
-`ANALYZE TABLE orders_w2` 를 실행해서 cardinality 갱신을 시도하고, 그래도 괴리가 크면 `optimizer_trace` 로 옵티마이저의 결정 과정을 들여다봅니다 (§11 에서 다룸).
+`ANALYZE TABLE orders_w2` 를 실행해서 cardinality 갱신을 시도하고, 그래도 괴리가 크면 `optimizer_trace` 로 옵티마이저의 결정 과정을 들여다봅니다 (11장에서 다룸).
 
 본 글은 모든 측정을 **EXPLAIN ANALYZE** 의 actual time 으로 합니다. 추정이 아닌 측정.
 
@@ -175,7 +175,7 @@ graph TB
 
 ### 2.4 핵심 단어 — `Filter:` 가 등장하면 push down 실패 의심
 
-가장 중요한 단어 하나. `Filter: cond` 가 트리에 등장하면 — 그 cond 는 **인덱스 안으로 push down 되지 못하고** 위 연산자가 row 를 위로 보낸 뒤 **후처리** 되고 있다는 뜻. 위 연산자가 1M row 를 보내면 1M 번 평가. 이게 §3 의 본질입니다.
+가장 중요한 단어 하나. `Filter: cond` 가 트리에 등장하면 — 그 cond 는 **인덱스 안으로 push down 되지 못하고** 위 연산자가 row 를 위로 보낸 뒤 **후처리** 되고 있다는 뜻. 위 연산자가 1M row 를 보내면 1M 번 평가. 이게 3장의 본질입니다.
 
 ---
 
@@ -232,7 +232,7 @@ Q3 (`ORDER BY created_at DESC LIMIT 20`):
 | Before (인덱스 없음) | Sort + Table scan + Filter | 9,708,696 | **1,609 ms** |
 | After (idx_created_at_id) | Limit + Covering index range scan reverse | 20 | **0.65 ms** |
 
-**2,476배 차이**. 차이의 본질이 § 3.1 의 두 패턴. Before 는 9.7M row 모두 위로 보낸 뒤 sort + 잘라내기. After 는 인덱스 leaf 에서 20 row 만 walk.
+**2,476배 차이**. 차이의 본질이 3.1장의 두 패턴. Before 는 9.7M row 모두 위로 보낸 뒤 sort + 잘라내기. After 는 인덱스 leaf 에서 20 row 만 walk.
 
 ---
 
@@ -446,7 +446,7 @@ bug 가 오래 known limitation 으로 남아있는 이유는 단순한 우선�
 - row constructor → OR 변환 로직 추가는 옵티마이저의 다른 부분과 상호작용 → 회귀 리스크
 - PostgreSQL 같은 다른 DB 가 정상 push down 하므로 "MySQL 만의 문제"
 
-→ 결론: **MySQL 에서는 row constructor 사용 금지**. No-Offset 페이지네이션 결정 사항의 §4.3 룰 5 와 동일.
+→ 결론: **MySQL 에서는 row constructor 사용 금지**. No-Offset 페이지네이션 결정 사항의 4.3장 룰 5 와 동일.
 
 ---
 
@@ -473,11 +473,11 @@ PostgreSQL 은 같은 row constructor 비교를 옵티마이저 ("planner") 가 
 
 → ANSI SQL 표준은 **의미만** 정의하고 **구현은 DB 마다**. 같은 표준 SQL 이 옵티마이저 구현에 따라 latency 가 500배 갈라집니다.
 
-### 7.3 함의 — 옵티마이저는 DB 의 특성
+### 7.3 정리 — 옵티마이저는 DB 의 특성
 
 > **"표준 SQL = 어디서나 같이 동작" 이 아니다. 의미는 같지만 옵티마이저 구현이 다르므로 plan 도 다르고 latency 도 다르다. 운영하는 DB 에 맞는 형태로 작성 — 그래서 EXPLAIN ANALYZE 로 **항상 검증** 이 표준 워크플로.**
 
-No-Offset 페이지네이션 결정 사항의 §4.4 ("DB 가 PostgreSQL 로 바뀌면 — Option B 가 더 단순") 가 이 함의 그대로.
+No-Offset 페이지네이션 결정 사항의 4.4장 ("DB 가 PostgreSQL 로 바뀌면 — Option B 가 더 단순") 가 이 의미 그대로.
 
 ---
 
@@ -570,7 +570,7 @@ WHERE state = 'CONFIRMED' ORDER BY created_at DESC LIMIT 5;
 
 > **옵티마이저는 cost-based 추정 + 통계 + 휴리스틱. 100% 의 시간 옳지 않다. 특히 (1) LIMIT 가 매우 작은 케이스, (2) cardinality 추정 오차가 큰 케이스, (3) ORDER BY + LIMIT 의 조합 — 옵티마이저의 약점. EXPLAIN ANALYZE 로 항상 직접 확인이 답.**
 
-자매글 [RDB Mastery #1](/posts/rdb-mastery-01-innodb-index-internals/) 의 §11 ("full table scan = clustered index full scan") 과 결합 — full scan + LIMIT 조기 종료 가 의외로 효율적인 케이스가 존재.
+자매글 [RDB Mastery #1](/posts/rdb-mastery-01-innodb-index-internals/) 의 11장 ("full table scan = clustered index full scan") 과 결합 — full scan + LIMIT 조기 종료 가 의외로 효율적인 케이스가 존재.
 
 ---
 
@@ -599,7 +599,7 @@ graph TB
     P3 --> Min
 ```
 
-→ 다이어그램 7-B 해석 (다이어그램 7-A 는 §8.4 의 Q2 cost 비교). plan 후보는 보통 5~20개. 각각의 cost 를 계산하고 최소값 선택.
+→ 다이어그램 7-B 해석 (다이어그램 7-A 는 8.4장의 Q2 cost 비교). plan 후보는 보통 5~20개. 각각의 cost 를 계산하고 최소값 선택.
 
 ### 9.2 cost model — rows × per-row cost
 
@@ -650,7 +650,7 @@ ANALYZE TABLE orders_w2 UPDATE HISTOGRAM ON state WITH 8 BUCKETS;
 
 처방:
 1. `ANALYZE TABLE <table>` 주기적 실행 (또는 `innodb_stats_auto_recalc=ON` 자동)
-2. `optimizer_trace` 로 옵티마이저의 결정 과정 확인 (§11)
+2. `optimizer_trace` 로 옵티마이저의 결정 과정 확인 (11장)
 3. cardinality 가 비현실적이면 `ANALYZE TABLE` 후에도 잘못 잡히는 경우 — `CREATE INDEX ... STATS_PERSISTENT=1, STATS_SAMPLE_PAGES=N` 으로 sampling 페이지 늘리기
 
 ### 9.5 [실측 — Java/Spring] — 5종 인덱스 + 옵티마이저의 선택
@@ -660,7 +660,7 @@ ANALYZE TABLE orders_w2 UPDATE HISTOGRAM ON state WITH 8 BUCKETS;
 | Q | 옵티마이저가 선택한 인덱스 | 그 이유 (cost 관점) |
 |---|---|---|
 | Q1 (`WHERE id=5M`) | PRIMARY | const 단 1 row → cost 압도적으로 작음 |
-| Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) | idx_state_created (잘못됨, §8) | est_rows(336K) × cost — LIMIT 5 효과 미반영 |
+| Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) | idx_state_created (잘못됨, 8장) | est_rows(336K) × cost — LIMIT 5 효과 미반영 |
 | Q3 (`ORDER BY created_at DESC LIMIT 20`) | idx_created_at_id (covering reverse) | covering = clustered lookup 절감, reverse 효과로 LIMIT 20 즉시 종료 |
 | Q4 (`GROUP BY region_code`) | idx_region_code (covering) | full index scan 이지만 인덱스가 작아서 (4 cardinality) 빠름 |
 | Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`) | idx_owner_state_created | composite leftmost prefix + reverse — 거의 perfect |
@@ -890,59 +890,61 @@ SELECT * FROM information_schema.OPTIMIZER_TRACE\G
 
 ### 11.5 ADR 화 — 본 글의 운영 룰
 
-No-Offset 페이지네이션 결정 사항의 §4.3 룰을 일반화:
+No-Offset 페이지네이션 결정 사항의 4.3장 룰을 일반화:
 
 1. **row constructor `(a, b) <` / `(a, b) >` 사용 금지** — PR 리뷰에서 차단. 워크어라운드: OR 분리 또는 단순 cursor
 2. **함수 적용 (`LOWER(col)` / `DATE(created_at)` 등) 사용 시 functional index 동반 필수**
 3. **묵시적 형변환 금지** — 컬럼 타입과 비교 값 타입 일치
 4. **ORDER BY + LIMIT 조합은 EXPLAIN ANALYZE 첨부 의무** — Sort 연산자가 끼는지, 인덱스 정렬 활용되는지 확인
 5. **인덱스 hint 는 결정 문서 동반** — USE INDEX / FORCE INDEX 사용 시 이유 + 제거 기준 문서화
-6. **모든 인덱스 추가 PR 은 EXPLAIN ANALYZE Before/After 첨부** — 자매글 [No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) §6 참조
+6. **모든 인덱스 추가 PR 은 EXPLAIN ANALYZE Before/After 첨부** — 자매글 [No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 6장 참조
 
 ---
 
-## 12. 빅테크 사례 + 면접 답변 {#bigtech-references}
+## 12. 빅테크 사례 + 정리 질문 {#bigtech-references}
 
 ### 12.1 빅테크 사례 (URL 검증 ≥ 6개)
 
-| 출처 | 핵심 | 본 글의 어느 §와 연결 |
+| 출처 | 핵심 | 본 글의 어느 장과 연결 |
 |---|---|---|
-| [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | type / rows / Filter 시각화로 인덱스 동작 검증 | §2 연산자 트리, §10 한 줄씩 읽기 |
-| [토스 SLASH22 — Broker issue / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) | JPA OptimisticLock + MVCC 동작 측정 | §11 운영 진단 |
-| [토스 SLASH24 — Next 코어뱅킹](https://haon.blog/article/toss-slash/next-core-banking/) | Oracle→MySQL 전환 + 옵티마이저 차이 | §7 PostgreSQL 비교 (DB 별 옵티마이저) |
+| [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | type / rows / Filter 시각화로 인덱스 동작 검증 | 2장 연산자 트리, 10장 한 줄씩 읽기 |
+| [토스 SLASH22 — Broker issue / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) | JPA OptimisticLock + MVCC 동작 측정 | 11장 운영 진단 |
+| [토스 SLASH24 — Next 코어뱅킹](https://haon.blog/article/toss-slash/next-core-banking/) | Oracle→MySQL 전환 + 옵티마이저 차이 | 7장 PostgreSQL 비교 (DB 별 옵티마이저) |
 | [Vlad Mihalcea — Database query optimization](https://vladmihalcea.com/) | Hibernate + EXPLAIN 운영 패턴 | 전반 |
-| [Vlad Mihalcea — Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | cardinality / histogram | §9.3 통계 |
-| [Use The Index, Luke! — Operations](https://use-the-index-luke.com/sql/explain-plan) | EXPLAIN type 컬럼 의미 | §2 연산자 |
-| [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) | OFFSET 안티패턴 | §10.1 |
-| [Percona — Index Hints](https://www.percona.com/blog/) | hint 운영 가이드라인 | §11.4 |
-| [PostgreSQL 공식 — Row-wise Comparison](https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON) | row constructor 정상 push down | §7 |
-| [PostgreSQL 공식 — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) | composite index push down 비교 | §7 |
-| [MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) | row constructor push down 한계 (오래된 known limitation, 트래커는 현재 duplicate) | §6 |
-| [MySQL 공식 — Range Optimization](https://dev.mysql.com/doc/refman/8.0/en/range-optimization.html) | 인식 가능한 range 패턴 | §5 whitelist |
-| [MySQL 공식 — EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.0/en/explain.html#explain-analyze) | actual time | §1 |
-| [MySQL 공식 — Optimizer Cost Model](https://dev.mysql.com/doc/refman/8.0/en/cost-model.html) | cost 단위 | §9.2 |
+| [Vlad Mihalcea — Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | cardinality / histogram | 9.3장 통계 |
+| [Use The Index, Luke! — Operations](https://use-the-index-luke.com/sql/explain-plan) | EXPLAIN type 컬럼 의미 | 2장 연산자 |
+| [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) | OFFSET 안티패턴 | 10.1장 |
+| [Percona — Index Hints](https://www.percona.com/blog/) | hint 운영 가이드라인 | 11.4장 |
+| [PostgreSQL 공식 — Row-wise Comparison](https://www.postgresql.org/docs/current/functions-comparisons.html#ROW-WISE-COMPARISON) | row constructor 정상 push down | 7장 |
+| [PostgreSQL 공식 — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) | composite index push down 비교 | 7장 |
+| [MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) | row constructor push down 한계 (오래된 known limitation, 트래커는 현재 duplicate) | 6장 |
+| [MySQL 공식 — Range Optimization](https://dev.mysql.com/doc/refman/8.0/en/range-optimization.html) | 인식 가능한 range 패턴 | 5장 whitelist |
+| [MySQL 공식 — EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.0/en/explain.html#explain-analyze) | actual time | 1장 |
+| [MySQL 공식 — Optimizer Cost Model](https://dev.mysql.com/doc/refman/8.0/en/cost-model.html) | cost 단위 | 9.2장 |
 
-### 12.2 면접 답변 5개
+### 12.2 정리 — 이 글의 답을 자기 말로
 
-#### Q1. "EXPLAIN ANALYZE 의 `Filter:` 와 `Index Range Scan over` 차이는?"
+이 글을 다 읽은 누군가가 **핵심 5가지 질문** 으로 정리해본다면 — 측정으로 풀었던 답을 자기 말로 풀면 다음과 같습니다.
 
-> "**Filter:** 가 트리에 등장하면 **push down 실패** 신호입니다. 자식 연산자가 모든 row 를 위로 보내고, Filter 가 row 마다 cond 를 평가 — O(N). **Index Range Scan over (cond)** 는 cond 가 **인덱스 안의 range 로 변환** 되어 binary search + leaf walk 로 처리 — O(log N + matching). 본 시리즈 측정에서 row constructor `(a,b)<(?,?)` 는 Filter 단계로 1M row scan = 154ms, OR 분리 형태는 Range Scan over 로 20 row scan = 0.30ms — **약 500배 차이**. 같은 의미의 SQL 두 개가 **연산자 트리 한 줄 차이** 로 500배 갈라집니다 ([실측 — Java/Spring])."
+#### Q. "EXPLAIN ANALYZE 의 `Filter:` 와 `Index Range Scan over` 차이는?"
 
-#### Q2. "Push Down 이란 무엇이고 왜 중요한가?"
+이 글이 측정으로 보여준 것은 — **Filter:** 가 트리에 등장하면 **push down 실패** 신호입니다. 자식 연산자가 모든 row 를 위로 보내고, Filter 가 row 마다 cond 를 평가 — O(N). **Index Range Scan over (cond)** 는 cond 가 **인덱스 안의 range 로 변환** 되어 binary search + leaf walk 로 처리 — O(log N + matching). 본 시리즈 측정에서 row constructor `(a,b)<(?,?)` 는 Filter 단계로 1M row scan = 154ms, OR 분리 형태는 Range Scan over 로 20 row scan = 0.30ms — **약 500배 차이**. 같은 의미의 SQL 두 개가 **연산자 트리 한 줄 차이** 로 500배 갈라집니다 ([실측 — Java/Spring]).
 
-> "**Push Down** 은 옵티마이저가 WHERE 조건을 **인덱스 안에서 평가하도록 내려보내는** 변환입니다. 성공하면 cond 가 **B-tree primitive** (binary search + leaf range walk) 로 처리 — O(log N + matching). 실패하면 자식이 모든 row 보내고 Filter 단계 후처리 — O(N). 1,000만 row 환경에서 N 차이는 곧 latency 차이 — **인덱스가 있어도 push down 실패면 인덱스 무용지물**. 그래서 EXPLAIN ANALYZE 의 `Filter:` 키워드가 진단의 1차 신호. push down 결정에는 두 게이트: (1) 옵티마이저의 인식 가능한 패턴 whitelist, (2) 인덱스 leftmost prefix 매칭."
+#### Q. "Push Down 이란 무엇이고 왜 중요한가?"
 
-#### Q3. "MySQL 옵티마이저가 row constructor 를 push down 못 하는 이유?"
+이 글이 정리한 정의는 — **Push Down** 은 옵티마이저가 WHERE 조건을 **인덱스 안에서 평가하도록 내려보내는** 변환입니다. 성공하면 cond 가 **B-tree primitive** (binary search + leaf range walk) 로 처리 — O(log N + matching). 실패하면 자식이 모든 row 보내고 Filter 단계 후처리 — O(N). 1,000만 row 환경에서 N 차이는 곧 latency 차이 — **인덱스가 있어도 push down 실패면 인덱스 무용지물**. 그래서 EXPLAIN ANALYZE 의 `Filter:` 키워드가 진단의 1차 신호. push down 결정에는 두 게이트: (1) 옵티마이저의 인식 가능한 패턴 whitelist, (2) 인덱스 leftmost prefix 매칭.
 
-> "ANSI SQL 표준의 `(a, b) < (?, ?)` 는 의미상 `a < ? OR (a = ? AND b < ?)` 와 **수학적으로 동치** — lexicographic 비교의 정의. 그런데 MySQL 옵티마이저는 row constructor → OR 변환 로직이 **없습니다**. 패턴 매칭으로 동작하는데 row constructor 자체를 range 로 인식 못 함 → Filter 로 fallback. **MySQL Bug #16247** — 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). 워크어라운드 (OR 분리) 가 명확하다 보니 우선순위가 낮아 fix 안 됨. PostgreSQL / Oracle 같은 다른 DB 는 정상 push down — **표준 SQL 의 의미는 같지만 옵티마이저 구현이 DB 마다 다르다**. No-Offset 페이지네이션 결정 사항의 룰 5: PR 에서 row constructor 차단."
+#### Q. "MySQL 옵티마이저가 row constructor 를 push down 못 하는 이유?"
 
-#### Q4. "인덱스를 추가했는데 느려진 적 있나요? 어떻게 진단했나요?"
+이 글이 측정으로 풀어본 본질은 — ANSI SQL 표준의 `(a, b) < (?, ?)` 는 의미상 `a < ? OR (a = ? AND b < ?)` 와 **수학적으로 동치** (lexicographic 비교의 정의). 그런데 MySQL 옵티마이저는 row constructor → OR 변환 로직이 **없습니다**. 패턴 매칭으로 동작하는데 row constructor 자체를 range 로 인식 못 함 → Filter 로 fallback. **MySQL Bug #16247** — 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). 워크어라운드 (OR 분리) 가 명확하다 보니 우선순위가 낮아 fix 안 됨. PostgreSQL / Oracle 같은 다른 DB 는 정상 push down — **표준 SQL 의 의미는 같지만 옵티마이저 구현이 DB 마다 다르다**. No-Offset 페이지네이션 결정 사항의 룰 5: PR 에서 row constructor 차단.
 
-> "Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) 에서 발견했습니다 ([실측 — Java/Spring]). state 인덱스 추가 전 0.658ms → 추가 후 13.5ms — **20배 느림**. EXPLAIN ANALYZE 비교했더니 — Before 는 `Table scan rows=25` (LIMIT 5 압력으로 25 row 만 읽고 종료), After 는 `Sort + Index lookup rows=336K` (옵티마이저가 인덱스 사용했지만 LIMIT 5 의 조기 종료 효과를 cost 모델에 반영 못 함). 진단 결론: 옵티마이저는 **cost-based 추정 + 통계 + 휴리스틱** — LIMIT 가 매우 작은 케이스 / cardinality 추정 오차가 큰 케이스 / ORDER BY + LIMIT 조합 — 약점이 있다. `USE INDEX(PRIMARY)` hint 로 PRIMARY 강제 → 0.65ms 회복. 교훈: **EXPLAIN ANALYZE 로 항상 직접 확인**, hint 는 결정 문서 동반."
+#### Q. "인덱스를 추가했는데 느려진 적 있나요? 어떻게 진단했나요?"
 
-#### Q5. "EXPLAIN ANALYZE 안 보고 인덱스 결정 가능한가요?"
+이 글이 측정으로 보여준 케이스는 Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) 입니다 ([실측 — Java/Spring]). state 인덱스 추가 전 0.658ms → 추가 후 13.5ms — **20배 느림**. EXPLAIN ANALYZE 비교: Before 는 `Table scan rows=25` (LIMIT 5 압력으로 25 row 만 읽고 종료), After 는 `Sort + Index lookup rows=336K` (옵티마이저가 인덱스 사용했지만 LIMIT 5 의 조기 종료 효과를 cost 모델에 반영 못 함). 진단 결론: 옵티마이저는 **cost-based 추정 + 통계 + 휴리스틱** — LIMIT 가 매우 작은 케이스 / cardinality 추정 오차가 큰 케이스 / ORDER BY + LIMIT 조합 — 약점이 있다. `USE INDEX(PRIMARY)` hint 로 PRIMARY 강제 → 0.65ms 회복. 교훈: **EXPLAIN ANALYZE 로 항상 직접 확인**, hint 는 결정 문서 동반.
 
-> "**불가능** 합니다. 옵티마이저는 cost-based 판단을 하고, cost 는 통계 (cardinality / histogram) 와 휴리스틱에 의존합니다. **100% 의 시간 옳지 않다** — 통계가 stale 하거나 cost model 가정이 깨지면 잘못된 plan 선택. 본 글의 Q2 역설이 그 케이스. 게다가 push down 여부는 **EXPLAIN ANALYZE 의 `Filter:` 키워드** 로만 정확히 진단 가능. 운영 워크플로 — SLOW LOG → EXPLAIN ANALYZE → push down 진단 → 쿼리 재작성 또는 hint → ADR 화. 인덱스 추가 PR 에 EXPLAIN ANALYZE Before/After 첨부 의무화가 표준. '인덱스 추가하면 빨라진다' 는 **가설** — 측정으로만 검증 가능."
+#### Q. "EXPLAIN ANALYZE 안 보고 인덱스 결정 가능한가요?"
+
+이 글이 측정으로 내린 결론은 **불가능** 입니다. 옵티마이저는 cost-based 판단을 하고, cost 는 통계 (cardinality / histogram) 와 휴리스틱에 의존합니다. **100% 의 시간 옳지 않다** — 통계가 stale 하거나 cost model 가정이 깨지면 잘못된 plan 선택. 본 글의 Q2 역설이 그 케이스. 게다가 push down 여부는 **EXPLAIN ANALYZE 의 `Filter:` 키워드** 로만 정확히 진단 가능. 운영 워크플로 — SLOW LOG → EXPLAIN ANALYZE → push down 진단 → 쿼리 재작성 또는 hint → ADR 화. 인덱스 추가 PR 에 EXPLAIN ANALYZE Before/After 첨부 의무화가 표준. "인덱스 추가하면 빨라진다" 는 **가설** — 측정으로만 검증 가능.
 
 ---
 
@@ -966,10 +968,10 @@ No-Offset 페이지네이션 결정 사항의 §4.3 룰을 일반화:
 본 글은 **RDB Mastery 시리즈 3편 — 플래그십**. **옵티마이저의 인식과 push down** 측면. 자매글:
 
 - **1편** [InnoDB 인덱스 내부 구조](/posts/rdb-mastery-01-innodb-index-internals/) — B-tree / clustered / secondary / covering. 본 글은 그 **위에** 옵티마이저가 어떻게 동작하는지
-- **2편 — 인덱스의 종류** (B-tree / Hash / Covering / Multi-valued / Functional). 본 글의 §5 whitelist 의 functional index 가 거기서 자세히
-- **4편 — 운영 ALTER 안전 패턴** (Online DDL / pt-osc / gh-ost). 본 글의 §11 ADR 화 의 운영 측면
-- **5편 — 1:N 조인의 한계** (N+1 / EntityGraph). 본 글의 §3 Index Range Scan 이 ORM 위에서 어떻게 폭증하는지
-- **6편 — 인덱스 다이어트**. 본 글의 §9 Index Selection 의 운영 회수
+- **2편 — 인덱스의 종류** (B-tree / Hash / Covering / Multi-valued / Functional). 본 글의 5장 whitelist 의 functional index 가 거기서 자세히
+- **4편 — 운영 ALTER 안전 패턴** (Online DDL / pt-osc / gh-ost). 본 글의 11장 ADR 화 의 운영 측면
+- **5편 — 1:N 조인의 한계** (N+1 / EntityGraph). 본 글의 3장 Index Range Scan 이 ORM 위에서 어떻게 폭증하는지
+- **6편 — 인덱스 다이어트**. 본 글의 9장 Index Selection 의 운영 회수
 
 자매 단일 글:
 - [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) — 같은 측정의 **page 단위 운영 처방** (cursor 표준 / 토큰화 / PR 차단)

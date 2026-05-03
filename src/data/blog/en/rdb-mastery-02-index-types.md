@@ -49,8 +49,8 @@ Two common answers.
 This post walks every one of those decision axes by building real indexes on a 10M-row table and measuring — concluding **when to pick what**.
 
 - Inputs: cardinality across 5 indexes + Q1~Q5 Before/After + Q2 paradox + index storage 1.3GB + write latency 5~6x.
-- Companion post [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) — its cursor is one application of the §3 composite + leftmost-prefix rule from this post.
-- Depth: **L2-L3** (RDB Mastery series, post #2 — **trade-offs by index type + measurements + Big Tech operations + interview answers**).
+- Companion post [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) — its cursor is one application of the Section 3 composite + leftmost-prefix rule from this post.
+- Depth: **L2-L3** (RDB Mastery series, post #2 — **trade-offs by index type + measurements + Big Tech operations + recap questions**).
 
 ---
 
@@ -103,7 +103,7 @@ This post walks every one of those decision axes by building real indexes on a 1
 
 ### 1.3 Focus of this post — InnoDB B-tree and its variants
 
-This post focuses on InnoDB B-tree and its variants (Multi-valued / Functional) because they dominate operational decision-making. Hash / Spatial / Full-text get one paragraph each in §8. Within the B-tree family, four **shapes** — clustered / secondary / covering / composite — and one **effect** — cardinality — form the decision axes.
+This post focuses on InnoDB B-tree and its variants (Multi-valued / Functional) because they dominate operational decision-making. Hash / Spatial / Full-text get one paragraph each in Section 8. Within the B-tree family, four **shapes** — clustered / secondary / covering / composite — and one **effect** — cardinality — form the decision axes.
 
 ---
 
@@ -145,10 +145,10 @@ The key observation: **secondary / composite / covering are all shapes of the sa
 |---|---|---|
 | **Clustered vs Secondary** | How is the PK defined? | Cost of every secondary lookup (PK size + distribution) |
 | **Covering or not** | Are all SELECT columns inside the index leaf? | One lookup vs two (tens to hundreds of x latency difference) |
-| **Composite column order** | (a, b, c) vs (b, a, c) — which goes first? | Leftmost-prefix rule (next, §3) |
-| **Cardinality / Selectivity** | Distinct values / total rows | Whether the index is effective at all (§4) |
+| **Composite column order** | (a, b, c) vs (b, a, c) — which goes first? | Leftmost-prefix rule (next, Section 3) |
+| **Cardinality / Selectivity** | Distinct values / total rows | Whether the index is effective at all (Section 4) |
 
-These four axes form the spine of §3~§5 below.
+These four axes form the spine of Section 3~Section 5 below.
 
 ---
 
@@ -301,7 +301,7 @@ This is the principle behind "do not build standalone indexes on boolean / state
 
 ### 5.1 Recap
 
-A one-paragraph recap of the covering index from [Post #1, §4](/en/posts/rdb-mastery-01-innodb-index-internals/#covering-index).
+A one-paragraph recap of the covering index from [Post #1, Section 4](/en/posts/rdb-mastery-01-innodb-index-internals/#covering-index).
 
 > If every column the SELECT requires lives in the secondary index leaf, the clustered index can be skipped — **one lookup is enough**. Because InnoDB's secondary index **always carries the PK in the leaf**, an index like `(created_at, id)` automatically covers `SELECT id, created_at`. `Using index` in EXPLAIN is the covering signal.
 
@@ -657,8 +657,8 @@ graph TB
     Q --> Decision{Optimizer<br/>cost-based decision}
     Decision -->|Before: no index| FS[Full Table Scan + LIMIT 5 early termination<br/>= 0.658 ms]
     Decision -->|After: idx_state_created| IS[Index Range Scan + Reverse + Lookup<br/>= 13.5 ms]
-    FS -.actually faster.-> Faster[Before is the<br/>faster path in reality]
-    IS -.optimizer picked wrong.-> Slower[Optimizer believed<br/>the index path is faster]
+    FS -.->|actually faster| Faster[Before is the<br/>faster path in reality]
+    IS -.->|optimizer picked wrong| Slower[Optimizer believed<br/>the index path is faster]
 ```
 
 → Reading Diagram 9. The optimizer is **mostly** right, but for **small LIMIT + evenly distributed predicates**, full scan + early termination can win. The optimizer, looking only at statistics, saw "state='CONFIRMED' is 25% of rows, so the index path is efficient" — but in reality the lookup overhead dominated.
@@ -720,46 +720,48 @@ This compresses every measurement and finding in this post into a process. A PR 
 
 ---
 
-## 12. Big Tech References + Interview Answers {#bigtech-references}
+## 12. Big Tech References + Recap Questions {#bigtech-references}
 
 ### 12.1 Big Tech references (URLs verified ≥ 6)
 
-| Source | Article | Linked § in this post |
+| Source | Article | Linked section in this post |
 |---|---|---|
-| LINE Engineering | [Validating index behaviour with MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | §10 detecting Q2 paradox + §11 EXPLAIN in operations |
-| Kakao Pay | [JPA Transactional readOnly + set_option, QPS down 58%](https://tech.kakaopay.com/post/jpa-transactional-bri/) | §5 covering + read-side optimisation |
-| Toss SLASH24 | [Next core banking — Oracle→MySQL MVCC + index behaviour](https://haon.blog/article/toss-slash/next-core-banking/) | §2 / §10 optimizer |
-| Vlad Mihalcea | [Index Selectivity / Cardinality](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | §4 cardinality |
-| Vlad Mihalcea | [MySQL 8 Functional Indexes](https://vladmihalcea.com/mysql-8-functional-indexes/) | §7 functional |
-| PlanetScale | [How indexes work in MySQL](https://planetscale.com/learn/articles/mysql-indexes) | §1 / §11 |
-| Pinterest Engineering | [Sharding Pinterest's growing data](https://medium.com/pinterest-engineering/sharding-pinterest-how-we-scaled-our-mysql-fleet-3f341e96ca6f) | §11 production (indexes + sharding) |
-| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | §9 index cost → distributed migration |
-| MySQL official | [CREATE INDEX](https://dev.mysql.com/doc/refman/8.0/en/create-index.html) | §1 the six types |
-| MySQL official | [Multi-valued Indexes](https://dev.mysql.com/doc/refman/8.0/en/create-index.html#create-index-multi-valued) | §6 |
-| MySQL official | [Hash Index — adaptive hash](https://dev.mysql.com/doc/refman/8.0/en/index-btree-hash.html) | §8.1 |
-| Use The Index, Luke! | [The Where Clause](https://use-the-index-luke.com/sql/where-clause) | §3 leftmost prefix |
+| LINE Engineering | [Validating index behaviour with MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | Section 10 detecting Q2 paradox + Section 11 EXPLAIN in operations |
+| Kakao Pay | [JPA Transactional readOnly + set_option, QPS down 58%](https://tech.kakaopay.com/post/jpa-transactional-bri/) | Section 5 covering + read-side optimisation |
+| Toss SLASH24 | [Next core banking — Oracle→MySQL MVCC + index behaviour](https://haon.blog/article/toss-slash/next-core-banking/) | Section 2 / Section 10 optimizer |
+| Vlad Mihalcea | [Index Selectivity / Cardinality](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | Section 4 cardinality |
+| Vlad Mihalcea | [MySQL 8 Functional Indexes](https://vladmihalcea.com/mysql-8-functional-indexes/) | Section 7 functional |
+| PlanetScale | [How indexes work in MySQL](https://planetscale.com/learn/articles/mysql-indexes) | Section 1 / Section 11 |
+| Pinterest Engineering | [Sharding Pinterest's growing data](https://medium.com/pinterest-engineering/sharding-pinterest-how-we-scaled-our-mysql-fleet-3f341e96ca6f) | Section 11 production (indexes + sharding) |
+| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | Section 9 index cost → distributed migration |
+| MySQL official | [CREATE INDEX](https://dev.mysql.com/doc/refman/8.0/en/create-index.html) | Section 1 the six types |
+| MySQL official | [Multi-valued Indexes](https://dev.mysql.com/doc/refman/8.0/en/create-index.html#create-index-multi-valued) | Section 6 |
+| MySQL official | [Hash Index — adaptive hash](https://dev.mysql.com/doc/refman/8.0/en/index-btree-hash.html) | Section 8.1 |
+| Use The Index, Luke! | [The Where Clause](https://use-the-index-luke.com/sql/where-clause) | Section 3 leftmost prefix |
 
-### 12.2 Five interview answers
+### 12.2 Recap — putting this article in your own words
 
-#### Q1. "What index types does MySQL have?"
+If someone who just finished this article were to summarize it through five core questions, here's how the measurements answer them.
 
-> "**Six.** **B-tree** (default; equality / range / sort), **Hash** (Memory-engine-only — InnoDB simulates parts via the **adaptive hash index**), **Spatial** (R-tree, GEOMETRY columns), **Full-text** (inverted index, natural-language search), **Multi-valued** (8.0+, each JSON-array element is a leaf), **Functional** (8.0.13+, expression result like `LOWER()` becomes the key). InnoDB can build five of them (no Hash). The decisions you make most often in production are around **B-tree and its variants** (composite / covering / multi-valued / functional)."
+#### Q. "What index types does MySQL have?"
 
-#### Q2. "What is the leftmost-prefix rule for composite indexes?"
+What this article catalogued is **six types**. **B-tree** (default; equality / range / sort), **Hash** (Memory-engine-only — InnoDB simulates parts via the **adaptive hash index**), **Spatial** (R-tree, GEOMETRY columns), **Full-text** (inverted index, natural-language search), **Multi-valued** (8.0+, each JSON-array element is a leaf), **Functional** (8.0.13+, expression result like `LOWER()` becomes the key). InnoDB can build five of them (no Hash). The decisions you make most often in production are around **B-tree and its variants** (composite / covering / multi-valued / functional).
 
-> "A composite `(a, b, c)` requires matching from the left. `WHERE a=?` ✅, `WHERE a=? AND b=?` ✅, full prefix ✅. But `WHERE b=?` alone ❌, `WHERE b=? AND c=?` also ❌. The reason: the leaf is sorted as a → b → c, and without a, b is **scattered** across the leaf — binary search no longer applies. The phone-book analogy: in a directory sorted by surname-then-given-name, finding 'given name Myeonsoo' alone forces a full scan. Same principle. Operationally: composite column order is **equality (=) first, range (<, >) next, ORDER BY last**. In our measurements, `(owner_id, state, created_at, id)` made Q5 go from 1,497ms to 2.59ms (577x) — leftmost-prefix matching + reverse scan combined ([Measured — Java/Spring])."
+#### Q. "What is the leftmost-prefix rule for composite indexes?"
 
-#### Q3. "Have you ever added an index and the query got slower?"
+What this article showed by measurement is — a composite `(a, b, c)` requires matching from the left. `WHERE a=?` works, `WHERE a=? AND b=?` works, full prefix works. But `WHERE b=?` alone fails to use the index, `WHERE b=? AND c=?` also fails. The reason: the leaf is sorted as a → b → c, and without a, b is **scattered** across the leaf — binary search no longer applies. The phone-book analogy: in a directory sorted by surname-then-given-name, finding "given name Myeonsoo" alone forces a full scan. Same principle. Operationally: composite column order is **equality (=) first, range (<, >) next, ORDER BY last**. In this article's measurements, `(owner_id, state, created_at, id)` made Q5 go from 1,497ms to 2.59ms (577x) — leftmost-prefix matching + reverse scan combined ([Measured — Java/Spring]).
 
-> "Yes. Q2 from this series (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 0.658ms without an index, 13.5ms after adding idx_state_created. **Adding the index made it slower.** Reason: the full scan with LIMIT 5 terminated early after reading ~20 rows, while the index path required secondary-index → table-row random-I/O lookups that exceeded the early-termination savings. The optimizer is statistics-driven cost-based — when stats drift from reality, it picks the wrong plan. Workarounds: (1) index hint (`USE INDEX(PRIMARY)`) to force, (2) `ANALYZE TABLE` to refresh stats, (3) drop the index if no other query needs it. Lesson: **verify with EXPLAIN ANALYZE**. The optimizer is **mostly** right, **never** infallible ([Measured — Java/Spring])."
+#### Q. "Have you ever added an index and the query got slower?"
 
-#### Q4. "When do you reach for Multi-valued or Functional indexes?"
+What this article surfaced as the canonical case is Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 0.658ms without an index, 13.5ms after adding idx_state_created. **Adding the index made it slower.** Reason: the full scan with LIMIT 5 terminated early after reading ~20 rows, while the index path required secondary-index → table-row random-I/O lookups that exceeded the early-termination savings. The optimizer is statistics-driven cost-based — when stats drift from reality, it picks the wrong plan. Workarounds: (1) index hint (`USE INDEX(PRIMARY)`) to force, (2) `ANALYZE TABLE` to refresh stats, (3) drop the index if no other query needs it. Lesson: **verify with EXPLAIN ANALYZE**. The optimizer is **mostly** right, **never** infallible ([Measured — Java/Spring]).
 
-> "**Multi-valued** (8.0+) sits on a JSON-array column — `WHERE JSON_CONTAINS(tags, ?)` / `MEMBER OF` / `JSON_OVERLAPS` becomes index-driven element-level lookups. One row → N leaves (size of the array). Use case: tags / labels / categories — modeling N:M as JSON instead of a join table. Only suitable when array size is small and INSERT frequency is low. **Functional** (8.0.13+) makes an expression like `LOWER(email)` the index key — `WHERE LOWER(email) = ?` pushes down as an index range scan. Use cases: case-insensitive search, date-part match, JSON field extraction. Caveat: the WHERE expression must **match the CREATE INDEX expression exactly** to push down — a single-character difference silences the index. EXPLAIN ANALYZE confirmation that the push-down really fires is mandatory."
+#### Q. "When do you reach for Multi-valued or Functional indexes?"
 
-#### Q5. "Adding N indexes to a table — is the write cost N× higher?"
+What this article catalogued as use cases: **Multi-valued** (8.0+) sits on a JSON-array column — `WHERE JSON_CONTAINS(tags, ?)` / `MEMBER OF` / `JSON_OVERLAPS` becomes index-driven element-level lookups. One row → N leaves (size of the array). Use case: tags / labels / categories — modeling N:M as JSON instead of a join table. Only suitable when array size is small and INSERT frequency is low. **Functional** (8.0.13+) makes an expression like `LOWER(email)` the index key — `WHERE LOWER(email) = ?` pushes down as an index range scan. Use cases: case-insensitive search, date-part match, JSON field extraction. Caveat: the WHERE expression must **match the CREATE INDEX expression exactly** to push down — a single-character difference silences the index. EXPLAIN ANALYZE confirmation that the push-down really fires is mandatory.
 
-> "Strictly, it's **N+1×**. One clustered index (the table itself) + N secondary = **N+1 B-trees** coexisting. Each INSERT updates every B-tree's leaf. In our measurements, INSERT cost with five indexes is theoretically 6×. That's why the standard pattern for bulk loads is **disable indexes during load → enable after** (Bulk Data Loading recommendation). Storage matters too — five indexes on 10M rows ≈ 1.3GB extra (+13% on a 10GB table) → buffer-pool occupancy → clustered-index hit ratio degrades. So **the index that speeds up reads costs writes, storage, and memory** — read/write ratio + write frequency + storage budget all factor in. **Index dieting** (sys.schema_unused_indexes / invisible indexes) is the operational standard ([Measured — Java/Spring])."
+#### Q. "Adding N indexes to a table — is the write cost N× higher?"
+
+What this article showed by measurement is that the cost is exactly **N+1×**. One clustered index (the table itself) + N secondary = **N+1 B-trees** coexisting. Each INSERT updates every B-tree's leaf. In this article's measurements, INSERT cost with five indexes is theoretically 6×. That's why the standard pattern for bulk loads is **disable indexes during load → enable after** (Bulk Data Loading recommendation). Storage matters too — five indexes on 10M rows ≈ 1.3GB extra (+13% on a 10GB table) → buffer-pool occupancy → clustered-index hit ratio degrades. So **the index that speeds up reads costs writes, storage, and memory** — read/write ratio + write frequency + storage budget all factor in. **Index dieting** (sys.schema_unused_indexes / invisible indexes) is the operational standard ([Measured — Java/Spring]).
 
 ---
 
@@ -784,15 +786,15 @@ This compresses every measurement and finding in this post into a process. A PR 
 
 This is **Post #2 of the RDB Mastery series** — the trade-offs of index types. Coming up:
 
-- **Post #3 — Mastering EXPLAIN ANALYZE**: builds on §10's Q2 paradox and the row-constructor push-down trap — how the optimizer **actually picks** an index
+- **Post #3 — Mastering EXPLAIN ANALYZE**: builds on Section 10's Q2 paradox and the row-constructor push-down trap — how the optimizer **actually picks** an index
 - **Post #4 — Safe operational ALTER patterns** (Online DDL / pt-osc / gh-ost): how the **N+1 B-trees** wobble during ALTER
 - **Post #5 — Limits of 1:N joins** (N+1 / EntityGraph / cursor + 1:N): how secondary lookups blow up on top of an ORM
 - **Post #6 — Index dieting**: how to recover the **N+1 B-tree cost** in production
 
 Companion posts:
 
-- [RDB Mastery #1 — InnoDB Index Internals](/en/posts/rdb-mastery-01-innodb-index-internals/) (the **structural** view this post recaps in §2 / §3 / §5)
-- [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) (a cursor application of §3's leftmost prefix)
+- [RDB Mastery #1 — InnoDB Index Internals](/en/posts/rdb-mastery-01-innodb-index-internals/) (the **structural** view this post recaps in Section 2 / Section 3 / Section 5)
+- [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) (a cursor application of Section 3's leftmost prefix)
 - [Understanding MySQL InnoDB Architecture](/en/posts/mysql-innodb-architecture-deep-dive/) (this post on **index types** / that post on **buffer pool / log / undo**)
 
 ---

@@ -97,6 +97,8 @@ The `prev` / `next` pointers form a **doubly-linked list** that connects this pa
 
 ### 1.3 An index = pages connected as a **B+-tree**
 
+A one-line recap of what we've covered so far — **a page is InnoDB's 16KB physical unit**, **rows live inside it sorted by PK**, and each page is **connected to its siblings via prev / next pointers**. Now: **how those pages are wired into parent-child relationships to form an index**.
+
 If a page holds 100 rows, then 10M rows = **100K pages**. Those 100K pages are wired into a **B+-tree** with **root → internal → leaf** levels. The height is typically 3–4: even with 10M rows, **3–4 page reads** reach any single row.
 
 This is the **first principle** of index design: **disk seek count = tree height + leaf scan**. With an index hit, disk seeks = 3–4. With a full scan, disk seeks = 100K. That gap is the source of 1,000x–10,000x latency differences.
@@ -106,6 +108,25 @@ This is the **first principle** of index design: **disk seek count = tree height
 ---
 
 ## 2. Every InnoDB table is a B-tree — the Clustered Index {#clustered-index-table-as-btree}
+
+### 2.0 Definition — **three meanings packed into one sentence**
+
+> **Clustered Index = a single B-tree where the table's data itself is stored, sorted by the key.**
+
+Three things are bundled into that one sentence:
+
+- **(1) The data itself** — the leaf carries the full row (the decisive difference from a secondary index)
+- **(2) Sorted by key** — the physical layout is determined by it (PK / UNIQUE NOT NULL / hidden ROWID, whichever applies)
+- **(3) Exactly one B-tree** — one per table, always present
+
+→ Everything below follows from that definition:
+
+- "A zero-index table" is **impossible** inside InnoDB — the clustered index always exists.
+- "Full Table Scan = Clustered Index Full Scan" — synonyms.
+- "AUTO_INCREMENT = few page splits" — INSERTs always land at the last leaf.
+- "Secondary-index lookup = two walks" — must go through the PK to reach the clustered index.
+
+Sections 2.1 and onward unpack each of those three meanings in order.
 
 ### 2.1 With a PK: PK = clustered index = **the table itself**
 
@@ -165,11 +186,47 @@ That's why the operational standard is always an *explicit* PK. The reason `id B
 
 → The 6-byte storage win of hidden ROWID never outweighs those three operational benefits. That's why the standard is BIGINT.
 
-### 2.3 Implication — **full table scan = clustered-index full scan**
+### 2.3 The truth about the `.ibd` file — the table body literally is B-tree pages
+
+An InnoDB table is stored on disk as **a single `.ibd` file** (with `innodb_file_per_table=ON` by default). Open that file as binary, and what you see is a **stream of B-tree pages laid out in 16KB units**:
+
+```
+orders.ibd file layout (10M rows, ~1.6GB):
+  Page 0   FSP Header (file-space metadata)
+  Page 1   IBUF Bitmap
+  Page 2   INODE
+  Page 3   Clustered Index Root         ← B-tree entry point
+  Page 4   Internal Page (id 1~5M)
+  Page 5   Internal Page (id 5M+1~10M)
+  Page 6   Leaf Page (id=1~100, + full row data)
+  Page 7   Leaf Page (id=101~200, + full row data)
+  ...
+  Page N   Leaf Page (id=9.9M~10M)
+
+  every page = exactly 16KB
+```
+
+→ "The table has data" is **synonymous** with "row bytes live inside the **clustered-index leaf pages** of this .ibd file". There is **no separate raw data file**. `mysqldump` is ultimately just a tool that walks these leaf pages and serializes them row-by-row.
+
+### 2.4 Implication — **full table scan = clustered-index full scan**
 
 A direct consequence: in InnoDB, what people call a "full table scan" actually means **walking the leaf level of the clustered index from start to end**. PK-ordered walk. This is **different from PostgreSQL's heap scan** (walk in physical insertion order, no sort guarantee).
 
 `type=ALL` in EXPLAIN = clustered-index full scan. Revisited in Section 11.
+
+### 2.5 Recap — **Clustered Index = 1, Secondary Index = N**
+
+Everything Section 2 covered so far is about the **clustered index**. A common point of confusion for outside readers:
+
+- **Clustered Index** = **exactly 1 per table**. One of PK / UNIQUE NOT NULL / hidden ROWID **must** be the key. The leaf carries the **full row**. **"Table" and "clustered index" are synonymous.**
+- **Secondary Index** = 0 to N (optional). A **separate** B-tree added via `CREATE INDEX ...`. The leaf carries **only the PK**.
+
+If you build 5 indexes on the same table `orders`:
+
+- 1 clustered (mandatory) + 5 secondary = **6 B-trees coexisting**.
+- "N indexes on the table" means N secondary indexes. The clustered index is the **default** and is excluded from the count.
+
+The next section (Section 3) unpacks the **two-lookup** mechanism of secondary indexes.
 
 ---
 
@@ -228,7 +285,64 @@ PostgreSQL's secondary indexes carry the **heap TID** (physical tuple location) 
 
 → A trade-off, not a winner. InnoDB pays the **two-walk** cost in exchange for **secondary indexes being unaffected by row movement** (as long as PK is stable). PostgreSQL is the opposite. Both are trade-offs.
 
-### 3.3 [Measured — Java/Spring] — Q5 composite-index lookup cost
+### 3.3 PostgreSQL's **heap + index** model — TID / page+slot / HOT, unwound
+
+Let's open up the **internals** of that difference, so the trade-off is clear to outside readers.
+
+#### TID (Tuple Identifier)
+
+A coordinate that **physically points** at one PG row:
+
+```
+TID = (block_number, item_number)
+    = (the N-th 8KB page in the heap file, the K-th slot inside that page)
+```
+
+InnoDB has **no equivalent of TID, no concept of a direct physical address**. Rows are identified by their PK value.
+
+#### Heap (PG) vs Clustered (InnoDB)
+
+| | InnoDB | PostgreSQL |
+|---|---|---|
+| Table body | Clustered B-tree (sorted by PK) | Heap (**no sort**) |
+| Data storage | Rows live inside clustered leaves | Rows live inside heap pages (in INSERT order) |
+| Index leaf | (key, **PK**) | (key, **TID**) |
+| Lookup | secondary → PK → clustered = **2 walks** | secondary → TID → heap = **1 walk** |
+
+#### Page + slot (the inside of a PG heap page)
+
+Inside a PG heap page (8KB):
+
+```
+Page Header (24B)
+Item Pointer Array (slots)  ← grows downward from the top
+  Slot 0: → tuple X
+  Slot 1: → tuple Y
+  Slot 2: → tuple Z
+  ...
+Free Space
+Tuple Z (variable length)   ← grows upward from the bottom
+Tuple Y
+Tuple X
+```
+
+→ The slot is an **indirection layer**. If a tuple shifts within the same page, only the slot needs an update — the TID `(page, slot)` stays valid.
+
+#### Why PG must update **every secondary index** when a row moves
+
+PG UPDATE is not in-place (MVCC):
+
+1. Mark the existing tuple as "deleted".
+2. INSERT the new tuple at a different location — a **new TID**.
+3. Every index's leaf entry must be **updated to the new TID**.
+
+**HOT (Heap-Only Tuple)** optimization: same page + index columns unchanged → skip the index update.
+
+InnoDB pays **zero** of this cost — since secondaries point only at the PK, row movement is irrelevant.
+
+→ Net trade-off: PG wins on **single-walk lookups** but pays **every-index update on UPDATE**. InnoDB pays **two-walk lookups** but enjoys **lighter UPDATEs**.
+
+### 3.4 [Measured — Java/Spring] — Q5 composite-index lookup cost
 
 Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
 
@@ -241,13 +355,68 @@ The composite `(owner_id, state, created_at)` leaf carries `(owner_id, state, cr
 
 That's why "a composite index can feel almost as fast as a covering index". Since PK rides along in every secondary leaf, ordering keys like (created_at, id) becomes covering for free.
 
+### 3.5 Query → which path → what is read
+
+Mapping the **secondary-index lookup mechanisms** of Section 3 onto concrete query examples:
+
+| Query | Which index / path | What is read | Lookups |
+|---|---|---|---|
+| `SELECT * FROM orders WHERE id = 100` | clustered (PK lookup) | leaf = full row | **1** (auto-covering) |
+| `SELECT * FROM orders` | clustered full scan | every leaf | leaf count |
+| `SELECT id FROM orders WHERE owner_id = 1234` | secondary `idx_owner_id` only | leaf = (owner_id, PK) | **1** (covering) |
+| `SELECT amount FROM orders WHERE owner_id = 1234` | secondary → PK → clustered | leaf has no amount → back to clustered | **2** |
+| `SELECT id, owner_id FROM orders WHERE owner_id = 1234` | secondary `idx_owner_id` only | leaf has it all | **1** (covering) |
+
+→ `Using index` in EXPLAIN ANALYZE is the signal for **rows 1, 3, and 5 of this table**. If only `Using where` shows up, you're looking at row 2 or 4.
+
+Keep this mapping in your head as we move into Section 4 — the **precise definition** of a covering index.
+
 ---
 
 ## 4. Covering Index — an index where **the answer lives in the leaf** {#covering-index}
 
-### 4.1 Definition
+### 4.1 Definition — **not an index type, a state of the index × query combination**
 
-If every column the SELECT requires already lives in a secondary-index leaf, the clustered index is never visited. **One lookup, done.** This is a **covering index**.
+**Covering Index** = an index where **every column the query requires** is **already inside the leaf**.
+
+The key nuance — "Covering" is **not a type of index, it's a state relative to a query**. The same index can be:
+
+- Covering for query A (every required column is in the leaf)
+- Non-covering for query B (some required column is missing)
+
+```
+Index idx_owner (owner_id) — leaf automatically holds (owner_id, PK)
+
+Query A: SELECT id FROM orders WHERE owner_id = ?
+  → required: {id=PK, owner_id} / leaf: {owner_id, PK}  → Covering ✅
+
+Query B: SELECT amount FROM orders WHERE owner_id = ?
+  → required: {amount, owner_id} / leaf: {owner_id, PK}  → amount missing ❌
+```
+
+→ **The index itself doesn't know whether it's covering**. The **query** decides at execution time.
+
+#### Composite-index covering
+
+```
+idx_owner_state_amount (owner_id, state, amount)
+leaf: (owner_id, state, amount, PK)
+
+SELECT id, amount WHERE owner_id=? AND state=? → everything is in the leaf → covering ✅
+```
+
+→ The technique: **analyze the queries you run most often → bundle every column they require** into a composite index to make it covering.
+
+#### PK-index auto-covering
+
+The clustered (PK) leaf = **the full row**. Therefore **a PK lookup is always automatically covering** (for any query). However, the term "covering" usually refers specifically to the **effect on a secondary index**.
+
+#### EXPLAIN signals
+
+| Extra | meaning |
+|---|---|
+| `Using index` | **Covering succeeded** — secondary leaf alone answers the query |
+| `Using where` only | secondary → PK → clustered (two-lookup walk) |
 
 In [MySQL — EXPLAIN Output](https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain-extra-information), the `Extra` column showing `Using index` is the **covering** signal.
 
@@ -512,6 +681,45 @@ OR-split cursor measurement from companion Section 3.3:
 
 The companion's three-shape comparison ((a) row constructor 154ms / (b) single-key cursor 0.27ms / (c) OR-split 0.30ms) is about **whether the optimizer pushes the predicate down**. The **B-tree mechanism itself** delivers binary-search primitive whenever push-down works. This post focuses on the latter.
 
+### 8.3 Page-level mechanism — **disk → buffer pool → record**
+
+The **real reason** cursor is fast, expressed in page-access counts.
+
+#### Cursor `WHERE created_at < ? LIMIT 20`
+
+1. Root → Internal → start leaf (binary search, **3~4 page accesses**).
+2. The leaf page (16KB) holds ~100 records.
+3. Decode just the first 20 records inside that page → done.
+
+→ Total page accesses: **3~4**, rows scanned = 20.
+
+#### OFFSET `LIMIT 20 OFFSET 1000000`
+
+1. Root → start leaf (3~4 pages).
+2. Leaf 1: 100 records → count and **throw all away**.
+3. Leaf 1.next → Leaf 2 (read another 16KB).
+4. ... (repeat ~10,000 times)
+5. Reach Leaf 10000 → 1M counted.
+6. Decode the next 20 → return.
+
+→ Total page accesses: **~10,003**, rows scanned = 1,000,020.
+
+#### Mapping to measurements
+
+```
+cursor 0.30ms = ~4 page accesses × warm buffer-pool hits + decoding 20 records
+OFFSET 1M 171ms = ~10,003 page accesses + decoding 1M records (most of the time)
+```
+
+#### Buffer pool / disk layer
+
+InnoDB never reads `.ibd` pages from disk **directly**. Every read goes through the **buffer pool** (in memory):
+
+- Buffer-pool hit (warm): ~0.001 ms / page
+- Buffer-pool miss (random read on SSD): ~0.5~5 ms / page
+
+→ With the buffer pool **warm** in the measurement environment, all 4 pages of the cursor query are buffer-pool hits → that's how 0.30ms materializes.
+
 ---
 
 ## 9. Multi-index — **N B-trees on the same table** {#multiple-indexes}
@@ -624,10 +832,10 @@ graph LR
         P4["..."]
         P5["Secondary B-tree #5<br/>idx_state_created"]
     end
-    L -.SQL ↔ B-tree.-> P1
-    L -.same row.-> P2
-    L -.in N trees.-> P3
-    L -.simultaneously.-> P4
+    L -.->|SQL ↔ B-tree| P1
+    L -.->|same row| P2
+    L -.->|in N trees| P3
+    L -.->|simultaneously| P4
     L -.-> P5
 ```
 

@@ -528,7 +528,7 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 | 시점 | 신호 |
 |---|---|
 | **첫 알람** | (운영 영향 전) 코드 리뷰 단계 |
-| **첫 5분** | 1) lint가 자동 차단 (§5.4)<br/>2) 차단 안 되면 리뷰어가 §4 룰 인용해서 차단 |
+| **첫 5분** | 1) lint가 자동 차단 (5.4장)<br/>2) 차단 안 되면 리뷰어가 4장 룰 인용해서 차단 |
 | **사용자 영향** | 0 (사전 차단) |
 
 → 사후 모니터링이 아니라 **PR 차단**이 핵심. row constructor가 운영에 한 번 풀리면 EXPLAIN ANALYZE 보기 전엔 **눈에 안 보임** (의미가 같으니까).
@@ -566,19 +566,19 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 
 ### Q. "OFFSET 페이지네이션이 1,000만 row 환경에서 무너지는 진짜 이유는?"
 
-OFFSET 의 비용은 **읽고 버리는 row 수** 와 정확히 비례합니다 — [실측] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. 인덱스가 있어도, covering 이어도 마찬가지. **InnoDB 의 B+-tree 인덱스가 *서수 위치 메타데이터를 가지지 않기* 때문**에 N번째 row 로 직접 점프할 수 없고, 1번째부터 N번째까지 *순차로 읽고 버리는* 방법밖에 없습니다. PostgreSQL · Oracle · SQL Server 의 일반적인 B-tree 인덱스도 동일한 구조라 같은 한계가 적용됩니다. 그래서 cursor 페이지네이션이 *대용량 순차 탐색 API 에서 널리 쓰이는 표준 패턴*.
+OFFSET 의 비용은 **읽고 버리는 row 수** 와 정확히 비례합니다 — [실측] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. 인덱스가 있어도, covering 이어도 마찬가지. **InnoDB 의 B+-tree 인덱스가 서수 위치 메타데이터를 가지지 않기 때문**에 N번째 row 로 직접 점프할 수 없고, 1번째부터 N번째까지 순차로 읽고 버리는 방법밖에 없습니다. PostgreSQL · Oracle · SQL Server 의 일반적인 B-tree 인덱스도 동일한 구조라 같은 한계가 적용됩니다. 그래서 cursor 페이지네이션이 **대용량 순차 탐색 API 에서 널리 쓰이는 표준 패턴**.
 
 ### Q. "row constructor `(a,b) < (?,?)` 와 OR 분리 형태가 같은 의미인데 왜 500배 차이가 나나요?"
 
-수학적으로는 lexicographic 비교 — 동일한 row 집합을 반환합니다. 그런데 **MySQL 옵티마이저가 row constructor 를 *index range scan 으로 push down 못 하는* 한계** 가 있습니다 — Bug #16247 은 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). EXPLAIN ANALYZE 한 줄로 검증되는 차이: row constructor 는 `Filter:` 단계로 1,000,000 row 전수 스캔 (154ms), OR 분리는 `Covering index range scan over` 로 rows=20 만 스캔 (0.30ms). PostgreSQL 은 *같은 SQL* 을 정상 push down — **DB 별 옵티마이저 구현이 ANSI SQL 표준 의미를 *어떻게 해석하느냐* 가 본질**.
+수학적으로는 lexicographic 비교 — 동일한 row 집합을 반환합니다. 그런데 **MySQL 옵티마이저가 row constructor 를 index range scan 으로 push down 못 하는 한계** 가 있습니다 — Bug #16247 은 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). EXPLAIN ANALYZE 한 줄로 검증되는 차이: row constructor 는 `Filter:` 단계로 1,000,000 row 전수 스캔 (154ms), OR 분리는 `Covering index range scan over` 로 rows=20 만 스캔 (0.30ms). PostgreSQL 은 같은 SQL 을 정상 push down — **DB 별 옵티마이저 구현이 ANSI SQL 표준 의미를 어떻게 해석하느냐가 본질**.
 
 ### Q. "단순 cursor `created_at < ?` 와 OR 분리 형태 — 운영 표준은 어느 쪽?"
 
-성능은 거의 동일합니다 — 0.27 vs 0.30ms. 차이는 *운영 안전성*: 같은 `created_at` 의 row 가 *동시각에 다수* 존재할 때 (대량 INSERT batch / 마이그레이션 등) 단순 cursor 는 *row 누락* 발생. 같은 ms 에 100건 INSERT 됐는데 그 ms 를 cursor 로 잡으면 다음 페이지에서 일부가 빠집니다. **OR 분리는 (created_at, id) 둘 다 비교해서 *정확한 페이지 경계*** 를 보장. 동시각 row 가 *희소하다고 증명된* 도메인이 아닌 한, 운영 표준은 OR 분리.
+성능은 거의 동일합니다 — 0.27 vs 0.30ms. 차이는 **운영 안전성**: 같은 `created_at` 의 row 가 동시각에 다수 존재할 때 (대량 INSERT batch / 마이그레이션 등) 단순 cursor 는 row 누락 발생. 같은 ms 에 100건 INSERT 됐는데 그 ms 를 cursor 로 잡으면 다음 페이지에서 일부가 빠집니다. **OR 분리는 (created_at, id) 둘 다 비교해서 정확한 페이지 경계** 를 보장. 동시각 row 가 희소하다고 증명된 도메인이 아닌 한, 운영 표준은 OR 분리.
 
-### Q. "OFFSET 페이지네이션을 *완전히* 안 쓰는 게 정답인가요?"
+### Q. "OFFSET 페이지네이션을 **완전히** 안 쓰는 게 정답인가요?"
 
-[실측] 으로 본 결론: **작은 OFFSET (≤ 1,000) 은 OK** — 0.443ms 로 충분히 빠름. 내부 admin / sample 1페이지 처럼 *제한된 사용처* 엔 SQL 단순함이 cursor 보다 가독성 좋음. 단 사용자 노출 *깊은 페이지* 엔 절대 X — 5M OFFSET = 765ms. 본 글의 결론: ADR 룰로 **"OFFSET 사용 시 N ≤ 1,000 만 허용"** 명시 + PR 차단.
+[실측] 으로 본 결론: **작은 OFFSET (≤ 1,000) 은 OK** — 0.443ms 로 충분히 빠름. 내부 admin / sample 1페이지 처럼 제한된 사용처엔 SQL 단순함이 cursor 보다 가독성 좋음. 단 사용자 노출 깊은 페이지엔 절대 X — 5M OFFSET = 765ms. 본 글의 결론: ADR 룰로 **"OFFSET 사용 시 N ≤ 1,000 만 허용"** 명시 + PR 차단.
 
 ---
 

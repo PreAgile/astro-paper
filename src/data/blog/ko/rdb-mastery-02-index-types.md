@@ -49,8 +49,8 @@ tags:
 이 모든 **축** 을 1,000만 row 환경에서 직접 만들고 측정해서 — **언제 무엇을 고를지** 를 결정으로 정리한 것이 본 글입니다.
 
 - 본 글의 입력 자산: 5종 인덱스 cardinality 측정 + Q1~Q5 Before/After + Q2 역설 + 인덱스 storage 1.3GB + 쓰기 latency 5~6배.
-- 자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 의 cursor 가 본 글의 §3 composite + leftmost prefix 위에서 동작하는 한 가지 패턴.
-- 본 글의 깊이: **L2-L3** (RDB Mastery 시리즈 2편 — **종류별 trade-off + 측정 + 빅테크 운영 + 면접 답변**).
+- 자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 의 cursor 가 본 글의 3장 composite + leftmost prefix 위에서 동작하는 한 가지 패턴.
+- 본 글의 깊이: **L2-L3** (RDB Mastery 시리즈 2편 — **종류별 trade-off + 측정 + 빅테크 운영 + 정리 질문**).
 
 ---
 
@@ -103,7 +103,7 @@ tags:
 
 ### 1.3 본 글의 초점 — InnoDB B-tree 와 그 변형
 
-본 글은 운영에서 가장 자주 의사결정이 필요한 InnoDB B-tree 와 그 변형 (Multi-valued / Functional) 에 집중합니다. Hash / Spatial / Full-text 는 §8 에서 한 단락씩 정리. 같은 B-tree 안에서도 — **clustered / secondary / covering / composite** 라는 4가지 **형태** 와 **cardinality** 라는 **효과** 의 결정축으로 풀어봅니다.
+본 글은 운영에서 가장 자주 의사결정이 필요한 InnoDB B-tree 와 그 변형 (Multi-valued / Functional) 에 집중합니다. Hash / Spatial / Full-text 는 8장에서 한 단락씩 정리. 같은 B-tree 안에서도 — **clustered / secondary / covering / composite** 라는 4가지 **형태** 와 **cardinality** 라는 **효과** 의 결정축으로 풀어봅니다.
 
 ---
 
@@ -145,10 +145,10 @@ graph TB
 |---|---|---|
 | **Clustered vs Secondary** | PK 를 어떻게 정의? | 모든 secondary lookup 의 비용 (PK 크기 + 분포) |
 | **Covering 여부** | SELECT 컬럼 전부가 인덱스 leaf 에 있나? | lookup 1번 vs 2번 (수십~수백배 차이) |
-| **Composite 의 컬럼 순서** | (a, b, c) vs (b, a, c) — 어느 게 먼저? | leftmost prefix 룰 (다음 §3) |
-| **Cardinality / Selectivity** | 컬럼의 고유 값 수 / row 수 비율 | 인덱스 효과 자체 (§4) |
+| **Composite 의 컬럼 순서** | (a, b, c) vs (b, a, c) — 어느 게 먼저? | leftmost prefix 룰 (다음 3장) |
+| **Cardinality / Selectivity** | 컬럼의 고유 값 수 / row 수 비율 | 인덱스 효과 자체 (4장) |
 
-이 4축이 본 글의 §3~§5 의 뼈대.
+이 4축이 본 글의 3장~5장의 뼈대.
 
 ---
 
@@ -301,7 +301,7 @@ cardinality
 
 ### 5.1 정의 회수
 
-[1편 §4](/posts/rdb-mastery-01-innodb-index-internals/#covering-index) 에서 다룬 covering index 의 정의 — 한 단락 회수.
+[1편 4장](/posts/rdb-mastery-01-innodb-index-internals/#covering-index) 에서 다룬 covering index 의 정의 — 한 단락 회수.
 
 > SELECT 가 요구하는 컬럼이 **모두** secondary index leaf 에 있으면 — clustered index 안 가도 됨. **1번 lookup 으로 끝**. InnoDB 의 secondary index 는 **항상 PK 가 leaf 에 같이 들어 있어서** `(created_at, id)` 같은 인덱스는 `SELECT id, created_at` 에 자동 covering. EXPLAIN 의 `Using index` = covering 신호.
 
@@ -657,8 +657,8 @@ graph TB
     Q --> Decision{옵티마이저<br/>cost-based decision}
     Decision -->|Before: 인덱스 없음| FS[Full Table Scan + LIMIT 5 조기 종료<br/>= 0.658 ms]
     Decision -->|After: idx_state_created 사용| IS[Index Range Scan + Reverse + Lookup<br/>= 13.5 ms]
-    FS -.-실제 더 빠름.-> Faster[실제로는<br/>Before 가 빠름]
-    IS -.-옵티마이저 잘못 선택.-> Slower[옵티마이저 통계로는<br/>인덱스 사용이 빠를 거라 판단]
+    FS -.->|실제 더 빠름| Faster[실제로는<br/>Before 가 빠름]
+    IS -.->|옵티마이저 잘못 선택| Slower[옵티마이저 통계로는<br/>인덱스 사용이 빠를 거라 판단]
 ```
 
 → 다이어그램 9 해석. 옵티마이저는 **대부분** 옳지만 — **작은 LIMIT + 분포 균등** 조합에서는 full scan + 조기 종료가 더 빠를 수 있음. 그런데 옵티마이저는 통계만 보고 "state='CONFIRMED' 가 25% 분포니 인덱스 사용이 효율적" 으로 판단 → 실제로는 lookup 비용이 더 커서 느려짐.
@@ -720,46 +720,48 @@ graph TB
 
 ---
 
-## 12. 빅테크 사례 + 면접 답변 {#bigtech-references}
+## 12. 빅테크 사례 + 정리 질문 {#bigtech-references}
 
 ### 12.1 빅테크 사례 (URL 검증 ≥ 6개)
 
-| 출처 | 글 | 본 글의 어느 §와 연결 |
+| 출처 | 글 | 본 글의 어느 장과 연결 |
 |---|---|---|
-| LINE Engineering | [MySQL Workbench VISUAL EXPLAIN 으로 인덱스 동작 검증](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | §10 Q2 역설 검출 + §11 EXPLAIN 운영 |
-| 카카오페이 | [JPA Transactional readOnly + set_option QPS 58% 감소](https://tech.kakaopay.com/post/jpa-transactional-bri/) | §5 covering + read 최적화 |
-| 토스 SLASH24 | [Next 코어뱅킹 Oracle→MySQL MVCC + 인덱스 동작 차이](https://haon.blog/article/toss-slash/next-core-banking/) | §2 / §10 옵티마이저 |
-| Vlad Mihalcea | [Index Selectivity / Cardinality](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | §4 cardinality |
-| Vlad Mihalcea | [MySQL 8 Functional Indexes](https://vladmihalcea.com/mysql-8-functional-indexes/) | §7 Functional |
-| PlanetScale | [How indexes work in MySQL](https://planetscale.com/learn/articles/mysql-indexes) | §1 / §11 |
-| Pinterest Engineering | [Sharding Pinterest's growing data](https://medium.com/pinterest-engineering/sharding-pinterest-how-we-scaled-our-mysql-fleet-3f341e96ca6f) | §11 운영 (인덱스 + sharding) |
-| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | §9 인덱스 비용 → 분산 한계 |
-| MySQL 공식 | [CREATE INDEX](https://dev.mysql.com/doc/refman/8.0/en/create-index.html) | §1 6가지 종류 |
-| MySQL 공식 | [Multi-valued Indexes](https://dev.mysql.com/doc/refman/8.0/en/create-index.html#create-index-multi-valued) | §6 |
-| MySQL 공식 | [Hash Index — adaptive hash](https://dev.mysql.com/doc/refman/8.0/en/index-btree-hash.html) | §8.1 |
-| Use The Index, Luke! | [The Where Clause](https://use-the-index-luke.com/sql/where-clause) | §3 leftmost prefix |
+| LINE Engineering | [MySQL Workbench VISUAL EXPLAIN 으로 인덱스 동작 검증](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | 10장 Q2 역설 검출 + 11장 EXPLAIN 운영 |
+| 카카오페이 | [JPA Transactional readOnly + set_option QPS 58% 감소](https://tech.kakaopay.com/post/jpa-transactional-bri/) | 5장 covering + read 최적화 |
+| 토스 SLASH24 | [Next 코어뱅킹 Oracle→MySQL MVCC + 인덱스 동작 차이](https://haon.blog/article/toss-slash/next-core-banking/) | 2장 / 10장 옵티마이저 |
+| Vlad Mihalcea | [Index Selectivity / Cardinality](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | 4장 cardinality |
+| Vlad Mihalcea | [MySQL 8 Functional Indexes](https://vladmihalcea.com/mysql-8-functional-indexes/) | 7장 Functional |
+| PlanetScale | [How indexes work in MySQL](https://planetscale.com/learn/articles/mysql-indexes) | 1장 / 11장 |
+| Pinterest Engineering | [Sharding Pinterest's growing data](https://medium.com/pinterest-engineering/sharding-pinterest-how-we-scaled-our-mysql-fleet-3f341e96ca6f) | 11장 운영 (인덱스 + sharding) |
+| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | 9장 인덱스 비용 → 분산 한계 |
+| MySQL 공식 | [CREATE INDEX](https://dev.mysql.com/doc/refman/8.0/en/create-index.html) | 1장 6가지 종류 |
+| MySQL 공식 | [Multi-valued Indexes](https://dev.mysql.com/doc/refman/8.0/en/create-index.html#create-index-multi-valued) | 6장 |
+| MySQL 공식 | [Hash Index — adaptive hash](https://dev.mysql.com/doc/refman/8.0/en/index-btree-hash.html) | 8.1장 |
+| Use The Index, Luke! | [The Where Clause](https://use-the-index-luke.com/sql/where-clause) | 3장 leftmost prefix |
 
-### 12.2 면접 답변 5개
+### 12.2 정리 — 이 글의 답을 자기 말로
 
-#### Q1. "MySQL 의 인덱스 종류는?"
+이 글을 다 읽은 누군가가 **핵심 5가지 질문** 으로 정리해본다면 — 측정으로 풀었던 답을 자기 말로 풀면 다음과 같습니다.
 
-> "**6가지** 입니다. **B-tree** (디폴트, 등치/범위/정렬 모두), **Hash** (Memory engine 전용 — InnoDB 는 **adaptive hash** 로 자동 최적화), **Spatial** (R-tree, GEOMETRY 컬럼), **Full-text** (역인덱스, 자연어 검색), **Multi-valued** (8.0+, JSON 배열의 각 원소가 leaf), **Functional** (8.0.13+, `LOWER()` 같은 표현식 결과가 키). InnoDB 가 만들 수 있는 것은 5가지 (Hash 제외). 운영에서 가장 자주 결정에 들어가는 것은 **B-tree 와 그 변형** (composite / covering / multi-valued / functional)."
+#### Q. "MySQL 의 인덱스 종류는?"
 
-#### Q2. "Composite index 의 leftmost prefix 룰이란?"
+이 글이 정리한 인덱스 종류는 **6가지**. **B-tree** (디폴트, 등치/범위/정렬 모두), **Hash** (Memory engine 전용 — InnoDB 는 **adaptive hash** 로 자동 최적화), **Spatial** (R-tree, GEOMETRY 컬럼), **Full-text** (역인덱스, 자연어 검색), **Multi-valued** (8.0+, JSON 배열의 각 원소가 leaf), **Functional** (8.0.13+, `LOWER()` 같은 표현식 결과가 키). InnoDB 가 만들 수 있는 것은 5가지 (Hash 제외). 운영에서 가장 자주 결정에 들어가는 것은 **B-tree 와 그 변형** (composite / covering / multi-valued / functional).
 
-> "복합 인덱스 `(a, b, c)` 는 **왼쪽부터** 차례로 매칭해야 인덱스가 동작합니다. `WHERE a=?` ✅, `WHERE a=? AND b=?` ✅, 전체 ✅. 그런데 `WHERE b=?` 단독은 ❌, `WHERE b=? AND c=?` 도 ❌. 이유: 인덱스의 leaf 가 a → b → c 순으로 **정렬** 되어 있어서 — a 가 빠지면 b 가 **흩어져 있어** binary search 가 안 됩니다. 전화번호부에 비유하면 성+이름 정렬 책에서 '이름이 면수' 만으로는 책 전체를 봐야 함. 같은 원리. 운영 결정: composite 컬럼 순서는 **등치 (=) 먼저, 범위 (<, >) 나중, ORDER BY 컬럼 가장 뒤**. 본 시리즈 측정에서 `(owner_id, state, created_at, id)` composite 로 Q5 1,497ms → 2.59ms (577배) — leftmost prefix 매칭 + reverse scan 의 효과 ([실측 — Java/Spring])."
+#### Q. "Composite index 의 leftmost prefix 룰이란?"
 
-#### Q3. "인덱스를 추가했는데 쿼리가 느려진 적 있나요?"
+이 글이 측정으로 보여준 것은 — 복합 인덱스 `(a, b, c)` 는 **왼쪽부터** 차례로 매칭해야 인덱스가 동작한다는 사실. `WHERE a=?` 사용, `WHERE a=? AND b=?` 사용, 전체 사용. 그런데 `WHERE b=?` 단독은 인덱스 무효, `WHERE b=? AND c=?` 도 무효. 이유는 인덱스의 leaf 가 a → b → c 순으로 **정렬** 되어 있어서 — a 가 빠지면 b 가 **흩어져 있어** binary search 가 안 되기 때문. 전화번호부에 비유하면 성+이름 정렬 책에서 "이름이 면수" 만으로는 책 전체를 봐야 함. 같은 원리. 운영 결정: composite 컬럼 순서는 **등치 (=) 먼저, 범위 (<, >) 나중, ORDER BY 컬럼 가장 뒤**. 본 시리즈 측정에서 `(owner_id, state, created_at, id)` composite 로 Q5 1,497ms → 2.59ms (577배) — leftmost prefix 매칭 + reverse scan 의 효과 ([실측 — Java/Spring]).
 
-> "있습니다. 본 시리즈의 Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 인덱스 없을 때 0.658ms 였는데 idx_state_created 추가 후 13.5ms. **인덱스가 **느리게** 만든 케이스**. 이유: full scan + LIMIT 5 조기 종료가 ~20개 row 만 읽고 끝나는 반면, 인덱스 사용은 secondary index → table row lookup 의 random I/O 비용이 더 컸음. 옵티마이저는 통계 기반 cost-based decision — 통계가 현실과 어긋나면 잘못된 plan 선택. 해법: (1) 인덱스 hint (`USE INDEX(PRIMARY)`) 로 강제, (2) `ANALYZE TABLE` 로 통계 갱신, (3) 정말 그 인덱스가 다른 쿼리에 안 쓰이면 제거. 교훈: **EXPLAIN ANALYZE 로 직접 확인**. 옵티마이저는 **대부분** 옳지만 **항상** 옳지 않음 ([실측 — Java/Spring])."
+#### Q. "인덱스를 추가했는데 쿼리가 느려진 적 있나요?"
 
-#### Q4. "Multi-valued / Functional index 는 언제 쓰나요?"
+이 글이 측정으로 보여준 대표 사례가 있습니다. Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 인덱스 없을 때 0.658ms 였는데 idx_state_created 추가 후 13.5ms. **인덱스가 느리게 만든 케이스**. 이유: full scan + LIMIT 5 조기 종료가 ~20개 row 만 읽고 끝나는 반면, 인덱스 사용은 secondary index → table row lookup 의 random I/O 비용이 더 컸음. 옵티마이저는 통계 기반 cost-based decision — 통계가 현실과 어긋나면 잘못된 plan 선택. 해법: (1) 인덱스 hint (`USE INDEX(PRIMARY)`) 로 강제, (2) `ANALYZE TABLE` 로 통계 갱신, (3) 정말 그 인덱스가 다른 쿼리에 안 쓰이면 제거. 교훈: **EXPLAIN ANALYZE 로 직접 확인**. 옵티마이저는 **대부분** 옳지만 **항상** 옳지 않음 ([실측 — Java/Spring]).
 
-> "**Multi-valued** (8.0+) 는 JSON 배열 컬럼에 — `WHERE JSON_CONTAINS(tags, ?)` / `MEMBER OF` / `JSON_OVERLAPS` 같은 **원소 단위 검색** 이 인덱스로 처리됨. row 1개당 leaf N개 (배열 크기 만큼). 사용처: 태그 / 라벨 / 카테고리 같이 **N:M 을 별도 join 테이블 안 만들고 JSON 으로** 처리할 때. 단 배열 크기가 작고 INSERT 빈도가 낮은 경우만 적합. **Functional** (8.0.13+) 은 `LOWER(email)` 같은 표현식 결과를 인덱스 키로 — `WHERE LOWER(email) = ?` 가 **index range scan** 으로 push down. 사용처: 대소문자 구분 없는 검색, 날짜 일부 매칭, JSON 필드 추출 매칭. 한계: WHERE 의 표현식이 CREATE INDEX 의 표현식과 **정확히 일치** 해야 push down — 한 글자라도 다르면 인덱스 무효. EXPLAIN ANALYZE 로 **실제 push down 확인** 이 필수."
+#### Q. "Multi-valued / Functional index 는 언제 쓰나요?"
 
-#### Q5. "테이블에 인덱스 N개 추가 = 쓰기 비용 N배인가요?"
+이 글이 정리한 사용처는 다음과 같습니다. **Multi-valued** (8.0+) 는 JSON 배열 컬럼에 — `WHERE JSON_CONTAINS(tags, ?)` / `MEMBER OF` / `JSON_OVERLAPS` 같은 **원소 단위 검색** 이 인덱스로 처리됨. row 1개당 leaf N개 (배열 크기 만큼). 사용처: 태그 / 라벨 / 카테고리 같이 **N:M 을 별도 join 테이블 안 만들고 JSON 으로** 처리할 때. 단 배열 크기가 작고 INSERT 빈도가 낮은 경우만 적합. **Functional** (8.0.13+) 은 `LOWER(email)` 같은 표현식 결과를 인덱스 키로 — `WHERE LOWER(email) = ?` 가 **index range scan** 으로 push down. 사용처: 대소문자 구분 없는 검색, 날짜 일부 매칭, JSON 필드 추출 매칭. 한계: WHERE 의 표현식이 CREATE INDEX 의 표현식과 **정확히 일치** 해야 push down — 한 글자라도 다르면 인덱스 무효. EXPLAIN ANALYZE 로 **실제 push down 확인** 이 필수.
 
-> "정확히는 **N+1배** 입니다. clustered index 1개 (테이블 자체) + secondary index N개 = **B-tree N+1개** 가 동시에 존재. INSERT 1건 = 모든 B-tree 의 leaf 갱신. 본 시리즈 측정에서 인덱스 5종 추가 후 INSERT 비용은 이론상 6배. 그래서 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** (Bulk Data Loading 권장). storage 도 영향 — 1,000만 row 에 5종 인덱스 = 약 1.3GB 추가 (10GB 테이블 대비 +13%) → buffer pool 점유 → clustered hit 율까지 영향. 그래서 **읽기 빠르게 한 인덱스가 쓰기 / storage / 메모리 모두 비용**. **읽기 / 쓰기 비율 + 쓰기 빈도 + storage 예산** 모두 따져서 결정. 인덱스 다이어트 (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring])."
+#### Q. "테이블에 인덱스 N개 추가 = 쓰기 비용 N배인가요?"
+
+이 글이 측정으로 보여준 것은 정확히 **N+1배**. clustered index 1개 (테이블 자체) + secondary index N개 = **B-tree N+1개** 가 동시에 존재. INSERT 1건 = 모든 B-tree 의 leaf 갱신. 본 시리즈 측정에서 인덱스 5종 추가 후 INSERT 비용은 이론상 6배. 그래서 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** (Bulk Data Loading 권장). storage 도 영향 — 1,000만 row 에 5종 인덱스 = 약 1.3GB 추가 (10GB 테이블 대비 +13%) → buffer pool 점유 → clustered hit 율까지 영향. 그래서 **읽기 빠르게 한 인덱스가 쓰기 / storage / 메모리 모두 비용**. **읽기 / 쓰기 비율 + 쓰기 빈도 + storage 예산** 모두 따져서 결정. 인덱스 다이어트 (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring]).
 
 ---
 
@@ -784,14 +786,14 @@ graph TB
 
 본 글은 **RDB Mastery 시리즈 2편**. **인덱스 종류별 trade-off** 측면. 다음 편들에서:
 
-- **3편 — EXPLAIN ANALYZE 마스터**: 본 글의 §10 Q2 역설 + row constructor push down 함정 — 옵티마이저가 인덱스를 **어떻게 선택** 하는지의 깊이
+- **3편 — EXPLAIN ANALYZE 마스터**: 본 글의 10장 Q2 역설 + row constructor push down 함정 — 옵티마이저가 인덱스를 **어떻게 선택** 하는지의 깊이
 - **4편 — 운영 ALTER 안전 패턴** (Online DDL / pt-osc / gh-ost): 본 글의 **N+1개 B-tree** 가 ALTER 시 어떻게 흔들리는지
 - **5편 — 1:N 조인의 한계** (N+1 / EntityGraph / cursor + 1:N): 본 글의 secondary lookup 이 ORM 위에서 어떻게 폭증하는지
 - **6편 — 인덱스 다이어트**: 본 글의 **N+1개 B-tree 비용** 을 운영에서 어떻게 회수하는지
 
 자매글:
-- [RDB Mastery #1 — InnoDB 인덱스 내부 구조](/posts/rdb-mastery-01-innodb-index-internals/) (본 글의 §2 / §3 / §5 의 **구조** 측면 회수)
-- [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) (본 글의 §3 leftmost prefix 의 **cursor 응용** 사례)
+- [RDB Mastery #1 — InnoDB 인덱스 내부 구조](/posts/rdb-mastery-01-innodb-index-internals/) (본 글의 2장 / 3장 / 5장의 **구조** 측면 회수)
+- [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) (본 글의 3장 leftmost prefix 의 **cursor 응용** 사례)
 - [MySQL InnoDB 아키텍처 이해](/posts/mysql-innodb-architecture-deep-dive/) (본 글이 **index 종류** 측면 / 자매글이 **buffer pool / log / undo** 측면)
 
 ---

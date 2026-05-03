@@ -97,6 +97,8 @@ page 안에는 여러 row 가 **PK 정렬 순서** 로 저장됩니다. 다이�
 
 ### 1.3 인덱스 = page 들이 **B+-tree** 로 연결된 구조
 
+지금까지 본 것을 한 줄로 다시 정리하면 — **page 는 InnoDB 의 16KB 물리 단위** 이고, 그 안에 **row 들이 PK 정렬된 채로** 들어 있고, 양옆 page 와 **prev / next 로 연결** 되어 있습니다. 이제 그 page 들이 **어떻게 부모-자식 관계로 묶여서 인덱스가 되는지**.
+
 page 1장에 100개 row 가 들어가면 1,000만 row = page **10만 장**. 이 10만 장을 **B+-tree** 로 묶어서 **root → internal → leaf** 의 트리를 만듭니다. height 가 보통 3~4 — 1,000만 row 도 **page 3-4장만 읽으면** 임의의 row 1개에 도달.
 
 이 점이 인덱스 설계의 **제1원칙**. **disk seek 횟수 = tree height + leaf scan**. 인덱스 hit 시 disk seek = 3~4. full scan 시 disk seek = 100K. 이 차이가 latency 1,000배~10,000배 의 본질.
@@ -106,6 +108,25 @@ page 1장에 100개 row 가 들어가면 1,000만 row = page **10만 장**. 이 
 ---
 
 ## 2. 모든 InnoDB 테이블은 B-tree — Clustered Index {#clustered-index-table-as-btree}
+
+### 2.0 정의 — **세 가지 의미가 한 문장에**
+
+> **Clustered Index = 테이블의 데이터 자체가 키 순서로 정렬되어 저장된 B-tree 1개.**
+
+이 한 문장에 세 가지가 결합:
+
+- **① 데이터 자체** — leaf 가 전체 row (secondary 와 결정적 차이)
+- **② 키 순서로 정렬** — physical layout 결정 (PK / UNIQUE NOT NULL / hidden ROWID 중 하나)
+- **③ B-tree 1개** — 테이블당 정확히 하나 (반드시 존재)
+
+→ 이 정의에서 다음이 모두 도출:
+
+- "테이블에 인덱스 0개" 가 InnoDB 안에서 **불가능** — clustered 가 항상 존재
+- "Full Table Scan = Clustered Index Full Scan" — 동의어
+- "AUTO_INCREMENT = page split 적음" — 항상 마지막 leaf 에만 INSERT
+- "Secondary index lookup = 2번 walk" — PK 거쳐서 clustered 까지
+
+다음 §2.1 부터 이 세 가지를 차례로.
 
 ### 2.1 PK 가 있을 때: PK = clustered index = **테이블 자체**
 
@@ -165,11 +186,47 @@ graph TB
 
 → 6-byte hidden ROWID 의 *공간 이득* 이 위 3가지 *운영 안정성* 보다 결코 크지 않습니다. 그래서 표준은 BIGINT.
 
-### 2.3 정리 — **full table scan = clustered index full scan**
+### 2.3 .ibd 파일의 **진실** — 테이블 본체가 곧 B-tree page 들
+
+InnoDB 의 한 테이블은 디스크에 **하나의 `.ibd` 파일** 로 저장됩니다 (`innodb_file_per_table=ON` 기본). 그 파일을 binary 로 열면 보이는 것 — **B-tree 의 page 들이 16KB 단위로 나열**:
+
+```
+orders.ibd 파일 구조 (1,000만 row, 약 1.6GB):
+  Page 0   FSP Header (file space 메타)
+  Page 1   IBUF Bitmap
+  Page 2   INODE
+  Page 3   Clustered Index Root         ← B-tree 시작점
+  Page 4   Internal Page (id 1~5M)
+  Page 5   Internal Page (id 5M+1~10M)
+  Page 6   Leaf Page (id=1~100, + 전체 row 데이터)
+  Page 7   Leaf Page (id=101~200, + 전체 row 데이터)
+  ...
+  Page N   Leaf Page (id=9.9M~10M)
+
+  각 page = 정확히 16KB
+```
+
+→ "테이블에 데이터가 있다" = "이 .ibd 파일의 **clustered index leaf page** 안에 row 의 byte 가 있다" 와 **동의어**. 별도의 raw 데이터 파일이 **없습니다**. `mysqldump` 도 결국 이 leaf page 들을 walk 해서 row 단위로 직렬화하는 도구.
+
+### 2.4 정리 — **full table scan = clustered index full scan**
 
 clustered index 가 곧 테이블이라는 사실의 직접적 의미는 — "full table scan" 이라는 표현은 InnoDB 에서 **clustered index 의 leaf 를 처음부터 끝까지 walk** 하는 것을 뜻합니다. PK 순서로 walk. **PostgreSQL 의 heap scan** (저장 순서 walk) 과 다릅니다.
 
 EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 11장 에서 다시 봅니다.
+
+### 2.5 정리 — **Clustered Index = 1개, Secondary Index = N개**
+
+지금까지 §2 가 다룬 게 **clustered index**. 외부 독자가 자주 혼동하는 부분:
+
+- **Clustered Index** = 테이블당 **정확히 1개**. PK / UNIQUE NOT NULL / hidden ROWID 중 하나가 **반드시** 키. leaf 가 **전체 row**. **테이블 = clustered index** 가 동의어.
+- **Secondary Index** = 0~N개 (선택적). `CREATE INDEX ...` 로 추가하는 **별도** B-tree. leaf 가 **PK 만** 가짐.
+
+같은 테이블 `orders` 에 인덱스 5개 만들면:
+
+- clustered 1개 (반드시) + secondary 5개 = **B-tree 6개 동시 존재**
+- "테이블에 인덱스 N개" = secondary index N개를 의미. clustered 는 **기본값** 이라 셈에서 빠짐.
+
+다음 §3 에서 secondary 의 **2번 lookup** 메커니즘.
 
 ---
 
@@ -228,7 +285,64 @@ PostgreSQL 의 secondary index 는 leaf 가 **heap tuple 의 물리 위치 (TID)
 
 → trade-off. InnoDB 는 **PK 를 통한 1단 indirection** 으로 **row 이동 시 secondary 무영향** 의 이득을 얻고, **2번 lookup** 의 비용을 받음. PostgreSQL 은 그 반대. **둘 다 trade-off** 일 뿐 한쪽이 우월하지 않습니다.
 
-### 3.3 [실측 — Java/Spring] — Q5 composite index 의 lookup 비용
+### 3.3 PostgreSQL 의 **heap + index** 모델 — TID / page+slot / HOT 풀어 보기
+
+이 차이의 **내부** 를 좀 더 풀어 봅니다. 외부 독자에게도 두 DB 의 trade-off 가 명확해지도록.
+
+#### TID (Tuple Identifier)
+
+PG 의 row 1개를 **물리적으로 가리키는** 좌표:
+
+```
+TID = (block_number, item_number)
+    = (heap 파일의 N번째 8KB 페이지, 그 페이지 안의 K번째 slot)
+```
+
+InnoDB 에는 TID 같은 **직접 물리 주소 개념 자체가 없음**. PK 값으로 row 를 식별.
+
+#### Heap (PG) vs Clustered (InnoDB)
+
+| | InnoDB | PostgreSQL |
+|---|---|---|
+| 테이블 본체 | Clustered B-tree (PK 정렬) | Heap (정렬 **없음**) |
+| 데이터 저장 | clustered leaf 안에 row | heap 의 page 안에 row (INSERT 순서) |
+| 인덱스 leaf | (key, **PK**) | (key, **TID**) |
+| Lookup | secondary → PK → clustered = **2번** | secondary → TID → heap = **1번** |
+
+#### Page + Slot (PG heap 의 내부)
+
+PG heap 의 page (8KB) 안:
+
+```
+Page Header (24B)
+Item Pointer Array (slot)  ← page 위에서 아래로
+  Slot 0: → tuple X
+  Slot 1: → tuple Y
+  Slot 2: → tuple Z
+  ...
+Free Space
+Tuple Z (가변 길이)        ← page 아래에서 위로
+Tuple Y
+Tuple X
+```
+
+→ Slot 은 **간접 참조**. tuple 이 같은 page 안에서 이동해도 slot 만 갱신하면 됨 — TID `(page, slot)` 그대로 유효.
+
+#### Row 이동 시 PG 가 **모든 secondary index** 갱신 이유
+
+PG 의 UPDATE 는 in-place 가 아님 (MVCC):
+
+1. 기존 tuple "삭제됨" 마크
+2. 새 tuple 다른 위치에 INSERT — **새 TID**
+3. 모든 index 의 leaf entry 가 **새 TID 로 갱신** 필요
+
+**HOT (Heap-Only Tuple)** 최적화: 같은 page 안 + 인덱스 컬럼 unchanged → index 갱신 skip.
+
+InnoDB 는 이 비용 **0** — secondary 가 PK 만 가리키니 row 이동 무영향.
+
+→ trade-off 정리: PG 는 **1번 lookup** 이득 / **UPDATE 시 모든 index 갱신** 비용. InnoDB 는 **2번 lookup** 비용 / **UPDATE 가벼움** 이득.
+
+### 3.4 [실측 — Java/Spring] — Q5 composite index 의 lookup 비용
 
 측정한 Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
 
@@ -241,13 +355,68 @@ PostgreSQL 의 secondary index 는 leaf 가 **heap tuple 의 물리 위치 (TID)
 
 이게 "composite index 가 거의 covering 처럼 빠른 이유". leaf 에 PK 가 **공짜로** 따라다니므로 (created_at, id) 같은 순서 키를 만들면 자연스럽게 covering 됩니다.
 
+### 3.5 쿼리 → 어느 path → 무엇을 읽는가
+
+지금까지 §3 가 다룬 **secondary index lookup 메커니즘** 을 쿼리 예시로 매핑:
+
+| 쿼리 | 어느 인덱스 / path | 무엇을 읽나 | lookup 횟수 |
+|---|---|---|---|
+| `SELECT * FROM orders WHERE id = 100` | clustered (PK lookup) | leaf = 전체 row | **1번** (자동 covering) |
+| `SELECT * FROM orders` | clustered full scan | 모든 leaf | leaf 수만큼 |
+| `SELECT id FROM orders WHERE owner_id = 1234` | secondary `idx_owner_id` 만 | leaf = (owner_id, PK) | **1번** (covering) |
+| `SELECT amount FROM orders WHERE owner_id = 1234` | secondary → PK → clustered | leaf 에 amount 없음 → clustered 다시 | **2번** |
+| `SELECT id, owner_id FROM orders WHERE owner_id = 1234` | secondary `idx_owner_id` 만 | leaf 에 다 있음 | **1번** (covering) |
+
+→ EXPLAIN ANALYZE 의 `Using index` 는 **이 표 첫째 / 셋째 / 다섯째 케이스** 의 신호. `Using where` 만 있으면 둘째 / 넷째.
+
+이 매핑을 머릿속에 두고 §4 covering index 의 **정확한 정의** 로.
+
 ---
 
 ## 4. Covering Index — **PK 까지 안 가도 답이 있는** 인덱스 {#covering-index}
 
-### 4.1 정의
+### 4.1 정의 — **인덱스 type 이 아니라 인덱스 × 쿼리 조합의 상태**
 
-SELECT 가 요구하는 컬럼이 **모두** secondary index leaf 에 있으면 — clustered index 안 가도 됩니다. **1번 lookup** 으로 끝. 이걸 **covering index** 라고 부릅니다.
+**Covering Index** = 쿼리가 **요구하는 모든 컬럼** 이 인덱스의 **leaf 안에 다 들어 있는 경우** 의 인덱스.
+
+핵심 nuance — "Covering" 은 **인덱스의 type 이 아니라 쿼리에 대한 상태**. 같은 인덱스가:
+
+- 쿼리 A 에는 covering (요구 컬럼이 다 leaf 에 있음)
+- 쿼리 B 에는 non-covering (요구 컬럼이 leaf 에 부족)
+
+```
+인덱스 idx_owner (owner_id) — leaf 에 (owner_id, PK) 자동 포함
+
+쿼리 A: SELECT id FROM orders WHERE owner_id = ?
+  → 요구: {id=PK, owner_id} / leaf: {owner_id, PK}  → Covering ✅
+
+쿼리 B: SELECT amount FROM orders WHERE owner_id = ?
+  → 요구: {amount, owner_id} / leaf: {owner_id, PK}  → amount 없음 ❌
+```
+
+→ **인덱스 자체는 covering 인지 모름**. **쿼리 시점에** covering 여부 결정.
+
+#### Composite Index 의 covering
+
+```
+idx_owner_state_amount (owner_id, state, amount)
+leaf: (owner_id, state, amount, PK)
+
+SELECT id, amount WHERE owner_id=? AND state=? → 다 leaf 에 있음 → covering ✅
+```
+
+→ **자주 쓰는 쿼리 분석 → 그 쿼리가 요구하는 모든 컬럼** 을 composite 로 묶어 covering 만들기.
+
+#### PK 인덱스의 자동 covering
+
+Clustered (PK) 의 leaf = **전체 row**. 따라서 **PK lookup 은 항상 자동 covering** (어떤 쿼리든). 단 "covering" 용어는 보통 **secondary index 의 효과** 를 말함.
+
+#### EXPLAIN 신호
+
+| Extra | 의미 |
+|---|---|
+| `Using index` | **Covering 성공** — secondary leaf 만으로 답 |
+| `Using where` only | secondary → PK → clustered (2번 lookup) |
 
 [MySQL 공식 — EXPLAIN Output](https://dev.mysql.com/doc/refman/8.0/en/explain-output.html#explain-extra-information) 의 Extra 컬럼에 `Using index` 가 보이면 **covering** 신호.
 
@@ -512,6 +681,45 @@ sequenceDiagram
 
 자매글에서 다룬 (a) row constructor 154ms / (b) 단순 cursor 0.27ms / (c) OR 분리 0.30ms 의 **세 형태 차이** 는 **옵티마이저가 push down 하느냐** 의 문제. **B-tree 메커니즘 자체** 는 cursor 가 push down 잘 되면 항상 binary search primitive. 본 글은 후자에 집중.
 
+### 8.3 page-level 메커니즘 — **디스크 → buffer pool → record** 까지
+
+cursor 가 빠른 **진짜 이유** 를 page 접근 횟수 차원에서:
+
+#### Cursor `WHERE created_at < ? LIMIT 20`
+
+1. Root → Internal → Leaf 시작점 (binary search, **3~4 page 접근**)
+2. Leaf page 1장 (16KB) 안에 record ~100개
+3. 그 page 안에서 LIMIT 20 만 디코딩 → 끝
+
+→ 총 page 접근 **3~4개**, rows scanned = 20
+
+#### OFFSET `LIMIT 20 OFFSET 1000000`
+
+1. Root → leaf 시작점 (3~4 page)
+2. Leaf 1 record 100개 → 카운트 후 **전부 버림**
+3. Leaf 1.next → Leaf 2 (16KB 또 읽음)
+4. ... (1만 번 반복)
+5. Leaf 10000 도달 → 1M 카운트 완료
+6. 다음 20개 디코딩 → 반환
+
+→ 총 page 접근 **약 10,003개**, rows scanned = 1,000,020
+
+#### 측정값과의 매핑
+
+```
+cursor 0.30ms = 약 4 page 접근 × buffer pool warm hit + LIMIT 20 record 디코딩
+OFFSET 1M 171ms = 약 10,003 page 접근 + 1M record 디코딩 (대부분 시간)
+```
+
+#### Buffer pool / 디스크 layer
+
+InnoDB 는 디스크 .ibd 파일 의 page 를 **직접** 안 읽음. 항상 **buffer pool** (메모리) 거침:
+
+- Buffer pool hit (warm): ~0.001 ms / page
+- Buffer pool miss (디스크 random read SSD): ~0.5~5 ms / page
+
+→ 측정 환경의 buffer pool 이 **워밍업** 된 상태에서 cursor 의 4 page 가 모두 hit → 0.30ms 의 본질.
+
 ---
 
 ## 9. 다중 인덱스 — 같은 테이블에 **N개 B-tree** {#multiple-indexes}
@@ -624,10 +832,10 @@ graph LR
         P4["..."]
         P5["Secondary B-tree #5<br/>idx_state_created"]
     end
-    L -.SQL ↔ B-tree 매핑.-> P1
-    L -.같은 row.-> P2
-    L -.가 N개 트리에.-> P3
-    L -.동시에 존재.-> P4
+    L -.->|SQL ↔ B-tree 매핑| P1
+    L -.->|같은 row| P2
+    L -.->|가 N개 트리에| P3
+    L -.->|동시에 존재| P4
     L -.-> P5
 ```
 
