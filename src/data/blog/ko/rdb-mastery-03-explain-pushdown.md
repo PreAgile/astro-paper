@@ -3,7 +3,6 @@ title: "RDB Mastery #3 — EXPLAIN ANALYZE 마스터: Push Down 함정과 Index 
 description: "EXPLAIN ANALYZE 의 연산자 트리 한 줄을 읽을 줄 알면 옵티마이저의 결정을 직접 검증할 수 있습니다. Filter vs Index Range Scan over 한 단어 차이가 push down 성공 vs 실패. ANSI SQL 표준 row constructor (a,b)<(?,?) 가 MySQL 옵티마이저의 whitelist 패턴에 안 맞아서 push down 실패 — Bug #16247 은 2006년에 등록된 오래된 known limitation (현재 트래커는 duplicate 처리). Index Selection 도 옵티마이저의 cost-based 판단 — Q2 역설 (LIMIT 5 의 작은 수에서 옵티마이저가 잘못된 인덱스 선택해서 인덱스 추가가 느려짐). 100% 의 시간 옵티마이저는 옳지 않습니다. 1,000만 row 에서 측정한 5개 EXPLAIN ANALYZE 출력을 한 줄씩 해석하면서 push down 메커니즘과 cost-based index selection 의 내부를 풀어봅니다."
 author: 김면수
 pubDatetime: 2026-05-03T17:30:00.000Z
-slug: rdb-mastery-03-explain-pushdown
 featured: true
 draft: false
 tags:

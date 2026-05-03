@@ -3,7 +3,6 @@ title: "RDB Mastery #1 — InnoDB 인덱스 내부 구조: No-Index 부터 다�
 description: "인덱스를 안 걸어도 InnoDB 안에서는 이미 B-tree 입니다. PK 가 clustered index = 테이블 자체. Secondary index 는 PK 를 가리키는 별도 B-tree. Covering index 는 PK 까지 안 가도 답이 있는 인덱스. Reverse scan 은 leaf 의 양방향 linked list 를 거꾸로 walk. OFFSET 이 건너뛸 수 없는 이유는 B-tree 가 row 카운터를 안 가지기 때문. Cursor 가 빠른 이유는 WHERE 가 binary search primitive 를 트리거하기 때문. 다중 인덱스 = 같은 테이블에 N 개 B-tree. 1,000만 row 환경에서 [실측] Q3 covering 2,476배 / Q5 composite 577배 / OFFSET 1M 171ms / cursor 0.30ms — 다이어그램 10개로 끝까지 풀어봤습니다."
 author: 김면수
 pubDatetime: 2026-05-03T15:00:00.000Z
-slug: rdb-mastery-01-innodb-index-internals
 featured: true
 draft: false
 tags:

@@ -3,7 +3,6 @@ title: "Decoding HikariCP Pool Exhaustion via JVM Thread Dump — What TIMED_WAI
 description: "When the pool exhaustion alert fires, staring at application code yields nothing. The thread dump from jstack is the real evidence — every worker thread is frozen in HikariCP at TIMED_WAITING (parked). I walk through the JVM Thread State machine, LockSupport.parkNanos, the ConcurrentBag and SynchronousQueue mechanics, and how EXP-09 [measured] (timeout 5s = 100% pass / 1s = 16.7%) maps line-by-line to the dump — diagnosing pool exhaustion from a single dump in production."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00.000Z
-slug: jvm-java-mastery-01-hikari-pool-thread-dump
 featured: true
 draft: false
 tags:

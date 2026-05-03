@@ -3,7 +3,6 @@ title: "JVM Thread Dump로 분해한 HikariCP 풀 고갈 — TIMED_WAITING (park
 description: "풀 고갈 알람이 울렸을 때 애플리케이션 코드만 들여다보면 답이 안 나옵니다. jstack으로 받아본 thread dump가 진짜 증거 — 모든 worker thread가 HikariCP 안에서 TIMED_WAITING (parked) 상태로 멈춰 있습니다. JVM Thread State 머신, LockSupport.parkNanos, ConcurrentBag·SynchronousQueue 의 동작, 그리고 EXP-09 [실측] (timeout 5s 100% / 1s 16.7%)가 thread dump 한 줄과 정확히 어떻게 매핑되는지 — 운영 중 풀 고갈을 dump 한 장으로 진단하는 방법을 라인 단위로 풀어봤습니다."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00.000Z
-slug: jvm-java-mastery-01-hikari-pool-thread-dump
 featured: true
 draft: false
 tags:

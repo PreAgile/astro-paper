@@ -3,7 +3,6 @@ title: "RDB Mastery #2 — MySQL Index Types: B-tree / Hash / Covering / Composi
 description: "Not every index in InnoDB is a B-tree. Hash (Memory engine), Spatial (R-tree), Full-text (inverted index), Multi-valued (8.0+, JSON arrays), Functional (8.0.13+, expressions). And even within the B-tree family, clustered vs secondary, covering or not, the leftmost-prefix rule for composites, and cardinality / selectivity become the decision axes. Built five real indexes on a 10M-row table and decided when to pick what by measuring cardinality + Q1~Q5 latency. Q3 covering 2,476x / Q5 composite 577x / Q2 paradox where adding an index made it slower (0.66ms → 13.5ms). Indexes are not free — write cost 5~6x + storage 1.3GB. Unwound to the end with 9 diagrams."
 author: Myeonsoo Kim
 pubDatetime: 2026-05-03T16:00:00.000Z
-slug: rdb-mastery-02-index-types
 featured: true
 draft: false
 tags:

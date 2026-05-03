@@ -3,7 +3,6 @@ title: "RDB Mastery #2 — MySQL 인덱스의 종류: B-tree / Hash / Covering /
 description: "InnoDB 의 모든 인덱스가 B-tree 가 아닙니다. Hash (Memory engine), Spatial (R-tree), Full-text (역인덱스), Multi-valued (8.0+, JSON 배열), Functional (8.0.13+, 표현식). 그리고 같은 B-tree 안에서도 clustered vs secondary, covering 여부, composite 의 leftmost prefix, cardinality / selectivity 가 결정의 축이 됩니다. 1,000만 row 환경에서 5종 인덱스를 직접 만들어 cardinality + Q1~Q5 latency 변화로 언제 무엇을 고를지를 측정으로 결정. Q3 covering 2,476배 / Q5 composite 577배 / Q2 역설 (인덱스 추가가 느려지는 케이스 0.66ms → 13.5ms). 인덱스는 공짜가 아닙니다 — 쓰기 비용 5~6배 + storage 1.3GB. 9개 다이어그램으로 끝까지 풀어봅니다."
 author: 김면수
 pubDatetime: 2026-05-03T16:00:00.000Z
-slug: rdb-mastery-02-index-types
 featured: true
 draft: false
 tags:

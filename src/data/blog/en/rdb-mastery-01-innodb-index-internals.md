@@ -3,7 +3,6 @@ title: "RDB Mastery #1 — InnoDB Index Internals: From No-Index to Multi-Index,
 description: "Even when you don't define an index, InnoDB already stores rows inside a B-tree. PK = clustered index = the table itself. Secondary index = a separate B-tree that points to PK. Covering index = an index where the answer lives in the leaf, no PK lookup needed. Reverse scan = walking the leaf doubly-linked list backward. OFFSET cannot skip because B-trees do not maintain row counters. Cursor is fast because WHERE triggers the binary-search primitive of the B-tree. Multi-index means N B-trees on the same table. With a 10M-row environment, [measured] Q3 covering 2,476x / Q5 composite 577x / OFFSET 1M = 171ms / cursor = 0.30ms — unwound to the end with 10 diagrams."
 author: Myeonsoo Kim
 pubDatetime: 2026-05-03T15:00:00.000Z
-slug: rdb-mastery-01-innodb-index-internals
 featured: true
 draft: false
 tags:
