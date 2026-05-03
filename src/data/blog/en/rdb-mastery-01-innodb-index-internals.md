@@ -39,10 +39,10 @@ Once that single fact wobbles, every following sentence wobbles too:
 - "Why is cursor fast?" — because `WHERE created_at < ?` triggers the B-tree's **binary-search primitive**: jump from root to leaf in one shot.
 - "5 indexes = 5x write cost" — because the same table simultaneously holds **5 secondary B-trees + 1 clustered B-tree = 6 B-trees**.
 
-This post unwinds every one of those lines with **10 diagrams + W2 10M-row [measured — Java/Spring]** numbers.
+This post unwinds every one of those lines with **10 diagrams + 10M-row [measured — Java/Spring]** numbers.
 
 - The companion post [MySQL No-Offset Cursor Pagination — at 10M rows, OFFSET 1M = 171ms / Cursor = 0.30ms](/en/posts/mysql-no-offset-cursor-pagination/) covered the same measurements from the **operational/page-prescription** angle. This post revisits those four concepts (covering / reverse / OFFSET / cursor) from the **B-tree mechanism + diagram** angle, at the principles layer. They are paired posts.
-- Inputs: W2 Phase 2 10M-row load (187K rows/s) + Phase 3 cardinality across 5 indexes + Q1~Q5 Before/After.
+- Inputs: the 10M-row load measurement (187K rows/s) + cardinality across 5 indexes + Q1~Q5 Before/After.
 - Depth: **L2-L3** (RDB Mastery series, post #1 — **InnoDB mechanism + measurements + Big Tech operational hindsight + interview answers**).
 
 ---
@@ -136,9 +136,9 @@ graph TB
     I1 --> L2
     I2 --> L3
     I2 --> L4
-    L1 -.-doubly linked.-> L2
-    L2 -.-doubly linked.-> L3
-    L3 -.-doubly linked.-> L4
+    L1 <-.->|doubly linked| L2
+    L2 <-.-> L3
+    L3 <-.-> L4
 ```
 
 → Reading diagram 2: the key point is that **leaf nodes contain the full row**. The PK directly determines the row's physical location. PK 1 and PK 2 sit on **adjacent (or the same) leaf**, while PK 1 and PK 9,999,999 sit on **distant** leaves. This is what "the table is physically sorted by PK" actually means.
@@ -151,7 +151,19 @@ graph TB
 
 → The common myth "without a PK, the table is stored without an index" is wrong. **A zero-index table cannot exist inside InnoDB.** Without a PK there is hidden ROWID; with a UNIQUE NOT NULL column, that takes priority. Always exactly one clustered index.
 
-The pitfall of hidden ROWID: **every secondary index leaf still carries this 6-byte hidden ROWID**. If you skip declaring a PK, secondary indexes look up rows by an **invisible** 6-byte key. Declare a PK and you get an explicit 4-byte (INT) or 8-byte (BIGINT) key. That's why `id BIGINT PRIMARY KEY AUTO_INCREMENT` is the operational standard.
+The pitfall of hidden ROWID *isn't its size* — at 6 bytes it's actually smaller than BIGINT (8 bytes). The real pitfall is **it's invisible to your application**:
+
+- **Cannot be queried in SQL** — `WHERE _rowid = ?` doesn't work; it doesn't appear in SELECT results
+- **Cannot be referenced externally** — REST API paths like `/orders/123`, foreign keys, and sharding routing keys all require an *explicit* PK
+- **Unstable across dump / restore** — hidden ROWID is InnoDB internal metadata, so values can change during backup/restore or migration to another instance
+
+That's why the operational standard is always an *explicit* PK. The reason `id BIGINT PRIMARY KEY AUTO_INCREMENT` became *the* canonical pattern boils down to **three points**:
+
+1. **AUTO_INCREMENT avoids page splits.** New rows always go to the *last leaf* of the clustered index, so the index stays sorted in INSERT order with *almost no page splits*. UUIDs / random PKs do the opposite — every INSERT lands at an *arbitrary* leaf, exploding fragmentation (which is exactly why sortable IDs like UUIDv7 / ULID emerged).
+2. **BIGINT is overflow-safe.** INT (4 bytes, signed max ~2.1 billion) hits the ceiling within 4–5 years in fast-growing domains (orders / event logs / tracking). BIGINT (8 bytes, ~9 quintillion) is effectively infinite. *"Started with INT, then ALTER to BIGINT"* is the #1 ops incident — start with BIGINT and you're safe forever.
+3. **External-system compatibility.** JSON / Java `long` / TypeScript `bigint` are all 8-byte integer standards. Distributed systems / API serialization / cache keys — every boundary uses a consistent type.
+
+→ The 6-byte storage win of hidden ROWID never outweighs those three operational benefits. That's why the standard is BIGINT.
 
 ### 2.3 Implication — **full table scan = clustered-index full scan**
 
@@ -174,24 +186,24 @@ When you run `CREATE INDEX idx_owner_id ON orders (owner_id)`, InnoDB builds a *
 Diagram 3 — the two-stage relationship between secondary and clustered indexes:
 
 ```mermaid
-graph LR
-    subgraph "Step 1: Secondary B-tree (idx_owner_id)"
+graph TB
+    subgraph step1 ["Step 1 — Secondary index walk (idx_owner_id)"]
+        direction TB
         S_Root["Root<br/>owner_id 1~10K"]
-        S_L1["Leaf<br/>owner_id=1234<br/>→ PK=5,000,001<br/>→ PK=5,000,123<br/>→ PK=8,234,567<br/>..."]
+        S_L1["Leaf<br/>owner_id=1234<br/>PK list: 5,000,001 / 5,000,123 / 8,234,567 …"]
         S_Root --> S_L1
     end
-
-    subgraph "Step 2: Clustered B-tree (the table itself)"
+    subgraph step2 ["Step 2 — Clustered index walk (= the table itself)"]
+        direction TB
         C_Root["Root<br/>PK 1~10M"]
-        C_L1["Leaf PK=5,000,001<br/>+ owner_id, amount, name full row"]
+        C_L1["Leaf PK=5,000,001<br/>+ full row"]
         C_L2["Leaf PK=5,000,123<br/>+ full row"]
         C_L3["Leaf PK=8,234,567<br/>+ full row"]
         C_Root --> C_L1
         C_Root --> C_L2
         C_Root --> C_L3
     end
-
-    S_L1 -.PK lookup.-> C_Root
+    S_L1 -.->|PK lookup| C_Root
 ```
 
 → Reading diagram 3. For `WHERE owner_id = 1234 AND amount > 1000`:
@@ -218,7 +230,7 @@ PostgreSQL's secondary indexes carry the **heap TID** (physical tuple location) 
 
 ### 3.3 [Measured — Java/Spring] — Q5 composite-index lookup cost
 
-W2 Phase 3 — Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
+Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
 
 | Step | actual time |
 |---|---|
@@ -268,7 +280,7 @@ sequenceDiagram
 
 ### 4.3 [Measured — Java/Spring] Q3 — the clearest case for covering
 
-W2 Phase 3 — Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
+Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
 
 | Stage | actual time | rows processed |
 |---|---|---|
@@ -383,7 +395,7 @@ graph TB
 
 ### 6.2 [Measured — Java/Spring] mapping the 5 queries to the 4 walks
 
-W2 Phase 3's 5 queries:
+The five queries in this series:
 
 | Q | walk type | actual time |
 |---|---|---|
@@ -500,7 +512,7 @@ The companion's three-shape comparison ((a) row constructor 154ms / (b) single-k
 
 ### 9.1 5 indexes = 6 B-trees (clustered + 5)
 
-The 5 indexes built in W2 Phase 3:
+The 5 indexes built in this series:
 
 ```sql
 CREATE INDEX idx_created_at_id        ON orders_w2 (created_at, id);
@@ -547,7 +559,7 @@ graph TB
 
 → Reading diagram 9. One row = 6 leaf entries (one in each B-tree). One INSERT = **all 6 B-trees updated**. One DELETE the same.
 
-### 9.2 Cardinality of each index — W2 Phase 3 [measured]
+### 9.2 Cardinality of each index — five-index measurement [measured]
 
 | index | cardinality | meaning |
 |---|---|---|
@@ -571,13 +583,13 @@ Cost of one INSERT:
 | 1 secondary | 2 | 2x |
 | 5 secondary | **6** | **6x** |
 
-W2 Phase 2 loaded 10M rows in **53.5s = 187K rows/s** with **no indexes**. If you re-ran the same load with 5 indexes attached, you would expect 5–6x slower. That's why the operational pattern is **disable indexes for bulk load → enable after**, recommended by [MySQL — Bulk Data Loading for InnoDB Tables](https://dev.mysql.com/doc/refman/8.0/en/optimizing-innodb-bulk-data-loading.html).
+The bulk-load measurement loaded 10M rows in **53.5s = 187K rows/s** with **no indexes**. If you re-ran the same load with 5 indexes attached, you would expect 5–6x slower. That's why the operational pattern is **disable indexes for bulk load → enable after**, recommended by [MySQL — Bulk Data Loading for InnoDB Tables](https://dev.mysql.com/doc/refman/8.0/en/optimizing-innodb-bulk-data-loading.html).
 
 ### 9.4 Storage cost
 
 A single index ≈ (key column size + PK size) × row count × 1.5 (B-tree fill factor + page overhead).
 
-W2 Phase 3 rough math:
+Rough math for this series:
 - idx_created_at_id (8B + 8B) × 10M × 1.5 ≈ 240MB
 - idx_owner_state_created (8 + 1 + 8 + 8) × 10M × 1.5 ≈ 375MB
 - 5 indexes total ≈ **1.3GB**
@@ -695,15 +707,15 @@ Restating the implication from §2. EXPLAIN's `type=ALL` is colloquially "full t
 
 #### Q3. "Why is a covering index fast?"
 
-> "If every column the SELECT needs lives **in the secondary-index leaf**, the clustered index is never touched — **one lookup**. InnoDB's secondary indexes **always carry the PK in the leaf**, so an index like (created_at, id) is **automatically covering** for `SELECT id, created_at`. EXPLAIN's `Using index` is the covering signal. In W2, `ORDER BY created_at DESC LIMIT 20` went from 1,609ms (filesort, no index) → 0.65ms (covering reverse scan) — **2,476x** ([measured — Java/Spring])."
+> "If every column the SELECT needs lives **in the secondary-index leaf**, the clustered index is never touched — **one lookup**. InnoDB's secondary indexes **always carry the PK in the leaf**, so an index like (created_at, id) is **automatically covering** for `SELECT id, created_at`. EXPLAIN's `Using index` is the covering signal. In our measurements, `ORDER BY created_at DESC LIMIT 20` went from 1,609ms (filesort, no index) → 0.65ms (covering reverse scan) — **2,476x** ([measured — Java/Spring])."
 
 #### Q4. "Why does OFFSET collapse on deep pages? (B-tree mechanism)"
 
-> "B-tree internal nodes only store **key ranges**; **they don't carry a row counter**. So 'jump to the N-th row' is impossible — the engine must **read N rows sequentially from the first leaf and discard them**. Why no counter? Because every INSERT/DELETE would have to bump counters on every node along the root path — turning the root into a **lock hot spot** that collapses concurrent throughput. **Cost > benefit.** Every RDBMS (MySQL/PG/Oracle) makes the same call. In W2, OFFSET 1M = 171ms with rows scanned = 1,000,020 — **literally read 1M and threw them away** ([measured — Java/Spring])."
+> "B-tree internal nodes only store **key ranges**; **they don't carry a row counter**. So 'jump to the N-th row' is impossible — the engine must **read N rows sequentially from the first leaf and discard them**. Why no counter? Because every INSERT/DELETE would have to bump counters on every node along the root path — turning the root into a **lock hot spot** that collapses concurrent throughput. **Cost > benefit.** Every RDBMS (MySQL/PG/Oracle) makes the same call. In our measurements, OFFSET 1M = 171ms with rows scanned = 1,000,020 — **literally read 1M and threw them away** ([measured — Java/Spring])."
 
 #### Q5. "5 indexes vs 0 — what's the **write** cost difference?"
 
-> "5 indexes on a single table = clustered 1 + secondary 5 = **6 B-trees** simultaneously. One INSERT = updates to leaves on all 6. One DELETE same. UPDATE only touches secondary indexes whose key columns changed, but if a key changes the leaf moves (potential page split). In W2, no-index load was 187K rows/s (53.5s for 10M rows); the same load with 5 indexes attached is theoretically 5–6x slower. That's why **disable indexes during bulk load, enable after** is the operational standard. Storage adds 1.3GB → buffer-pool pressure also degrades clustered hit-rate. Hence the operational discipline of an **index diet** (sys.schema_unused_indexes / invisible indexes) ([measured — Java/Spring])."
+> "5 indexes on a single table = clustered 1 + secondary 5 = **6 B-trees** simultaneously. One INSERT = updates to leaves on all 6. One DELETE same. UPDATE only touches secondary indexes whose key columns changed, but if a key changes the leaf moves (potential page split). In our measurements, no-index load was 187K rows/s (53.5s for 10M rows); the same load with 5 indexes attached is theoretically 5–6x slower. That's why **disable indexes during bulk load, enable after** is the operational standard. Storage adds 1.3GB → buffer-pool pressure also degrades clustered hit-rate. Hence the operational discipline of an **index diet** (sys.schema_unused_indexes / invisible indexes) ([measured — Java/Spring])."
 
 ---
 

@@ -39,10 +39,10 @@ tags:
 - "cursor 가 빠른 이유" — `WHERE created_at < ?` 가 B-tree 의 **binary search primitive** 를 트리거. root 에서 leaf 까지 한 번에 점프
 - "인덱스 5개 = 쓰기 5배 비용" — 같은 테이블에 **B-tree 5개 + clustered 1개 = 6개** 가 동시에 존재하기 때문
 
-이 글은 그 모든 한 줄을 **다이어그램 10개 + W2 1,000만 row [실측 — Java/Spring]** 로 끝까지 풀어봅니다.
+이 글은 그 모든 한 줄을 **다이어그램 10개 + 1,000만 row [실측 — Java/Spring]** 로 끝까지 풀어봅니다.
 
 - 자매글 [MySQL No-Offset Cursor 페이지네이션 — 1,000만 row에서 OFFSET 1M이 171ms / Cursor 0.30ms](/posts/mysql-no-offset-cursor-pagination/) 가 같은 측정을 **page 단위 운영 처방** 측면에서 다뤘다면, 본 글은 그 4개 개념 (covering / reverse / OFFSET / cursor) 을 **B-tree 메커니즘 + 다이어그램** 으로 **원리 차원** 에서 다시 봅니다. 두 글이 짝.
-- 본 글의 입력 자산: W2 Phase 2 1,000만 row 적재 (187K rows/s) + Phase 3 5종 인덱스 cardinality + Q1~Q5 Before/After 측정.
+- 본 글의 입력 자산: 1,000만 row 적재 측정 (187K rows/s) + 5종 인덱스 cardinality + Q1~Q5 Before/After 측정.
 - 본 글의 깊이: **L2-L3** (RDB Mastery 시리즈 1편 — **InnoDB 메커니즘 + 측정 + 빅테크 운영 회고 + 면접 답변**).
 
 ---
@@ -136,9 +136,9 @@ graph TB
     I1 --> L2
     I2 --> L3
     I2 --> L4
-    L1 -.-doubly linked.-> L2
-    L2 -.-doubly linked.-> L3
-    L3 -.-doubly linked.-> L4
+    L1 <-.->|doubly linked| L2
+    L2 <-.-> L3
+    L3 <-.-> L4
 ```
 
 → 다이어그램 2 해석. **leaf 노드 안에 전체 row** 가 들어 있다는 점이 핵심. PK 가 곧 row 의 물리적 위치를 결정합니다. PK 1과 PK 2는 **반드시 인접한 leaf** (또는 같은 leaf) 에 있고, PK 1과 PK 9,999,999는 **멀리 떨어진** leaf 에 있습니다. **테이블이 PK 순서로 물리적으로 정렬되어 있다** 는 말이 이 뜻.
@@ -151,7 +151,19 @@ graph TB
 
 → "PK 안 만들면 인덱스 없이 저장된다" 는 흔한 오해. **InnoDB 안에는 인덱스 0개 가 불가능합니다**. PK 없으면 hidden ROWID, UNIQUE NOT NULL 컬럼이 있으면 그게 우선. 항상 clustered index 1개는 있습니다.
 
-이 hidden ROWID 의 함정은 — **모든 secondary index 의 leaf 가 이 6-byte hidden ROWID 를 가집니다**. 즉 PK 명시 안 하면 secondary index 는 6-byte 짜리 **볼 수 없는** 키로 lookup 합니다. PK 정의하면 그게 4-byte (INT) 또는 8-byte (BIGINT) 짜리 **명시적** 키. 운영에서 `id BIGINT PRIMARY KEY AUTO_INCREMENT` 가 표준 패턴인 이유.
+이 hidden ROWID 의 함정은 *크기가 아닙니다* — 6 byte 라 BIGINT (8 byte) 보다 오히려 작습니다. 진짜 함정은 **application 에서 안 보인다** 는 것:
+
+- **SQL 로 query 못함** — `WHERE _rowid = ?` 같은 form 안 됨. SELECT 결과에도 안 나옴
+- **외부 참조 못함** — REST API 의 `/orders/123` 같은 경로, FK, 분산 sharding routing key 모두 *명시 PK* 가 있어야 가능
+- **dump / restore 시 불안정** — hidden ROWID 는 InnoDB 내부 메타데이터라 백업·복원 / 다른 인스턴스 마이그레이션 시 값이 바뀔 수 있음
+
+그래서 운영 표준은 항상 *명시적* PK. 그 중에서 `id BIGINT PRIMARY KEY AUTO_INCREMENT` 가 굳어진 이유는 **세 가지**:
+
+1. **AUTO_INCREMENT = page split 회피**. 새 row 가 *항상 마지막 leaf* 에만 들어감 → clustered index 가 INSERT 순서로 정렬돼서 *page split 거의 없음*. UUID / 랜덤 PK 는 정반대 — 매 INSERT 마다 *임의의 leaf* 에 끼어 들어가서 fragmentation 폭증 (UUIDv7 / ULID 같은 정렬 가능 ID 가 등장한 배경).
+2. **BIGINT = overflow 안전**. INT (4 byte, 부호 있는 ~21억 max) 는 빠르게 성장하는 도메인 (주문 / 이벤트 로그 / 트래킹) 에서 4~5년 안에 한계 도달. BIGINT (8 byte, ~9 quintillion) 는 사실상 무한. *"INT 로 시작했다가 BIGINT 로 ALTER"* 가 운영 사고 1순위 — 처음부터 BIGINT 로 시작하면 평생 안전.
+3. **외부 시스템 호환**. JSON / Java long / TS bigint 모두 8-byte 정수 표준. 분산 시스템 / API 직렬화 / 캐시 key 등 모든 경계에서 일관된 타입.
+
+→ 6-byte hidden ROWID 의 *공간 이득* 이 위 3가지 *운영 안정성* 보다 결코 크지 않습니다. 그래서 표준은 BIGINT.
 
 ### 2.3 함의 — **full table scan = clustered index full scan**
 
@@ -174,24 +186,24 @@ EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 §11 에서 다시 �
 다이어그램 3 — secondary index 와 clustered index 의 **2단계 관계**:
 
 ```mermaid
-graph LR
-    subgraph "Step 1: Secondary Index B-tree (idx_owner_id)"
+graph TB
+    subgraph step1 ["Step 1 — Secondary Index walk (idx_owner_id)"]
+        direction TB
         S_Root["Root<br/>owner_id 1~10K"]
-        S_L1["Leaf<br/>owner_id=1234<br/>→ PK=5,000,001<br/>→ PK=5,000,123<br/>→ PK=8,234,567<br/>..."]
+        S_L1["Leaf<br/>owner_id=1234<br/>PK list: 5,000,001 / 5,000,123 / 8,234,567 …"]
         S_Root --> S_L1
     end
-
-    subgraph "Step 2: Clustered Index B-tree (테이블 자체)"
+    subgraph step2 ["Step 2 — Clustered Index walk (= 테이블 자체)"]
+        direction TB
         C_Root["Root<br/>PK 1~10M"]
-        C_L1["Leaf PK=5,000,001<br/>+ owner_id, amount, name 전체 row"]
+        C_L1["Leaf PK=5,000,001<br/>+ 전체 row"]
         C_L2["Leaf PK=5,000,123<br/>+ 전체 row"]
         C_L3["Leaf PK=8,234,567<br/>+ 전체 row"]
         C_Root --> C_L1
         C_Root --> C_L2
         C_Root --> C_L3
     end
-
-    S_L1 -.PK lookup.-> C_Root
+    S_L1 -.->|PK lookup| C_Root
 ```
 
 → 다이어그램 3 해석. `WHERE owner_id = 1234 AND amount > 1000` 같은 쿼리:
@@ -218,7 +230,7 @@ PostgreSQL 의 secondary index 는 leaf 가 **heap tuple 의 물리 위치 (TID)
 
 ### 3.3 [실측 — Java/Spring] — Q5 composite index 의 lookup 비용
 
-W2 Phase 3 에서 측정한 Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
+측정한 Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
 
 | 단계 | actual time |
 |---|---|
@@ -268,7 +280,7 @@ sequenceDiagram
 
 ### 4.3 [실측 — Java/Spring] Q3 — covering 의 가장 명확한 사례
 
-W2 Phase 3 의 Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
+Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
 
 | 단계 | actual time | 처리 row |
 |---|---|---|
@@ -383,7 +395,7 @@ graph TB
 
 ### 6.2 [실측 — Java/Spring] 4가지 walk 매핑
 
-W2 Phase 3 의 5종 쿼리를 이 분류에 매핑:
+측정한 5종 쿼리를 이 분류에 매핑:
 
 | Q | walk 종류 | actual time |
 |---|---|---|
@@ -500,7 +512,7 @@ sequenceDiagram
 
 ### 9.1 인덱스 5개 = B-tree 6개 (clustered + 5)
 
-W2 Phase 3 에서 만든 5종 인덱스:
+본 시리즈 측정에서 만든 5종 인덱스:
 
 ```sql
 CREATE INDEX idx_created_at_id        ON orders_w2 (created_at, id);
@@ -547,7 +559,7 @@ graph TB
 
 → 다이어그램 9 해석. row 1개 = leaf entry 6개 (각 B-tree 에 1개씩). INSERT 1번 = **6개 B-tree 모두 갱신**. DELETE 1번도 마찬가지.
 
-### 9.2 인덱스 cardinality — W2 Phase 3 [실측]
+### 9.2 인덱스 cardinality — 5종 인덱스 측정 [실측]
 
 | 인덱스 | cardinality | 의미 |
 |---|---|---|
@@ -571,13 +583,13 @@ INSERT 1개의 비용:
 | 1 secondary | 2 | 2× |
 | 5 secondary | **6** | **6×** |
 
-W2 Phase 2 에서 인덱스 **없는 상태** 적재 → 187K rows/s (53.5초 / 1,000만). Phase 3 에서 인덱스 5종 추가 후 같은 적재를 측정한다면 — 이론상 5~6배 느림. 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** 인 이유. [MySQL 공식 — Bulk Data Loading for InnoDB Tables](https://dev.mysql.com/doc/refman/8.0/en/optimizing-innodb-bulk-data-loading.html) 권장.
+인덱스 **없는 상태** 적재 → 187K rows/s (53.5초 / 1,000만). 인덱스 5종 추가 후 같은 적재를 측정한다면 — 이론상 5~6배 느림. 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** 인 이유. [MySQL 공식 — Bulk Data Loading for InnoDB Tables](https://dev.mysql.com/doc/refman/8.0/en/optimizing-innodb-bulk-data-loading.html) 권장.
 
 ### 9.4 storage 비용
 
 인덱스 1개의 storage ≈ (key 컬럼 크기 + PK 크기) × row 수 × 1.5 (B-tree fill factor 와 page overhead).
 
-W2 Phase 3 기준 (대략):
+본 시리즈 측정 기준 (대략):
 - idx_created_at_id (8B + 8B) × 10M × 1.5 ≈ 240MB
 - idx_owner_state_created (8 + 1 + 8 + 8) × 10M × 1.5 ≈ 375MB
 - 5개 합 ≈ **1.3GB**
@@ -695,15 +707,15 @@ graph LR
 
 #### Q3. "Covering Index 가 빠른 이유?"
 
-> "secondary index 의 leaf 안에 **SELECT 가 요구하는 모든 컬럼** 이 들어 있으면 — clustered index 안 가도 답이 나옵니다. **1번 lookup 으로 끝**. InnoDB 의 secondary index 는 **항상 PK 가 leaf 에 같이 들어 있어서** (created_at, id) 인덱스는 `SELECT id, created_at` 에 자동 covering. EXPLAIN 의 `Using index` = covering 신호. W2 측정에서 ORDER BY created_at DESC LIMIT 20 이 인덱스 없을 때 1,609ms (filesort) → covering reverse scan 후 0.65ms — **2,476배** 차이가 그 효과 ([실측 — Java/Spring])."
+> "secondary index 의 leaf 안에 **SELECT 가 요구하는 모든 컬럼** 이 들어 있으면 — clustered index 안 가도 답이 나옵니다. **1번 lookup 으로 끝**. InnoDB 의 secondary index 는 **항상 PK 가 leaf 에 같이 들어 있어서** (created_at, id) 인덱스는 `SELECT id, created_at` 에 자동 covering. EXPLAIN 의 `Using index` = covering 신호. 본 시리즈 측정에서 ORDER BY created_at DESC LIMIT 20 이 인덱스 없을 때 1,609ms (filesort) → covering reverse scan 후 0.65ms — **2,476배** 차이가 그 효과 ([실측 — Java/Spring])."
 
 #### Q4. "OFFSET 이 깊은 페이지에서 무너지는 이유? (B-tree 메커니즘 차원)"
 
-> "B-tree 의 internal node 는 **키의 범위** 만 저장하고 **row 카운터를 안 가집니다**. 그래서 'N번째 row 위치' 를 **바로** 알 수 없어서 — 처음 leaf 부터 N개를 **순차로 읽고 버립니다**. 카운터를 둘 수도 있지 않냐? 매 INSERT/DELETE 마다 root 까지 가는 **경로의 모든 node** 카운터를 갱신해야 해서 — root 가 lock hot spot 이 되어 동시성 throughput 폭락. **비용 > 이득**. 모든 RDBMS (MySQL/PG/Oracle) 가 동일. W2 측정에서 OFFSET 1M = 171ms (rows scanned 1,000,020) — **1M 개 읽고 버림** 의 본질이 이 메커니즘 ([실측 — Java/Spring])."
+> "B-tree 의 internal node 는 **키의 범위** 만 저장하고 **row 카운터를 안 가집니다**. 그래서 'N번째 row 위치' 를 **바로** 알 수 없어서 — 처음 leaf 부터 N개를 **순차로 읽고 버립니다**. 카운터를 둘 수도 있지 않냐? 매 INSERT/DELETE 마다 root 까지 가는 **경로의 모든 node** 카운터를 갱신해야 해서 — root 가 lock hot spot 이 되어 동시성 throughput 폭락. **비용 > 이득**. 모든 RDBMS (MySQL/PG/Oracle) 가 동일. 본 시리즈 측정에서 OFFSET 1M = 171ms (rows scanned 1,000,020) — **1M 개 읽고 버림** 의 본질이 이 메커니즘 ([실측 — Java/Spring])."
 
 #### Q5. "인덱스 5개 추가 vs 0개 — **쓰기** 비용 차이는?"
 
-> "한 테이블에 인덱스 5개 = clustered 1 + secondary 5 = **B-tree 6개** 가 동시에 존재합니다. INSERT 1건 = 6개 B-tree 의 leaf 갱신. DELETE 1건도 마찬가지. UPDATE 가 인덱스 키 컬럼을 안 건드리면 영향 적지만, 키 컬럼을 건드리면 leaf 위치 이동 (page split 가능). W2 환경에서 인덱스 없는 상태 적재가 187K rows/s (53.5초 / 1,000만) — 인덱스 5종 추가 후 같은 적재는 이론상 5~6배 느림. 운영 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** 인 이유. storage 도 1.3GB 추가 → buffer pool 점유로 clustered hit 율까지 영향. 그래서 **인덱스 다이어트** (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring])."
+> "한 테이블에 인덱스 5개 = clustered 1 + secondary 5 = **B-tree 6개** 가 동시에 존재합니다. INSERT 1건 = 6개 B-tree 의 leaf 갱신. DELETE 1건도 마찬가지. UPDATE 가 인덱스 키 컬럼을 안 건드리면 영향 적지만, 키 컬럼을 건드리면 leaf 위치 이동 (page split 가능). 본 시리즈 환경에서 인덱스 없는 상태 적재가 187K rows/s (53.5초 / 1,000만) — 인덱스 5종 추가 후 같은 적재는 이론상 5~6배 느림. 운영 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** 인 이유. storage 도 1.3GB 추가 → buffer pool 점유로 clustered hit 율까지 영향. 그래서 **인덱스 다이어트** (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring])."
 
 ---
 

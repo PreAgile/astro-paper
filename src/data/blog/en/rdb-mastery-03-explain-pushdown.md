@@ -57,9 +57,9 @@ The word `Filter:` once vs the words `Index range scan over` once. **That single
 The companion post [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) covered the same measurement from the **operational prescription** side (cursor standard / token encoding / PR gate). This post focuses on **why the optimizer fails to push down** — the internals. Why has [Bug #16247](https://bugs.mysql.com/bug.php?id=16247) remained a long-standing known limitation? What patterns does the optimizer's whitelist recognize, and what doesn't it? The limits of cost-based judgment (the Q2 paradox — when adding an index makes things slower). And how to read a single line of EXPLAIN ANALYZE output.
 
 Inputs for this post:
-- W2 Phase 3 Q1~Q5 Before/After + the Q2 paradox (10M rows, MySQL 8.0.44)
-- W2 Phase 4 EXP-07 row constructor push-down failure (154ms vs 0.30ms)
-- ADR-BE-009 No-Offset pagination decision (rule banning row constructor)
+- 10M-row Q1~Q5 Before/After + the Q2 paradox (MySQL 8.0.44)
+- The OFFSET vs No-Offset measurement's row constructor push-down failure (154ms vs 0.30ms)
+- The No-Offset pagination decision (rule banning row constructor)
 
 Depth: **L3-L4** (Series #1 covered B-tree internals / #2 covered index types / this #3 covers **how the optimizer perceives queries and pushes down**).
 
@@ -101,7 +101,7 @@ EXPLAIN ANALYZE SELECT id FROM orders_w2
 ORDER BY created_at DESC LIMIT 20;
 ```
 
-A line of the output (Q3 Before from W2 Phase 3 — no index [measured — Java/Spring]):
+A line of the output (Q3 Before — no index [measured — Java/Spring]):
 
 ```
 -> Limit: 20 row(s)  (actual time=1608.999..1608.999 rows=20 loops=1)
@@ -161,7 +161,7 @@ EXPLAIN ANALYZE output is a **tree**, not a table. Each line is **one operator**
 
 ### 2.3 Diagram 2 — sample operator tree
 
-EXPLAIN ANALYZE tree for Q5 from W2 Phase 3 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
+EXPLAIN ANALYZE tree for Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`):
 
 ```mermaid
 graph TB
@@ -224,7 +224,7 @@ This analogy is the intuitive model behind every push-down trap. If the optimize
 
 ### 3.4 [Measured — Java/Spring] — Q3 vs Q3 Before
 
-Q3 from W2 Phase 3 (`ORDER BY created_at DESC LIMIT 20`):
+Q3 (`ORDER BY created_at DESC LIMIT 20`):
 
 | Stage | Tree | rows scanned | actual time |
 |---|---|---|---|
@@ -369,7 +369,7 @@ Bug summary:
 
 ### 6.3 [Measured — Java/Spring] — 154ms vs 0.30ms
 
-The core measurement from EXP-07 in the companion post (10M rows, cursor at the 1M-th position):
+The core measurement from the OFFSET vs No-Offset measurement in the companion post (10M rows, cursor at the 1M-th position):
 
 ```sql
 -- (a) row constructor — push down fails
@@ -445,7 +445,7 @@ Pure prioritization:
 - Adding row-constructor → OR conversion logic interacts with other parts of the optimizer → regression risk
 - Other databases like PostgreSQL push down correctly → "this is MySQL's specific quirk"
 
-→ Conclusion: **Don't use row constructor in MySQL**. Same as ADR-BE-009 §4.3 rule 5.
+→ Conclusion: **Don't use row constructor in MySQL**. Same as the No-Offset pagination decision §4.3 rule 5.
 
 ---
 
@@ -476,7 +476,7 @@ PostgreSQL's optimizer ("planner") **automatically converts** row-constructor co
 
 > **"Standard SQL = works the same everywhere" is a myth. Same meaning, different optimizers, different plans, different latencies. Write in the form that suits your DB — and verify with EXPLAIN ANALYZE every time. That's the standard workflow.**
 
-ADR-BE-009 §4.4 ("If the DB switches to PostgreSQL — Option B becomes simpler") is precisely this implication.
+The No-Offset pagination decision §4.4 ("If the DB switches to PostgreSQL — Option B becomes simpler") is precisely this implication.
 
 ---
 
@@ -484,9 +484,9 @@ ADR-BE-009 §4.4 ("If the DB switches to PostgreSQL — Option B becomes simpler
 
 ### 8.1 Setup
 
-Q2 from W2 Phase 3 (`WHERE state = 'CONFIRMED' ORDER BY created_at DESC LIMIT 5`).
+Q2 (`WHERE state = 'CONFIRMED' ORDER BY created_at DESC LIMIT 5`).
 
-> Note: The Q2 here is the simplified form measured in W2 Phase 3 (range removed, smallest case LIMIT 5) — the form that most clearly exposes the trap of "small LIMIT + low-cardinality index candidate."
+> Note: The Q2 here is the simplified form measured in this series (range removed, smallest case LIMIT 5) — the form that most clearly exposes the trap of "small LIMIT + low-cardinality index candidate."
 
 ### 8.2 [Measured — Java/Spring] — adding an index made it slower
 
@@ -622,7 +622,7 @@ Roughly: plan cost ≈ `est_rows × row_evaluate_cost + key_compare × index_com
 
 **Cardinality** — estimated count of distinct values for index keys. The `Cardinality` column of `SHOW INDEX FROM table`.
 
-W2 Phase 3 cardinalities [Measured — Java/Spring]:
+Cardinalities of the five indexes [Measured — Java/Spring]:
 
 | Index | Cardinality |
 |---|---|
@@ -652,9 +652,9 @@ Remedies:
 2. Use `optimizer_trace` to inspect the optimizer's decisions (§11)
 3. If cardinality looks unrealistic even after `ANALYZE TABLE`, increase sampling: `CREATE INDEX ... STATS_PERSISTENT=1, STATS_SAMPLE_PAGES=N`
 
-### 9.5 [Measured — Java/Spring] — Phase 3's 5 indexes + the optimizer's choices
+### 9.5 [Measured — Java/Spring] — The five indexes + the optimizer's choices
 
-Re-reading the W2 Phase 3 results from the optimizer's angle:
+Re-reading the five-index results from the optimizer's angle:
 
 | Q | Index picked | Why (cost view) |
 |---|---|---|
@@ -889,7 +889,7 @@ Output is JSON containing every plan considered, each plan's cost, and the final
 
 ### 11.5 ADR-ize — operational rules from this post
 
-Generalizing ADR-BE-009 (No-Offset pagination) §4.3:
+Generalizing the No-Offset pagination decision's §4.3:
 
 1. **Ban row constructor `(a, b) <` / `(a, b) >`** — block at PR review. Workaround: OR-decompose or single-column cursor
 2. **If using functions (`LOWER(col)` / `DATE(created_at)`), require a functional index alongside**
@@ -925,7 +925,7 @@ Generalizing ADR-BE-009 (No-Offset pagination) §4.3:
 
 #### Q1. "What's the difference between `Filter:` and `Index Range Scan over` in EXPLAIN ANALYZE?"
 
-> "**`Filter:`** appearing in the tree is a **push-down failure** signal. The child operator forwards every row, and Filter evaluates cond per row — O(N). **`Index Range Scan over (cond)`** means cond was **converted to an in-index range** — binary search + leaf walk — O(log N + matching). In W2 measurements, the row constructor `(a,b)<(?,?)` ran at 154ms via Filter (1M-row scan); the OR-decomposed form ran at 0.30ms via Range Scan over (20-row scan) — about a **500x difference**. Two SQL statements with the same meaning split 500x apart on **a single line in the operator tree** ([Measured — Java/Spring])."
+> "**`Filter:`** appearing in the tree is a **push-down failure** signal. The child operator forwards every row, and Filter evaluates cond per row — O(N). **`Index Range Scan over (cond)`** means cond was **converted to an in-index range** — binary search + leaf walk — O(log N + matching). In our measurements, the row constructor `(a,b)<(?,?)` ran at 154ms via Filter (1M-row scan); the OR-decomposed form ran at 0.30ms via Range Scan over (20-row scan) — about a **500x difference**. Two SQL statements with the same meaning split 500x apart on **a single line in the operator tree** ([Measured — Java/Spring])."
 
 #### Q2. "What is push down and why does it matter?"
 
@@ -933,11 +933,11 @@ Generalizing ADR-BE-009 (No-Offset pagination) §4.3:
 
 #### Q3. "Why can't the MySQL optimizer push down a row constructor?"
 
-> "The ANSI SQL standard's `(a, b) < (?, ?)` is **mathematically equivalent** to `a < ? OR (a = ? AND b < ?)` — straight from lexicographic ordering. But the MySQL optimizer **lacks the row-constructor → OR conversion logic**. It does pattern matching, doesn't recognize the row constructor itself as a range, and falls back to Filter. **MySQL Bug #16247** — filed in 2006, a long-standing known limitation (currently marked duplicate in the tracker). Because a clear workaround (OR-decompose) exists, fix priority is low. Other DBs like PostgreSQL / Oracle push down correctly — **the standard SQL meaning is the same, but optimizer implementations differ across DBs**. ADR-BE-009 rule 5: PR-block row constructors."
+> "The ANSI SQL standard's `(a, b) < (?, ?)` is **mathematically equivalent** to `a < ? OR (a = ? AND b < ?)` — straight from lexicographic ordering. But the MySQL optimizer **lacks the row-constructor → OR conversion logic**. It does pattern matching, doesn't recognize the row constructor itself as a range, and falls back to Filter. **MySQL Bug #16247** — filed in 2006, a long-standing known limitation (currently marked duplicate in the tracker). Because a clear workaround (OR-decompose) exists, fix priority is low. Other DBs like PostgreSQL / Oracle push down correctly — **the standard SQL meaning is the same, but optimizer implementations differ across DBs**. The No-Offset pagination decision's rule 5: PR-block row constructors."
 
 #### Q4. "Have you ever added an index and made things slower? How did you diagnose it?"
 
-> "Found in W2 Phase 3 with Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) ([Measured — Java/Spring]). Before adding the state index: 0.658ms → after: 13.5ms — **20x slower**. Comparing EXPLAIN ANALYZE — Before showed `Table scan rows=25` (LIMIT 5 pressure stops at 25 rows), After showed `Sort + Index lookup rows=336K` (used the index, but couldn't model the LIMIT 5 early-termination effect in the cost model). Diagnosis: the optimizer is **cost-based estimation + statistics + heuristics** — weak spots include very small LIMITs, large cardinality estimation errors, and ORDER BY + LIMIT combinations. `USE INDEX(PRIMARY)` recovered to 0.65ms. Lesson: **always confirm with EXPLAIN ANALYZE**, document hints in an ADR."
+> "Found via Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) ([Measured — Java/Spring]). Before adding the state index: 0.658ms → after: 13.5ms — **20x slower**. Comparing EXPLAIN ANALYZE — Before showed `Table scan rows=25` (LIMIT 5 pressure stops at 25 rows), After showed `Sort + Index lookup rows=336K` (used the index, but couldn't model the LIMIT 5 early-termination effect in the cost model). Diagnosis: the optimizer is **cost-based estimation + statistics + heuristics** — weak spots include very small LIMITs, large cardinality estimation errors, and ORDER BY + LIMIT combinations. `USE INDEX(PRIMARY)` recovered to 0.65ms. Lesson: **always confirm with EXPLAIN ANALYZE**, document hints in an ADR."
 
 #### Q5. "Can you make index decisions without looking at EXPLAIN ANALYZE?"
 

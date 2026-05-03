@@ -48,7 +48,7 @@ Two common answers.
 
 This post walks every one of those decision axes by building real indexes on a 10M-row table and measuring — concluding **when to pick what**.
 
-- Inputs: W2 Phase 3 cardinality across 5 indexes + Q1~Q5 Before/After + Q2 paradox + index storage 1.3GB + write latency 5~6x.
+- Inputs: cardinality across 5 indexes + Q1~Q5 Before/After + Q2 paradox + index storage 1.3GB + write latency 5~6x.
 - Companion post [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) — its cursor is one application of the §3 composite + leftmost-prefix rule from this post.
 - Depth: **L2-L3** (RDB Mastery series, post #2 — **trade-offs by index type + measurements + Big Tech operations + interview answers**).
 
@@ -198,7 +198,7 @@ The phone-book analogy: in a directory sorted by surname-then-given-name, "surna
 
 ### 3.3 [Measured — Java/Spring] Q5 — composite lookup + reverse scan
 
-Q5 in W2 Phase 3, after creating the `(owner_id, state, created_at, id)` composite:
+Q5 from this series, after creating the `(owner_id, state, created_at, id)` composite:
 
 ```sql
 SELECT id, owner_id, state, created_at, amount
@@ -235,7 +235,7 @@ The standard rule for composite column order:
 2. **Higher cardinality first** (within the equality group): if equal in operator, the more selective column goes first.
 3. **ORDER BY column at the very end** (so the B-tree's natural sort order eliminates filesort).
 
-W2 Phase 3's `(owner_id, state, created_at)` follows exactly this rule. owner_id (10K owners) + state (4 values, equality) → created_at (for sort). Equality → sort.
+This series' `(owner_id, state, created_at)` follows exactly this rule. owner_id (10K owners) + state (4 values, equality) → created_at (for sort). Equality → sort.
 
 ---
 
@@ -252,7 +252,7 @@ W2 Phase 3's `(owner_id, state, created_at)` follows exactly this rule. owner_id
 
 > "The higher the selectivity of a column, the more efficient an index on it can be. A column with low selectivity (e.g., a boolean) often does not benefit from a standalone index — the optimizer would prefer a full table scan."
 
-### 4.2 [Measured — Java/Spring] Cardinality across the five indexes in W2 Phase 3
+### 4.2 [Measured — Java/Spring] Cardinality across the five indexes from this series
 
 | Index / column | Cardinality | Selectivity | Effect |
 |---|---|---|---|
@@ -291,7 +291,7 @@ A one-line rule for production.
 
 > **Do not build a standalone index on a low-cardinality column (selectivity < 0.01). It only earns its keep as a non-leading column inside a composite.**
 
-W2 Phase 3's `idx_region_code` (cardinality 4) is **nearly useless on its own**. The optimizer almost never picks it. But as a non-leading column in something like `(region_code, owner_id, created_at)`, it narrows by 1/4 first and then owner_id refines further.
+This series' `idx_region_code` (cardinality 4) is **nearly useless on its own**. The optimizer almost never picks it. But as a non-leading column in something like `(region_code, owner_id, created_at)`, it narrows by 1/4 first and then owner_id refines further.
 
 This is the principle behind "do not build standalone indexes on boolean / state / region enum columns".
 
@@ -322,7 +322,7 @@ The operational pattern: **narrow the SELECT list explicitly** and design coveri
 
 ### 5.3 [Measured — Java/Spring] Q3 — the cleanest covering case
 
-Q3 in W2 Phase 3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
+Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
 
 | Stage | Actual time | Rows processed |
 |---|---|---|
@@ -494,7 +494,7 @@ WHERE LOWER(email) = 'alice@foo.com'
 
 [Vlad Mihalcea — MySQL 8 Functional Indexes](https://vladmihalcea.com/mysql-8-functional-indexes/) covers 8.0.13+ usage and pitfalls in detail.
 
-W2 measurements do not include functional indexes, so this section relies on official docs + Vlad Mihalcea. In production, EXPLAIN ANALYZE confirmation that **the push-down really happens** is mandatory — even a single-character mismatch silences the index.
+Our measurements do not include functional indexes, so this section relies on official docs + Vlad Mihalcea. In production, EXPLAIN ANALYZE confirmation that **the push-down really happens** is mandatory — even a single-character mismatch silences the index.
 
 ---
 
@@ -557,9 +557,9 @@ InnoDB full-text tops out at **small forums / simple lookups**. Real search prod
 
 ## 9. Index Cost — Indexes Are Not Free {#index-cost}
 
-### 9.1 [Measured — Java/Spring] The price of Phase 3
+### 9.1 [Measured — Java/Spring] The price of the five-index design
 
-The bill that landed alongside the read-side speedups in W2 Phase 3:
+The bill that landed alongside the read-side speedups after adding the five indexes:
 
 | Cost item | Measured | Notes |
 |---|---|---|
@@ -579,7 +579,7 @@ Breakdown:
 ### 9.2 Diagram 8 — index count vs cost
 
 ```
-Cost vs index count (W2 Phase 3 reference):
+Cost vs index count (this series' measurement reference):
 
 #indexes    INSERT cost (× baseline)    Storage (GB)
    0          █  1×                        0
@@ -608,7 +608,7 @@ A one-line rule:
 
 - **OLAP table with 99%+ reads**: add indexes liberally (write cost is negligible).
 - **OLTP table with 50%+ writes**: keep indexes **minimal** — only the ones you genuinely need.
-- **Batch load then read**: disable indexes during load, enable afterward (the W2 Phase 2/3 pattern).
+- **Batch load then read**: disable indexes during load, enable afterward (the load-then-add-indexes pattern in this series).
 
 ---
 
@@ -616,7 +616,7 @@ A one-line rule:
 
 ### 10.1 [Measured — Java/Spring] Q2's numbers
 
-Q2 in W2 Phase 3:
+Q2 from this series:
 
 ```sql
 SELECT id, owner_id, state, created_at
@@ -709,7 +709,7 @@ A single table that compresses every decision in this post.
 |---|---|
 | Make it covering when possible | **Narrow the SELECT list explicitly** so all columns fit in the leaf |
 | High-write tables | Indexes **minimal** — only what is genuinely needed |
-| Bulk loads | Disable indexes during load → enable after (the W2 Phase 2/3 pattern) |
+| Bulk loads | Disable indexes during load → enable after (the load-then-add-indexes pattern in this series) |
 | Before adding any index | **Measure** Before/After with EXPLAIN ANALYZE + write-latency impact + record the decision in an ADR |
 
 ### 11.4 The hard rule (production standard)
@@ -747,11 +747,11 @@ This compresses every measurement and finding in this post into a process. A PR 
 
 #### Q2. "What is the leftmost-prefix rule for composite indexes?"
 
-> "A composite `(a, b, c)` requires matching from the left. `WHERE a=?` ✅, `WHERE a=? AND b=?` ✅, full prefix ✅. But `WHERE b=?` alone ❌, `WHERE b=? AND c=?` also ❌. The reason: the leaf is sorted as a → b → c, and without a, b is **scattered** across the leaf — binary search no longer applies. The phone-book analogy: in a directory sorted by surname-then-given-name, finding 'given name Myeonsoo' alone forces a full scan. Same principle. Operationally: composite column order is **equality (=) first, range (<, >) next, ORDER BY last**. In the W2 measurements, `(owner_id, state, created_at, id)` made Q5 go from 1,497ms to 2.59ms (577x) — leftmost-prefix matching + reverse scan combined ([Measured — Java/Spring])."
+> "A composite `(a, b, c)` requires matching from the left. `WHERE a=?` ✅, `WHERE a=? AND b=?` ✅, full prefix ✅. But `WHERE b=?` alone ❌, `WHERE b=? AND c=?` also ❌. The reason: the leaf is sorted as a → b → c, and without a, b is **scattered** across the leaf — binary search no longer applies. The phone-book analogy: in a directory sorted by surname-then-given-name, finding 'given name Myeonsoo' alone forces a full scan. Same principle. Operationally: composite column order is **equality (=) first, range (<, >) next, ORDER BY last**. In our measurements, `(owner_id, state, created_at, id)` made Q5 go from 1,497ms to 2.59ms (577x) — leftmost-prefix matching + reverse scan combined ([Measured — Java/Spring])."
 
 #### Q3. "Have you ever added an index and the query got slower?"
 
-> "Yes. Q2 in W2 Phase 3 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 0.658ms without an index, 13.5ms after adding idx_state_created. **Adding the index made it slower.** Reason: the full scan with LIMIT 5 terminated early after reading ~20 rows, while the index path required secondary-index → table-row random-I/O lookups that exceeded the early-termination savings. The optimizer is statistics-driven cost-based — when stats drift from reality, it picks the wrong plan. Workarounds: (1) index hint (`USE INDEX(PRIMARY)`) to force, (2) `ANALYZE TABLE` to refresh stats, (3) drop the index if no other query needs it. Lesson: **verify with EXPLAIN ANALYZE**. The optimizer is **mostly** right, **never** infallible ([Measured — Java/Spring])."
+> "Yes. Q2 from this series (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 0.658ms without an index, 13.5ms after adding idx_state_created. **Adding the index made it slower.** Reason: the full scan with LIMIT 5 terminated early after reading ~20 rows, while the index path required secondary-index → table-row random-I/O lookups that exceeded the early-termination savings. The optimizer is statistics-driven cost-based — when stats drift from reality, it picks the wrong plan. Workarounds: (1) index hint (`USE INDEX(PRIMARY)`) to force, (2) `ANALYZE TABLE` to refresh stats, (3) drop the index if no other query needs it. Lesson: **verify with EXPLAIN ANALYZE**. The optimizer is **mostly** right, **never** infallible ([Measured — Java/Spring])."
 
 #### Q4. "When do you reach for Multi-valued or Functional indexes?"
 
@@ -759,7 +759,7 @@ This compresses every measurement and finding in this post into a process. A PR 
 
 #### Q5. "Adding N indexes to a table — is the write cost N× higher?"
 
-> "Strictly, it's **N+1×**. One clustered index (the table itself) + N secondary = **N+1 B-trees** coexisting. Each INSERT updates every B-tree's leaf. In W2's measurements, INSERT cost with five indexes is theoretically 6×. That's why the standard pattern for bulk loads is **disable indexes during load → enable after** (Bulk Data Loading recommendation). Storage matters too — five indexes on 10M rows ≈ 1.3GB extra (+13% on a 10GB table) → buffer-pool occupancy → clustered-index hit ratio degrades. So **the index that speeds up reads costs writes, storage, and memory** — read/write ratio + write frequency + storage budget all factor in. **Index dieting** (sys.schema_unused_indexes / invisible indexes) is the operational standard ([Measured — Java/Spring])."
+> "Strictly, it's **N+1×**. One clustered index (the table itself) + N secondary = **N+1 B-trees** coexisting. Each INSERT updates every B-tree's leaf. In our measurements, INSERT cost with five indexes is theoretically 6×. That's why the standard pattern for bulk loads is **disable indexes during load → enable after** (Bulk Data Loading recommendation). Storage matters too — five indexes on 10M rows ≈ 1.3GB extra (+13% on a 10GB table) → buffer-pool occupancy → clustered-index hit ratio degrades. So **the index that speeds up reads costs writes, storage, and memory** — read/write ratio + write frequency + storage budget all factor in. **Index dieting** (sys.schema_unused_indexes / invisible indexes) is the operational standard ([Measured — Java/Spring])."
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: "Decoding HikariCP Pool Exhaustion via JVM Thread Dump — What TIMED_WAITING (parked) Really Means"
-description: "When the pool exhaustion alert fires, staring at application code yields nothing. The thread dump from jstack is the real evidence — every worker thread is frozen in HikariCP at TIMED_WAITING (parked). I walk through the JVM Thread State machine, LockSupport.parkNanos, the ConcurrentBag and SynchronousQueue mechanics, and how EXP-09 [measured] (timeout 5s = 100% pass / 1s = 16.7%) maps line-by-line to the dump — diagnosing pool exhaustion from a single dump in production."
+description: "When the pool exhaustion alert fires, staring at application code yields nothing. The thread dump from jstack is the real evidence — every worker thread is frozen in HikariCP at TIMED_WAITING (parked). I walk through the JVM Thread State machine, LockSupport.parkNanos, the ConcurrentBag and SynchronousQueue mechanics, and how the transaction-with-external-call pool-exhaustion measurement [measured] (timeout 5s = 100% pass / 1s = 16.7%) maps line-by-line to the dump — diagnosing pool exhaustion from a single dump in production."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00.000Z
 featured: true
@@ -46,17 +46,17 @@ The answer is in a single dump. **Every worker thread** is in `TIMED_WAITING (pa
 
 This post takes that dump apart **line by line**.
 
-- The **sister post** — [Spring Transactions and External API Calls — Reproducing Pool Exhaustion and Comparing Three Remedies (Simple Split, Saga, Outbox) by Measurement](/en/posts/spring-transaction-external-api-pool-exhaustion/) — covered the same incident from a **business pattern** angle (Saga / Outbox). This post replays **the same EXP-09 measurements through a JVM lens — Thread Dump / Thread State / HikariCP internals / LockSupport / GC**. The two posts are paired.
-- Input: W1 EXP-09 [measured — Java/Spring Stage 0] (timeout 5s = 100% pass / P99 6.3s, timeout 1s = 16.7% pass / 50 timeouts) + EXP-09b 9-scenario matrix.
+- The **sister post** — [Spring Transactions and External API Calls — Reproducing Pool Exhaustion and Comparing Three Remedies (Simple Split, Saga, Outbox) by Measurement](/en/posts/spring-transaction-external-api-pool-exhaustion/) — covered the same incident from a **business pattern** angle (Saga / Outbox). This post replays **the same transaction-with-external-call pool-exhaustion measurements through a JVM lens — Thread Dump / Thread State / HikariCP internals / LockSupport / GC**. The two posts are paired.
+- Input: the transaction-with-external-call pool-exhaustion measurement [measured — Java/Spring] (timeout 5s = 100% pass / P99 6.3s, timeout 1s = 16.7% pass / 50 timeouts) + the three-prescription comparison's 9-scenario matrix.
 - Depth: **L3-L4** ([JVM/Java Mastery series](/en/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) Part 1 — **measurement + JVM mechanics + big-tech operations + interview answers**).
 
 ---
 
 ## 1. The Operational Surface — What You See When the Pool Exhaustion Alert Fires {#operational-surface}
 
-The sister post handled the same EXP-09 from the business angle, so I will only briefly reprise the operational surface here.
+The sister post handled the same transaction-with-external-call pool-exhaustion measurement from the business angle, so I will only briefly reprise the operational surface here.
 
-### 1.1 Two Faces of Pool Exhaustion [measured — Java/Spring Stage 0]
+### 1.1 Two Faces of Pool Exhaustion [measured — Java/Spring]
 
 Same pool exhaustion, but the `connection-timeout` value flips **the signal the operations team receives**:
 
@@ -132,7 +132,7 @@ If the same thread sits in the same frame across all three dumps, you have **evi
 
 ## 3. Dissecting a Thread Dump — JVM at the Moment of Pool Exhaustion {#thread-dump-anatomy}
 
-The main course. Here is the **shape** of a dump captured during EXP-09 Run #2 (timeout 1s, concurrent 60, extDelay 3s), unpacked line by line.
+The main course. Here is the **shape** of a dump captured during the pool-exhaustion measurement's Run #2 (timeout 1s, concurrent 60, extDelay 3s), unpacked line by line.
 
 ### 3.1 A Healthy Thread (RUNNABLE)
 
@@ -199,7 +199,7 @@ This is the **signature** of pool exhaustion:
 
 ### 3.3 Thread State Distribution from a Single Dump — ASCII Bar
 
-A dump from EXP-09 Run #2 (60 workers, pool=10):
+A dump from the pool-exhaustion measurement's Run #2 (60 workers, pool=10):
 
 ```
 At idle:
@@ -218,7 +218,7 @@ BLOCKED          0
                  ─────────────────────── 69 threads (60 workers + HikariCP & friends)
 ```
 
-**TIMED_WAITING (parked) spikes to 50** — exactly matching `awaitingConnection=50` from EXP-09 Run #2. The dump's thread state and Hikari's MXBean metric are **two facets of the same event**.
+**TIMED_WAITING (parked) spikes to 50** — exactly matching `awaitingConnection=50` from the pool-exhaustion measurement's Run #2. The dump's thread state and Hikari's MXBean metric are **two facets of the same event**.
 
 ---
 
@@ -336,7 +336,7 @@ sequenceDiagram
     end
 ```
 
-In EXP-09 Run #2, 50 threads exited via the **latter** path (1-second timeout → SQLTransientConnectionException).
+In the pool-exhaustion measurement's Run #2, 50 threads exited via the **latter** path (1-second timeout → SQLTransientConnectionException).
 
 ### 4.3 LockSupport.parkNanos — How the JVM Puts a Thread to Sleep
 
@@ -363,9 +363,9 @@ What **`Unsafe.park(false, nanos)`** means:
 - The OS thread is **truly** scheduled out — 0 CPU
 - Wake conditions: (a) `nanos` expires, (b) another thread calls `unpark(thread)`, (c) interrupt, (d) spurious wakeup
 
-For EXP-09 Run #2 (timeout 1s), the 50 workers all call `parkNanos(blocker, 1_000_000_000L)` and sleep **up to 1 second**. After 1 second, if no thread has been unparked (no connection returned), `poll` returns null → HikariCP raises `SQLTransientConnectionException`.
+For the pool-exhaustion measurement's Run #2 (timeout 1s), the 50 workers all call `parkNanos(blocker, 1_000_000_000L)` and sleep **up to 1 second**. After 1 second, if no thread has been unparked (no connection returned), `poll` returns null → HikariCP raises `SQLTransientConnectionException`.
 
-### 4.4 Mapping EXP-09 [measurements] to the Code
+### 4.4 Mapping the transaction-with-external-call pool-exhaustion measurements to the code
 
 | Measurement | Cause in code |
 |---|---|
@@ -448,7 +448,7 @@ The thread **sits in TIMED_WAITING for up to 1 second**, then exits one of two w
 1. **Another thread returns a connection → SynchronousQueue.put → unpark(this)** ⇒ TIMED_WAITING → RUNNABLE
 2. **1-second timeout → auto-wake → poll() returns null** ⇒ TIMED_WAITING → RUNNABLE → throw SQLTransientConnectionException
 
-In EXP-09 Run #2, **50 threads exit via path (2)** (50 pool timeouts). In Run #1 (timeout 5s), **every thread takes path (1)** — wave by wave, threads get unparked.
+In the pool-exhaustion measurement's Run #2, **50 threads exit via path (2)** (50 pool timeouts). In Run #1 (timeout 5s), **every thread takes path (1)** — wave by wave, threads get unparked.
 
 ### 5.4 The RUNNABLE Trap — JVM's **Logical** State vs the OS's **Actual** State
 
@@ -476,7 +476,7 @@ When reading dumps, **don't look at `Thread.State` alone — always read the **t
 
 ---
 
-## 6. EXP-09b's 9 Scenarios → How the Thread Dump Changes {#nine-scenarios-thread-states}
+## 6. The three-prescription comparison's 9 Scenarios → How the Thread Dump Changes {#nine-scenarios-thread-states}
 
 How does the dump **differ** for Simple Split / Saga / Outbox from the sister post? A short JVM-side comparison.
 
@@ -484,7 +484,7 @@ How does the dump **differ** for Simple Split / Saga / Outbox from the sister po
 
 | Pattern | Worker thread state distribution | Auxiliary threads |
 |---|---|---|
-| **No split** (Stage 1 baseline) | RUNNABLE 10 (in external call) + TIMED_WAITING 50 (`parkNanos` waiting on pool) | — |
+| **No split** (Step 1 baseline) | RUNNABLE 10 (in external call) + TIMED_WAITING 50 (`parkNanos` waiting on pool) | — |
 | **Simple split** | RUNNABLE 10 (in external call) + WAITING 50 (sleeping **outside** the transaction) | — |
 | **Saga** | RUNNABLE 10 + WAITING 50 + sweeper 1 (TIMED_WAITING `Thread.sleep`) | sweeper |
 | **Outbox** | RUNNABLE 0 / all workers terminate after ACK + poller 1 (`socketRead0` on external call) | poller |
@@ -525,7 +525,7 @@ A separate thread loops every 5 seconds and runs an `UPDATE`. In the dump:
 
 `Thread.sleep` is implemented similarly to `parkNanos` internally (it's an `Object.wait` variant). In the dump it is distinguished by the `(sleeping)` qualifier.
 
-### 6.4 The Dump-Side View of EXP-09b A/OFF awaiting=57 [measured]
+### 6.4 The Dump-Side View of the three-prescription comparison's A/OFF awaiting=57 [measured]
 
 In §3.1 of the sister post, we measured **"after sleep(3,000ms) ends, 60 workers issue INSERTs simultaneously → pool of 10 saturated → awaiting=50+ spike"**.
 
@@ -565,7 +565,7 @@ hikaricp_pending_threads > 0 for 30s
   AND hikaricp_active_connections == hikaricp_max
 ```
 
-→ Ignore **momentary spikes** (50ms); alert only on **30-second persistence**. This threshold also naturally filters out the EXP-09b A/OFF spike from §6.4.
+→ Ignore **momentary spikes** (50ms); alert only on **30-second persistence**. This threshold also naturally filters out the A/OFF spike from §6.4.
 
 ### 7.2 Automated Thread Dump Capture — Pull Dumps at Alert Trigger
 
@@ -753,7 +753,7 @@ A different take on this post's lesson that "the DB Connection becomes a synchro
 
 ### Q1. "When the pool exhaustion alert fires, what do you capture first?"
 
-> "I take a thread dump **3 times at 5-second intervals** (`jcmd <pid> Thread.print`). A single dump can't distinguish **momentary** from **persistent**. If the same threads sit in the same stack frames across all three, they are genuinely stuck. Then I look at the thread state distribution — if TIMED_WAITING (parked) spikes, pool exhaustion; if BLOCKED spikes, `synchronized` contention; if RUNNABLE with `socketRead0` on top of stack, external I/O wait. In EXP-09 [measured] Run #2, all 50 workers shared a `LockSupport.parkNanos` and `ConcurrentBag.borrow` stack — pool exhaustion confirmed from a single dump."
+> "I take a thread dump **3 times at 5-second intervals** (`jcmd <pid> Thread.print`). A single dump can't distinguish **momentary** from **persistent**. If the same threads sit in the same stack frames across all three, they are genuinely stuck. Then I look at the thread state distribution — if TIMED_WAITING (parked) spikes, pool exhaustion; if BLOCKED spikes, `synchronized` contention; if RUNNABLE with `socketRead0` on top of stack, external I/O wait. In the transaction-with-external-call pool-exhaustion measurement [measured] Run #2, all 50 workers shared a `LockSupport.parkNanos` and `ConcurrentBag.borrow` stack — pool exhaustion confirmed from a single dump."
 
 ### Q2. "What does the PARKED state in a thread dump actually mean?"
 
@@ -761,7 +761,7 @@ A different take on this post's lesson that "the DB Connection becomes a synchro
 
 ### Q3. "Why does HikariCP use SynchronousQueue?"
 
-> "SynchronousQueue is a BlockingQueue with capacity 0. `put()` waits for **another thread to take()**, and `take()` waits for **another thread to put()** — nothing is ever stored in the queue. That's exactly the right shape for handing off a connection. First, zero-copy hand-off — connections are never stored, so zero GC pressure. Second, with `SynchronousQueue(true)` you get FIFO fairness — the first thread to wait gets served first. Third, `poll(0)` returns null immediately on an empty queue — the common path (pool not empty) stays fast. Even in EXP-09 the 50 awaiting threads all parked precisely inside `SynchronousQueue.poll(timeout, NANOSECONDS)`."
+> "SynchronousQueue is a BlockingQueue with capacity 0. `put()` waits for **another thread to take()**, and `take()` waits for **another thread to put()** — nothing is ever stored in the queue. That's exactly the right shape for handing off a connection. First, zero-copy hand-off — connections are never stored, so zero GC pressure. Second, with `SynchronousQueue(true)` you get FIFO fairness — the first thread to wait gets served first. Third, `poll(0)` returns null immediately on an empty queue — the common path (pool not empty) stays fast. Even in the pool-exhaustion measurement the 50 awaiting threads all parked precisely inside `SynchronousQueue.poll(timeout, NANOSECONDS)`."
 
 ### Q4. "What can a thread dump **not** tell you?"
 
@@ -773,7 +773,7 @@ A different take on this post's lesson that "the DB Connection becomes a synchro
 
 ### 11.1 The One-Liner
 
-> **"A pool exhaustion alert isn't an application-code bug — it's a JVM-internal state where threads are stuck inside `LockSupport.parkNanos`."** A single dump proves this line by line. EXP-09 [measured]: 50 workers sharing the `ConcurrentBag.borrow` → `SynchronousQueue.poll` → `LockSupport.parkNanos` → `Unsafe.park` stack is the evidence.
+> **"A pool exhaustion alert isn't an application-code bug — it's a JVM-internal state where threads are stuck inside `LockSupport.parkNanos`."** A single dump proves this line by line. The transaction-with-external-call pool-exhaustion measurement [measured]: 50 workers sharing the `ConcurrentBag.borrow` → `SynchronousQueue.poll` → `LockSupport.parkNanos` → `Unsafe.park` stack is the evidence.
 
 ### 11.2 Assumptions Broken by Measurement
 
@@ -797,9 +797,9 @@ Part 1 (the flagship) of the [JVM/Java Mastery series](/en/posts/jvm-java-master
 
 ## 12. In the Next Post {#next-post}
 
-- W4 EXP-02 lock comparison (optimistic / pessimistic / GET_LOCK / Redisson) — thread state differences between `synchronized` and `ReentrantLock`
-- W6 Spring Batch 1M-row backfill — G1 vs ZGC pause distribution [measurement planned]
-- W11 EXP-14 — Virtual Thread vs Coroutines for 100k I/O — how `parkNanos` behaves on a carrier thread
+- The lock comparison measurement (optimistic / pessimistic / GET_LOCK / Redisson) — thread state differences between `synchronized` and `ReentrantLock` (planned in a follow-up series)
+- Spring Batch 1M-row backfill — G1 vs ZGC pause distribution (follow-up measurement planned)
+- Coroutines vs Virtual Thread comparison — Virtual Thread vs Coroutines for 100k I/O — how `parkNanos` behaves on a carrier thread (follow-up measurement planned)
 
 ---
 
@@ -830,6 +830,6 @@ Part 1 (the flagship) of the [JVM/Java Mastery series](/en/posts/jvm-java-master
 - [Ron Pressler — Project Loom Slide](https://cr.openjdk.org/~rpressler/loom/loom/sol1_part1.html) — virtual thread park mechanics
 
 ### Sister Post
-- [Spring Transactions and External API Calls — Reproducing Pool Exhaustion and Comparing Three Remedies (Simple Split, Saga, Outbox) by Measurement](/en/posts/spring-transaction-external-api-pool-exhaustion/) — the same EXP-09 asset from a **business pattern** angle
+- [Spring Transactions and External API Calls — Reproducing Pool Exhaustion and Comparing Three Remedies (Simple Split, Saga, Outbox) by Measurement](/en/posts/spring-transaction-external-api-pool-exhaustion/) — the same transaction-with-external-call pool-exhaustion measurement from a **business pattern** angle
 
-> **NDA Guardrails**: All measurements in this post are labeled `[measured — Java/Spring Stage 0]`, the external platform is abstracted as `PlatformA` (further generalized for the blog), and no internal company code paths are referenced.
+> **NDA Guardrails**: All measurements in this post are labeled `[measured — Java/Spring]`, the external platform is abstracted as `PlatformA` (further generalized for the blog), and no internal company code paths are referenced.

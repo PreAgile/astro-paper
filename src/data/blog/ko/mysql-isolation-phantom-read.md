@@ -85,7 +85,7 @@ public void chargeCredit(long userId, BigDecimal amount) {
 | 테스트 테이블 | `orders_w2` (1000만건 더미 데이터, owner_id 인덱스) |
 | 대상 row | `WHERE owner_id=999999` — 측정 시작 시점 0건 |
 | 시나리오 | Session A SELECT × 2 사이 SLEEP 3초 / Session B INSERT 1.5초 시점 |
-| 라벨 | `[실측 — Java/Spring Stage 1]` |
+| 라벨 | `[실측 — Java/Spring]` |
 
 본 측정은 raw `mysql` CLI 로 했습니다. `@Transactional` 추상화 뒤에 가려진 **isolation level / consistent read / gap lock** 동작을 직접 다뤄봐야, 나중에 JPA 도입 후 **Spring 이 무엇을 감추는가** 를 비교할 수 있습니다.
 
@@ -210,7 +210,7 @@ docker exec commerce-comment-platform-be-mysql \
 
 ## 4. 측정 결과 — 4 격리수준 모두 [실측] {#measurement-results}
 
-### 4.1 종합 표 [실측 — Java/Spring Stage 1]
+### 4.1 종합 표 [실측 — Java/Spring]
 
 | 격리수준 | A1 | A2 | phantom 발생 | B INSERT wait time | 결론 |
 |---|:---:|:---:|:---:|---|---|
@@ -549,7 +549,7 @@ RR 의 consistent read snapshot 은 **읽기** 시점의 일관성만 보장합�
 | **낙관락** (version 컬럼) | UPDATE 시 `WHERE version=?` 체크. 충돌 시 retry | application 복잡도 ↑ |
 | **분산락** (Redisson 등) | application level 에서 lock 획득 | 외부 의존성 ↑ |
 
-본 repo 에서는 결제 도메인은 **RR + 비관락**, 멱등키 전이는 **RR + 분산락** 으로 보강 (ADR-BE-007 §4.2). PostgreSQL 은 SSI (Serializable Snapshot Isolation) 가 write skew 를 자동 detect 하지만 — MySQL 은 application 레이어에서 보강해야.
+본 repo 에서는 결제 도메인은 **RR + 비관락**, 멱등키 전이는 **RR + 분산락** 으로 보강 (격리수준 결정 사항의 §4.2). PostgreSQL 은 SSI (Serializable Snapshot Isolation) 가 write skew 를 자동 detect 하지만 — MySQL 은 application 레이어에서 보강해야.
 
 → **RR 의 한계를 인정하고 보강하는 게 면접 답변의 *깊이***. "RR 이면 모든 anomaly 차단" 은 **틀린 답**.
 
@@ -557,7 +557,7 @@ RR 의 consistent read snapshot 은 **읽기** 시점의 일관성만 보장합�
 
 ## 8. 도메인별 매핑 — 어떤 격리수준을 어디 쓰나 {#domain-mapping}
 
-ADR-BE-007 §4.2 의 도메인 매핑을 측정값과 함께 봅니다.
+격리수준 결정 사항의 §4.2 도메인 매핑을 측정값과 함께 봅니다.
 
 | 도메인 | 격리수준 | 보강 | 근거 |
 |---|---|---|---|
@@ -725,7 +725,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ### 10.4 Hermitage — 격리수준 anomaly 종합 측정
 
-[Hermitage — Testing the "I" in ACID](https://github.com/ept/hermitage) 는 MySQL / PostgreSQL / Oracle / SQL Server 의 격리수준별 anomaly 동작을 **표로** 비교한 테스트 모음. 본 글의 EXP-06 시나리오와 비슷한 패턴을 **모든 anomaly** 에 적용.
+[Hermitage — Testing the "I" in ACID](https://github.com/ept/hermitage) 는 MySQL / PostgreSQL / Oracle / SQL Server 의 격리수준별 anomaly 동작을 **표로** 비교한 테스트 모음. 본 글의 phantom read 재현 시나리오와 비슷한 패턴을 **모든 anomaly** 에 적용.
 
 → "내 측정만 믿지 마라" — Hermitage 의 결과와 본 글의 [실측] 이 **일치** 하는지 확인할 수 있는 cross-validation.
 
@@ -746,7 +746,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 | 롤백 가능성 | kill 후 자동 복구. application 의 retry 로직 동작 |
 | 사후 조치 | application 코드 추적 — **왜** 트랜잭션이 길었나. 외부 호출이 트랜잭션 안에 있나? OSIV?  |
 
-흔한 원인: **트랜잭션 안에서 외부 API 호출** ([자매글 EXP-09](/blog/spring-transaction-external-api-pool-exhaustion) 의 정확히 그 패턴). RR 격리수준을 쓰면 풀 고갈에 **더해서** undo log 폭증까지 동시에 발생.
+흔한 원인: **트랜잭션 안에서 외부 API 호출** ([자매글 — 트랜잭션-안-외부-호출 풀 고갈 측정](/blog/spring-transaction-external-api-pool-exhaustion) 의 정확히 그 패턴). RR 격리수준을 쓰면 풀 고갈에 **더해서** undo log 폭증까지 동시에 발생.
 
 ### 11.2 시나리오 2 — Write skew 발생 (RR 로 **못 막은** anomaly)
 
@@ -794,10 +794,10 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 | 측정 | 후속 결정 |
 |---|---|
-| RU/RC phantom 발생 (§4.2~4.3) | 결제 도메인 RU/RC 사용 금지 룰 (ADR-BE-007 §4.2) |
-| RR phantom 차단 (§4.4) | 본 repo 기본 격리수준 RR 채택 (ADR-BE-007 §4.1) |
+| RU/RC phantom 발생 (§4.2~4.3) | 결제 도메인 RU/RC 사용 금지 룰 (격리수준 결정 사항의 §4.2) |
+| RR phantom 차단 (§4.4) | 본 repo 기본 격리수준 RR 채택 (격리수준 결정 사항의 §4.1) |
 | SERIALIZABLE INSERT wait 1.56초 (§4.5) | SERIALIZABLE 짧은 critical 만 룰 (§4.3 강제 동반 룰) |
-| Write skew RR 로 못 막음 (§7) | 크레딧 차감 RR + 비관락 보강 (ADR-BE-007 §4.2) |
+| Write skew RR 로 못 막음 (§7) | 크레딧 차감 RR + 비관락 보강 (격리수준 결정 사항의 §4.2) |
 | Long-running RR + undo log 폭증 (§11.1) | 운영 모니터링 임계 알람 설계 (§9.3) |
 
 ### 12.3 핵심 한 줄
@@ -814,11 +814,11 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ### Q1. "MySQL 격리수준 어떻게 정하셨나요?"
 
-> "EXP-06 [실측] 4 격리수준 측정 결과 기반입니다. 같은 시나리오에서 — Session A 가 SELECT 두 번, 사이에 Session B 가 INSERT — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 결제 / 크레딧 도메인은 **같은 트랜잭션 안 동일 쿼리 일관성** 이 깨지면 비즈니스 로직이 깨지므로 **MySQL InnoDB 기본 RR** 로 결정. SERIALIZABLE 까지 갈 필요 없는 게 측정값으로 명확합니다."
+> "phantom read 재현 [실측] 4 격리수준 측정 결과 기반입니다. 같은 시나리오에서 — Session A 가 SELECT 두 번, 사이에 Session B 가 INSERT — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 결제 / 크레딧 도메인은 **같은 트랜잭션 안 동일 쿼리 일관성** 이 깨지면 비즈니스 로직이 깨지므로 **MySQL InnoDB 기본 RR** 로 결정. SERIALIZABLE 까지 갈 필요 없는 게 측정값으로 명확합니다."
 
 ### Q2. "MySQL 의 RR 과 PostgreSQL 의 RR 이 다른가요?"
 
-> "다릅니다. ANSI SQL 표준의 RR 은 phantom 차단을 **보장하지 않음** — 그래서 PostgreSQL 의 RR 은 표준대로 phantom 가능합니다. 그런데 MySQL InnoDB 는 RR 에서 (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log 의 세 메커니즘으로 phantom 까지 차단 — 사실상 Snapshot Isolation 에 가깝습니다. 그래서 MySQL → PostgreSQL 마이그레이션 시 격리수준 동작을 **재측정** 해야 한다는 게 ADR-BE-007 의 **틀렸다고 판단할 기준** 중 하나입니다."
+> "다릅니다. ANSI SQL 표준의 RR 은 phantom 차단을 **보장하지 않음** — 그래서 PostgreSQL 의 RR 은 표준대로 phantom 가능합니다. 그런데 MySQL InnoDB 는 RR 에서 (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log 의 세 메커니즘으로 phantom 까지 차단 — 사실상 Snapshot Isolation 에 가깝습니다. 그래서 MySQL → PostgreSQL 마이그레이션 시 격리수준 동작을 **재측정** 해야 한다는 게 격리수준 결정 사항의 **틀렸다고 판단할 기준** 중 하나입니다."
 
 ### Q3. "그럼 SERIALIZABLE 은 언제 쓰나요?"
 
@@ -826,7 +826,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ### Q4. "RR 도 못 막는 anomaly 는?"
 
-> "Write skew 입니다. 같은 row 두 개를 **각자** 읽고 **서로 모르고** update 하는 경우 — 둘 다 **자기 입장에선 일관성 OK** 인데 합쳐 보면 invariant 깨짐. RR 의 consistent read snapshot 은 **읽기** 시점 일관성만 보장하고, **서로 다른 row** 를 update 하면 lock 충돌도 안 나므로 detect 불가. 본 repo 는 크레딧 차감에 RR + 비관락 (`SELECT FOR UPDATE`), 멱등키 전이에 RR + 분산락 (Redisson) 으로 보강합니다 (ADR-BE-007 §4.2). PostgreSQL 은 SSI 가 자동 detect 하지만 MySQL 은 application 레이어 보강 필요."
+> "Write skew 입니다. 같은 row 두 개를 **각자** 읽고 **서로 모르고** update 하는 경우 — 둘 다 **자기 입장에선 일관성 OK** 인데 합쳐 보면 invariant 깨짐. RR 의 consistent read snapshot 은 **읽기** 시점 일관성만 보장하고, **서로 다른 row** 를 update 하면 lock 충돌도 안 나므로 detect 불가. 본 repo 는 크레딧 차감에 RR + 비관락 (`SELECT FOR UPDATE`), 멱등키 전이에 RR + 분산락 (Redisson) 으로 보강합니다 (격리수준 결정 사항의 §4.2). PostgreSQL 은 SSI 가 자동 detect 하지만 MySQL 은 application 레이어 보강 필요."
 
 ### Q5. "운영에서 RR 격리수준은 어떻게 모니터링하시나요?"
 

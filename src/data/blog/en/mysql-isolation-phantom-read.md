@@ -86,7 +86,7 @@ Normal operation: fine. But if another transaction slips an INSERT or UPDATE **b
 | Test table | `orders_w2` (10 million dummy rows, indexed on `owner_id`) |
 | Target rows | `WHERE owner_id=999999` — 0 rows at start |
 | Scenario | Session A SELECT × 2 with SLEEP 3s in between / Session B INSERT at 1.5s |
-| Label | `[measured — Java/Spring Stage 1]` |
+| Label | `[measured — Java/Spring]` |
 
 I ran the measurements through the raw `mysql` CLI. To compare **what Spring hides** later when JPA is introduced, you need to handle **isolation level / consistent read / gap lock** directly first, without the `@Transactional` abstraction in the way.
 
@@ -211,7 +211,7 @@ Substitute `<ISOLATION>` with `READ UNCOMMITTED` / `READ COMMITTED` / `REPEATABL
 
 ## 4. Measurement results — all 4 isolation levels [measured] {#measurement-results}
 
-### 4.1 Summary table [measured — Java/Spring Stage 1]
+### 4.1 Summary table [measured — Java/Spring]
 
 | Isolation level | A1 | A2 | Phantom? | B INSERT wait time | Verdict |
 |---|:---:|:---:|:---:|---|---|
@@ -549,7 +549,7 @@ This anomaly must be protected by additional mechanisms **layered on top** of RR
 | **Optimistic lock** (version column) | At UPDATE time check `WHERE version=?`. Retry on conflict | Higher application complexity |
 | **Distributed lock** (Redisson, etc.) | Acquire lock at the application level | External dependency |
 
-In this repo, payment uses **RR + pessimistic lock**, idempotency-key transitions use **RR + distributed lock** (ADR-BE-007 §4.2). PostgreSQL's SSI (Serializable Snapshot Isolation) auto-detects write skew, but on MySQL you must augment at the application layer.
+In this repo, payment uses **RR + pessimistic lock**, idempotency-key transitions use **RR + distributed lock** (per the isolation-level decision §4.2). PostgreSQL's SSI (Serializable Snapshot Isolation) auto-detects write skew, but on MySQL you must augment at the application layer.
 
 → **Acknowledging RR's limit and augmenting it** is the **depth** of an interview answer. "RR blocks all anomalies" is **wrong**.
 
@@ -557,7 +557,7 @@ In this repo, payment uses **RR + pessimistic lock**, idempotency-key transition
 
 ## 8. Domain mapping — which isolation level goes where {#domain-mapping}
 
-Let's revisit ADR-BE-007 §4.2's domain mapping alongside the measurements.
+Let's revisit the isolation-level decision §4.2's domain mapping alongside the measurements.
 
 | Domain | Isolation level | Augmentation | Rationale |
 |---|---|---|---|
@@ -725,7 +725,7 @@ The crux: **readers don't block writers, and vice versa**. This is the essence o
 
 ### 10.4 Hermitage — comprehensive isolation-level anomaly tests
 
-[Hermitage — Testing the "I" in ACID](https://github.com/ept/hermitage) is a test suite that **tabulates** anomaly behavior across MySQL / PostgreSQL / Oracle / SQL Server's isolation levels. The same scenario style as EXP-06 in this post, applied to **every anomaly**.
+[Hermitage — Testing the "I" in ACID](https://github.com/ept/hermitage) is a test suite that **tabulates** anomaly behavior across MySQL / PostgreSQL / Oracle / SQL Server's isolation levels. The same scenario style as the phantom-read reproduction in this post, applied to **every anomaly**.
 
 → "Don't just trust my measurement" — Hermitage offers a cross-validation against this post's [measured] results.
 
@@ -746,7 +746,7 @@ The crux: **readers don't block writers, and vice versa**. This is the essence o
 | Rollback option | Auto-recovery after kill. Application's retry logic handles it |
 | Postmortem | Trace application code — **why** was the transaction long? External call inside the transaction? OSIV? |
 
-A common cause: **external API calls inside transactions** (the exact pattern from the [companion post EXP-09](/en/spring-transaction-external-api-pool-exhaustion)). Combine RR with that, and you get pool exhaustion **and** undo log explosion at once.
+A common cause: **external API calls inside transactions** (the exact pattern from the [companion post — transaction-with-external-call pool-exhaustion measurement](/en/spring-transaction-external-api-pool-exhaustion)). Combine RR with that, and you get pool exhaustion **and** undo log explosion at once.
 
 ### 11.2 Scenario 2 — Write skew occurs (the anomaly RR **did not** prevent)
 
@@ -794,10 +794,10 @@ Without these measurements, the **why?** behind subsequent decisions is anemic.
 
 | Measurement | Follow-up decision |
 |---|---|
-| RU/RC phantoms occur (§4.2~4.3) | RU/RC off-limits rule for payment domain (ADR-BE-007 §4.2) |
-| RR blocks phantoms (§4.4) | Repo default RR adopted (ADR-BE-007 §4.1) |
+| RU/RC phantoms occur (§4.2~4.3) | RU/RC off-limits rule for payment domain (isolation-level decision §4.2) |
+| RR blocks phantoms (§4.4) | Repo default RR adopted (isolation-level decision §4.1) |
 | SERIALIZABLE INSERT wait 1.56s (§4.5) | "SERIALIZABLE only for short critical" rule (§4.3 enforcement) |
-| Write skew unblocked by RR (§7) | Credit deduction RR + pessimistic lock (ADR-BE-007 §4.2) |
+| Write skew unblocked by RR (§7) | Credit deduction RR + pessimistic lock (isolation-level decision §4.2) |
 | Long-running RR + undo log explosion (§11.1) | Operational threshold alert design (§9.3) |
 
 ### 12.3 The one-liner
@@ -814,11 +814,11 @@ Without these measurements, the **why?** behind subsequent decisions is anemic.
 
 ### Q1. "How did you decide on a MySQL isolation level?"
 
-> "Based on EXP-06 [measured] across all 4 isolation levels in the same scenario — Session A SELECTs twice with Session B INSERTing in between. RU/RC trigger phantoms (A1=0 → INSERT → A2=1), RR blocks them (A2=0), SERIALIZABLE has the INSERT itself wait (1.56s). Payment / credit domains break their business logic if **same-query consistency in the same transaction** fails, so we adopted **MySQL InnoDB's default RR**. Measurements make it clear there's no need to escalate to SERIALIZABLE."
+> "Based on the phantom-read reproduction [measured] across all 4 isolation levels in the same scenario — Session A SELECTs twice with Session B INSERTing in between. RU/RC trigger phantoms (A1=0 → INSERT → A2=1), RR blocks them (A2=0), SERIALIZABLE has the INSERT itself wait (1.56s). Payment / credit domains break their business logic if **same-query consistency in the same transaction** fails, so we adopted **MySQL InnoDB's default RR**. Measurements make it clear there's no need to escalate to SERIALIZABLE."
 
 ### Q2. "Are MySQL's RR and PostgreSQL's RR different?"
 
-> "Yes. The ANSI SQL standard's RR doesn't **guarantee** blocking phantoms — so PostgreSQL RR allows phantoms per the standard. But MySQL InnoDB RR uses three mechanisms — (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log — to block phantoms, effectively close to Snapshot Isolation. That's why ADR-BE-007's **re-measure on migration** criterion exists — when migrating MySQL → PostgreSQL, isolation behavior must be re-measured."
+> "Yes. The ANSI SQL standard's RR doesn't **guarantee** blocking phantoms — so PostgreSQL RR allows phantoms per the standard. But MySQL InnoDB RR uses three mechanisms — (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log — to block phantoms, effectively close to Snapshot Isolation. That's why the isolation-level decision's **re-measure on migration** criterion exists — when migrating MySQL → PostgreSQL, isolation behavior must be re-measured."
 
 ### Q3. "When do you actually use SERIALIZABLE?"
 
@@ -826,7 +826,7 @@ Without these measurements, the **why?** behind subsequent decisions is anemic.
 
 ### Q4. "What anomaly does RR fail to prevent?"
 
-> "Write skew. Two transactions **each** read rows and update **different rows** without knowing about each other — both consistent in their own view, but combined the invariant breaks. RR's consistent read snapshot only guarantees consistency at **read time**; updating **different rows** causes no lock conflict, so detection is impossible. In this repo, credit deduction uses RR + pessimistic lock (`SELECT FOR UPDATE`) and idempotency-key transitions use RR + distributed lock (Redisson) to augment (ADR-BE-007 §4.2). PostgreSQL's SSI auto-detects this; on MySQL you augment at the application layer."
+> "Write skew. Two transactions **each** read rows and update **different rows** without knowing about each other — both consistent in their own view, but combined the invariant breaks. RR's consistent read snapshot only guarantees consistency at **read time**; updating **different rows** causes no lock conflict, so detection is impossible. In this repo, credit deduction uses RR + pessimistic lock (`SELECT FOR UPDATE`) and idempotency-key transitions use RR + distributed lock (Redisson) to augment (isolation-level decision §4.2). PostgreSQL's SSI auto-detects this; on MySQL you augment at the application layer."
 
 ### Q5. "How do you monitor RR in production?"
 

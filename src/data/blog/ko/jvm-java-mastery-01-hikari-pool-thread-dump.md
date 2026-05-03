@@ -1,6 +1,6 @@
 ---
 title: "JVM Thread Dump로 분해한 HikariCP 풀 고갈 — TIMED_WAITING (parked) 의 진짜 의미"
-description: "풀 고갈 알람이 울렸을 때 애플리케이션 코드만 들여다보면 답이 안 나옵니다. jstack으로 받아본 thread dump가 진짜 증거 — 모든 worker thread가 HikariCP 안에서 TIMED_WAITING (parked) 상태로 멈춰 있습니다. JVM Thread State 머신, LockSupport.parkNanos, ConcurrentBag·SynchronousQueue 의 동작, 그리고 EXP-09 [실측] (timeout 5s 100% / 1s 16.7%)가 thread dump 한 줄과 정확히 어떻게 매핑되는지 — 운영 중 풀 고갈을 dump 한 장으로 진단하는 방법을 라인 단위로 풀어봤습니다."
+description: "풀 고갈 알람이 울렸을 때 애플리케이션 코드만 들여다보면 답이 안 나옵니다. jstack으로 받아본 thread dump가 진짜 증거 — 모든 worker thread가 HikariCP 안에서 TIMED_WAITING (parked) 상태로 멈춰 있습니다. JVM Thread State 머신, LockSupport.parkNanos, ConcurrentBag·SynchronousQueue 의 동작, 그리고 트랜잭션-안-외부-호출 풀 고갈 [실측] (timeout 5s 100% / 1s 16.7%)이 thread dump 한 줄과 정확히 어떻게 매핑되는지 — 운영 중 풀 고갈을 dump 한 장으로 진단하는 방법을 라인 단위로 풀어봤습니다."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00.000Z
 featured: true
@@ -46,17 +46,17 @@ dump 한 장에 답이 있습니다. **모든 worker thread** 가 HikariCP 의 `
 
 이 글은 그 dump 를 **한 줄씩** 분해합니다.
 
-- **자매글** [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) 이 **비즈니스 패턴 (Saga / Outbox)** 측면에서 같은 사건을 다뤘다면, 본 글은 **같은 EXP-09 [실측] 을 JVM 측면 — Thread Dump / Thread State / HikariCP 내부 / LockSupport / GC** 로 다시 봅니다. 두 글이 짝.
-- 본 글의 입력 자산: W1 EXP-09 [실측 — Java/Spring Stage 0] (timeout 5s 100% 통과 / P99 6.3s, timeout 1s 16.7% 통과 / 50건 timeout) + EXP-09b 9 시나리오 매트릭스.
+- **자매글** [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) 이 **비즈니스 패턴 (Saga / Outbox)** 측면에서 같은 사건을 다뤘다면, 본 글은 **같은 트랜잭션-안-외부-호출 풀 고갈 [실측] 을 JVM 측면 — Thread Dump / Thread State / HikariCP 내부 / LockSupport / GC** 로 다시 봅니다. 두 글이 짝.
+- 본 글의 입력 자산: 트랜잭션-안-외부-호출 풀 고갈 측정 [실측 — Java/Spring] (timeout 5s 100% 통과 / P99 6.3s, timeout 1s 16.7% 통과 / 50건 timeout) + 처방 비교 측정의 9 시나리오 매트릭스.
 - 본 글의 깊이: **L3-L4** ([JVM/Java Mastery 시리즈](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) 1편 — **측정 + JVM 메커니즘 + 빅테크 운영 회고 + 면접 답변**).
 
 ---
 
 ## 1. 운영 표면 — 풀 고갈 알람이 울렸을 때 보이는 것 {#operational-surface}
 
-자매글에서 같은 EXP-09 를 **비즈니스 측면** 으로 다뤘으니, 여기서는 **운영 측면**만 짧게 회수하겠습니다.
+자매글에서 같은 트랜잭션-안-외부-호출 풀 고갈 측정을 **비즈니스 측면** 으로 다뤘으니, 여기서는 **운영 측면**만 짧게 회수하겠습니다.
 
-### 1.1 두 가지 모습의 풀 고갈 [실측 — Java/Spring Stage 0]
+### 1.1 두 가지 모습의 풀 고갈 [실측 — Java/Spring]
 
 같은 풀 고갈인데 `connection-timeout` 값에 따라 **운영팀이 받는 신호가 정반대**:
 
@@ -132,7 +132,7 @@ done
 
 ## 3. Thread Dump 한 줄씩 해부 — JVM 풀 고갈 시점 dump {#thread-dump-anatomy}
 
-이제 본론. EXP-09 Run #2 (timeout 1s, concurrent 60, extDelay 3s) 시점에 채취한 dump 의 **형태**를 보면서 한 줄씩 풀어봅니다.
+이제 본론. 트랜잭션-안-외부-호출 풀 고갈 측정의 Run #2 (timeout 1s, concurrent 60, extDelay 3s) 시점에 채취한 dump 의 **형태**를 보면서 한 줄씩 풀어봅니다.
 
 ### 3.1 정상 thread (RUNNABLE)
 
@@ -199,7 +199,7 @@ done
 
 ### 3.3 dump 1회로 보는 thread state 분포 — ASCII bar
 
-EXP-09 Run #2 시점 dump (60 worker, pool=10) 시점 thread state 분포:
+풀 고갈 측정의 Run #2 시점 dump (60 worker, pool=10) 시점 thread state 분포:
 
 ```
 정상 시점 (idle):
@@ -218,7 +218,7 @@ BLOCKED          0
                  ─────────────────────── 69 thread (worker 60 + HikariCP 등)
 ```
 
-→ **TIMED_WAITING (parked) 가 50개로 spike** — 정확히 EXP-09 Run #2 의 `awaitingConnection=50` 측정값과 매핑. dump 의 thread state 와 Hikari MXBean 의 metric 이 **같은 사건의 두 측면**.
+→ **TIMED_WAITING (parked) 가 50개로 spike** — 정확히 풀 고갈 측정 Run #2 의 `awaitingConnection=50` 측정값과 매핑. dump 의 thread state 와 Hikari MXBean 의 metric 이 **같은 사건의 두 측면**.
 
 ---
 
@@ -336,7 +336,7 @@ sequenceDiagram
     end
 ```
 
-→ EXP-09 Run #2 측정에서 50 thread 가 **후자** 경로 (1초 만료 → SQLTransientConnectionException) 로 빠져나옴.
+→ 풀 고갈 측정의 Run #2 에서 50 thread 가 **후자** 경로 (1초 만료 → SQLTransientConnectionException) 로 빠져나옴.
 
 ### 4.3 LockSupport.parkNanos — JVM 이 thread 를 잠재우는 메커니즘
 
@@ -363,9 +363,9 @@ public static void parkNanos(Object blocker, long nanos) {
 - OS thread 가 **진짜로** schedule out — CPU 사용 0
 - 깨어남 조건: (a) `nanos` 만료 / (b) 다른 thread 가 `unpark(thread)` 호출 / (c) 인터럽트 / (d) spurious wakeup
 
-EXP-09 Run #2 (timeout 1s) 시점의 50 worker — 모두 `parkNanos(blocker, 1_000_000_000L)` 호출하고 **최대 1초까지** 잠들어 있습니다. 1초 후 하나도 unpark 안 되면 (= connection 반환 없음) → null 반환 → HikariCP 가 `SQLTransientConnectionException` 으로 변환.
+풀 고갈 측정의 Run #2 (timeout 1s) 시점의 50 worker — 모두 `parkNanos(blocker, 1_000_000_000L)` 호출하고 **최대 1초까지** 잠들어 있습니다. 1초 후 하나도 unpark 안 되면 (= connection 반환 없음) → null 반환 → HikariCP 가 `SQLTransientConnectionException` 으로 변환.
 
-### 4.4 EXP-09 [실측] 과 코드의 매핑
+### 4.4 트랜잭션-안-외부-호출 풀 고갈 [실측] 과 코드의 매핑
 
 | 측정값 | 원인 코드 |
 |---|---|
@@ -448,7 +448,7 @@ RUNNABLE
 1. **다른 thread 가 connection 반환 → SynchronousQueue.put → unpark(this)** ⇒ TIMED_WAITING → RUNNABLE
 2. **1초 만료 → 자동 깨어남 → poll() 이 null 반환** ⇒ TIMED_WAITING → RUNNABLE → SQLTransientConnectionException throw
 
-EXP-09 Run #2 측정에서 **50 thread 가 (2) 경로로 빠져나옴** (50건 pool timeout). Run #1 (timeout 5s) 에서는 **모든 thread 가 (1) 경로** — wave 별로 unpark 받음.
+풀 고갈 측정의 Run #2 에서 **50 thread 가 (2) 경로로 빠져나옴** (50건 pool timeout). Run #1 (timeout 5s) 에서는 **모든 thread 가 (1) 경로** — wave 별로 unpark 받음.
 
 ### 5.4 RUNNABLE 의 함정 — JVM 의 **논리** 상태 vs OS 의 **실제** 상태
 
@@ -476,7 +476,7 @@ dump 에서 가장 헷갈리는 부분.
 
 ---
 
-## 6. EXP-09b 9 시나리오 → Thread Dump 변화 {#nine-scenarios-thread-states}
+## 6. 처방 비교 측정의 9 시나리오 → Thread Dump 변화 {#nine-scenarios-thread-states}
 
 자매글에서 다룬 단순 분리 / Saga / Outbox 의 dump 형태는 **어떻게 다른가** — JVM 측면 차이를 짧게 정리.
 
@@ -525,7 +525,7 @@ Outbox (60 worker 즉시 ACK):
 
 `Thread.sleep` 도 내부적으로는 `parkNanos` 와 비슷하지만 `Object.wait` 변형. dump 에서 `(sleeping)` qualifier 로 구분 가능.
 
-### 6.4 EXP-09b A/OFF awaiting=57 의 dump 측면 [실측]
+### 6.4 처방 비교 측정의 A/OFF awaiting=57 의 dump 측면 [실측]
 
 자매글 §3.1 에서 **"외부 호출 sleep(3000ms) 끝난 직후 60 worker 가 동시에 INSERT 요청 → 풀 10 가득 → awaiting=50+ spike"** 측정.
 
@@ -565,7 +565,7 @@ hikaricp_pending_threads > 0 for 30s
   AND hikaricp_active_connections == hikaricp_max
 ```
 
-→ **순간 spike** (50ms) 는 무시, **30초 지속** 만 알람. 이 임계값이 §6.4 의 EXP-09b A/OFF spike 도 자연스럽게 거름.
+→ **순간 spike** (50ms) 는 무시, **30초 지속** 만 알람. 이 임계값이 §6.4 의 처방 비교 측정 A/OFF spike 도 자연스럽게 거름.
 
 ### 7.2 Thread Dump 자동 수집 — 알람 trigger 시 dump 채취
 
@@ -753,7 +753,7 @@ GC log 분석:
 
 ### Q1. "풀 고갈 알람을 받으면 무엇부터 채취하나요?"
 
-> "thread dump 를 **3회 5초 간격** 으로 먼저 받습니다 (`jcmd <pid> Thread.print`). 1회만 받으면 **순간 상태**인지 **지속**인지 구분 안 되거든요. 3회 모두 같은 thread 가 같은 stack frame 에 있으면 진짜 stuck. dump 의 thread state 분포를 보고 — TIMED_WAITING (parked) 가 spike 면 풀 고갈, BLOCKED 가 spike 면 `synchronized` 경합, RUNNABLE 인데 stack 최상단이 `socketRead0` 이면 외부 I/O 대기. EXP-09 [실측] Run #2 측정에서 50 worker 모두 `LockSupport.parkNanos` 와 `ConcurrentBag.borrow` stack 으로 dump 한 장에 풀 고갈을 확정했습니다."
+> "thread dump 를 **3회 5초 간격** 으로 먼저 받습니다 (`jcmd <pid> Thread.print`). 1회만 받으면 **순간 상태**인지 **지속**인지 구분 안 되거든요. 3회 모두 같은 thread 가 같은 stack frame 에 있으면 진짜 stuck. dump 의 thread state 분포를 보고 — TIMED_WAITING (parked) 가 spike 면 풀 고갈, BLOCKED 가 spike 면 `synchronized` 경합, RUNNABLE 인데 stack 최상단이 `socketRead0` 이면 외부 I/O 대기. 트랜잭션-안-외부-호출 풀 고갈 [실측] Run #2 측정에서 50 worker 모두 `LockSupport.parkNanos` 와 `ConcurrentBag.borrow` stack 으로 dump 한 장에 풀 고갈을 확정했습니다."
 
 ### Q2. "Thread Dump 의 PARKED 상태는 정확히 무엇인가요?"
 
@@ -761,7 +761,7 @@ GC log 분석:
 
 ### Q3. "HikariCP 가 SynchronousQueue 를 쓰는 이유?"
 
-> "SynchronousQueue 는 capacity 0 의 BlockingQueue 입니다. `put()` 은 **다른 thread 가 take()** 할 때까지 대기, `take()` 은 **다른 thread 가 put()** 할 때까지 대기 — 큐 안에 **원소를 보관 안 함**. HikariCP 는 connection 객체를 hand-off 하는 데 이게 정확히 맞습니다. 첫째, 0-copy hand-off — connection 을 큐에 저장 안 하니 GC pressure 0. 둘째, `SynchronousQueue(true)` 면 FIFO 공정성 — 먼저 빌리려고 기다린 thread 가 먼저 받음. 셋째, `poll(0)` 은 빈 큐에 즉시 null 반환 — 풀이 비어있는 일반 path 가 빠름. EXP-09 측정에서도 awaiting=50 thread 모두 정확히 `SynchronousQueue.poll(timeout, NANOSECONDS)` 안에서 park 됐습니다."
+> "SynchronousQueue 는 capacity 0 의 BlockingQueue 입니다. `put()` 은 **다른 thread 가 take()** 할 때까지 대기, `take()` 은 **다른 thread 가 put()** 할 때까지 대기 — 큐 안에 **원소를 보관 안 함**. HikariCP 는 connection 객체를 hand-off 하는 데 이게 정확히 맞습니다. 첫째, 0-copy hand-off — connection 을 큐에 저장 안 하니 GC pressure 0. 둘째, `SynchronousQueue(true)` 면 FIFO 공정성 — 먼저 빌리려고 기다린 thread 가 먼저 받음. 셋째, `poll(0)` 은 빈 큐에 즉시 null 반환 — 풀이 비어있는 일반 path 가 빠름. 트랜잭션-안-외부-호출 풀 고갈 측정에서도 awaiting=50 thread 모두 정확히 `SynchronousQueue.poll(timeout, NANOSECONDS)` 안에서 park 됐습니다."
 
 ### Q4. "Thread Dump 만으로는 부족한 케이스?"
 
@@ -773,7 +773,7 @@ GC log 분석:
 
 ### 11.1 핵심 한 줄
 
-> **"풀 고갈 알람 = 애플리케이션 코드 문제 X. JVM 안에서 thread 가 `LockSupport.parkNanos` 에 갇힌 상태"** — dump 한 장으로 라인 단위로 증명 가능합니다. EXP-09 [실측] 50 worker 가 모두 `ConcurrentBag.borrow` → `SynchronousQueue.poll` → `LockSupport.parkNanos` → `Unsafe.park` stack 에 있는 게 그 증거.
+> **"풀 고갈 알람 = 애플리케이션 코드 문제 X. JVM 안에서 thread 가 `LockSupport.parkNanos` 에 갇힌 상태"** — dump 한 장으로 라인 단위로 증명 가능합니다. 트랜잭션-안-외부-호출 풀 고갈 [실측] 의 50 worker 가 모두 `ConcurrentBag.borrow` → `SynchronousQueue.poll` → `LockSupport.parkNanos` → `Unsafe.park` stack 에 있는 게 그 증거.
 
 ### 11.2 측정으로 깨진 가정들
 
@@ -797,9 +797,9 @@ GC log 분석:
 
 ## 12. 다음 글에서 {#next-post}
 
-- W4 EXP-02 락 4종 비교 (낙관 / 비관 / GET_LOCK / Redisson) — `synchronized` / `ReentrantLock` 의 thread state 차이
-- W6 Spring Batch 100만 건 backfill — G1 vs ZGC pause 분포 [측정 예정]
-- W11 EXP-14 — Virtual Thread vs Coroutines 100k I/O — `parkNanos` 가 carrier 에서 어떻게 동작하는가
+- 락 비교 측정 (낙관 / 비관 / GET_LOCK / Redisson) — `synchronized` / `ReentrantLock` 의 thread state 차이 (후속 시리즈 예정)
+- Spring Batch 100만 건 backfill — G1 vs ZGC pause 분포 (후속 측정 예정)
+- Coroutines vs Virtual Thread 비교 측정 — Virtual Thread vs Coroutines 100k I/O — `parkNanos` 가 carrier 에서 어떻게 동작하는가 (후속 측정 예정)
 
 ---
 
@@ -830,6 +830,6 @@ GC log 분석:
 - [Ron Pressler — Project Loom slide](https://cr.openjdk.org/~rpressler/loom/loom/sol1_part1.html) — virtual thread 의 park 메커니즘
 
 ### 자매글
-- [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) — 같은 EXP-09 자산을 **비즈니스 패턴 측면** 으로 다룬 짝글
+- [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) — 같은 트랜잭션-안-외부-호출 풀 고갈 측정을 **비즈니스 패턴 측면** 으로 다룬 짝글
 
-> **NDA 가드레일**: 본 글의 모든 측정값은 `[실측 — Java/Spring Stage 0]` 라벨, 외부 플랫폼은 `PlatformA` 추상화 (블로그에서는 일반화), 회사 코드 경로 미인용.
+> **NDA 가드레일**: 본 글의 모든 측정값은 `[실측 — Java/Spring]` 라벨, 외부 플랫폼은 `PlatformA` 추상화 (블로그에서는 일반화), 회사 코드 경로 미인용.

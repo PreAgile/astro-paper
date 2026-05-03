@@ -48,7 +48,7 @@ tags:
 
 이 모든 **축** 을 1,000만 row 환경에서 직접 만들고 측정해서 — **언제 무엇을 고를지** 를 결정으로 정리한 것이 본 글입니다.
 
-- 본 글의 입력 자산: W2 Phase 3 의 5종 인덱스 cardinality + Q1~Q5 Before/After + Q2 역설 + 인덱스 storage 1.3GB + 쓰기 latency 5~6배.
+- 본 글의 입력 자산: 5종 인덱스 cardinality 측정 + Q1~Q5 Before/After + Q2 역설 + 인덱스 storage 1.3GB + 쓰기 latency 5~6배.
 - 자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 의 cursor 가 본 글의 §3 composite + leftmost prefix 위에서 동작하는 한 가지 패턴.
 - 본 글의 깊이: **L2-L3** (RDB Mastery 시리즈 2편 — **종류별 trade-off + 측정 + 빅테크 운영 + 면접 답변**).
 
@@ -198,7 +198,7 @@ idx_owner_state_created (owner_id, state, created_at) 의 leaf:
 
 ### 3.3 [실측 — Java/Spring] Q5 — composite 의 lookup + reverse scan
 
-W2 Phase 3 에서 `(owner_id, state, created_at, id)` composite 인덱스를 만들고 측정한 Q5:
+`(owner_id, state, created_at, id)` composite 인덱스를 만들고 측정한 Q5:
 
 ```sql
 SELECT id, owner_id, state, created_at, amount
@@ -235,7 +235,7 @@ composite 인덱스 만들 때 컬럼 순서 결정의 표준 룰:
 2. **Cardinality 높은 컬럼 먼저 (단, 등치 컬럼 안에서)**: 같은 등치라면 selectivity 큰 게 앞
 3. **ORDER BY 컬럼은 가장 뒤** (B-tree 의 자연 정렬과 맞아 filesort 회피)
 
-W2 Phase 3 의 `(owner_id, state, created_at)` 가 정확히 이 룰을 따른 형태. owner_id (10K 명) + state (4종, 등치) → created_at (정렬용). 등치 → 정렬 순서.
+본 시리즈의 `(owner_id, state, created_at)` 가 정확히 이 룰을 따른 형태. owner_id (10K 명) + state (4종, 등치) → created_at (정렬용). 등치 → 정렬 순서.
 
 ---
 
@@ -252,7 +252,7 @@ W2 Phase 3 의 `(owner_id, state, created_at)` 가 정확히 이 룰을 따른 �
 
 > "The higher the selectivity of a column, the more efficient an index on it can be. A column with low selectivity (e.g., a boolean) often does not benefit from a standalone index — the optimizer would prefer a full table scan."
 
-### 4.2 [실측 — Java/Spring] W2 Phase 3 의 5종 인덱스 cardinality
+### 4.2 [실측 — Java/Spring] 5종 인덱스의 cardinality
 
 | 인덱스 / 컬럼 | cardinality | selectivity | 효과 |
 |---|---|---|---|
@@ -291,7 +291,7 @@ cardinality
 
 > **cardinality 가 낮은 컬럼 (selectivity < 0.01) 은 단독 인덱스 만들지 않는다. 대신 **composite 의 후순위** 로만 가치가 있다.**
 
-W2 Phase 3 의 `idx_region_code` (cardinality 4) 는 **단독 인덱스로 만들면 거의 효과 없음**. 옵티마이저가 거의 사용하지 않음. 대신 `(region_code, owner_id, created_at)` 처럼 **composite 의 후순위** 로 들어가면 — region_code 로 1/4 좁히고 그 안에서 owner_id 로 정밀 좁히기.
+본 시리즈의 `idx_region_code` (cardinality 4) 는 **단독 인덱스로 만들면 거의 효과 없음**. 옵티마이저가 거의 사용하지 않음. 대신 `(region_code, owner_id, created_at)` 처럼 **composite 의 후순위** 로 들어가면 — region_code 로 1/4 좁히고 그 안에서 owner_id 로 정밀 좁히기.
 
 이게 "boolean / state / region 같은 enum 컬럼에 단독 인덱스 안 만든다" 의 원리.
 
@@ -322,7 +322,7 @@ W2 Phase 3 의 `idx_region_code` (cardinality 4) 는 **단독 인덱스로 만�
 
 ### 5.3 [실측 — Java/Spring] Q3 — covering 의 가장 명확한 사례
 
-W2 Phase 3 의 Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
+Q3 (`SELECT id, created_at FROM orders_w2 ORDER BY created_at DESC LIMIT 20`):
 
 | 단계 | actual time | 처리 row |
 |---|---|---|
@@ -494,7 +494,7 @@ WHERE LOWER(email) = 'alice@foo.com'
 
 [Vlad Mihalcea — MySQL 8 Functional Index](https://vladmihalcea.com/mysql-8-functional-indexes/) 가 8.0.13+ 의 사용 예와 함정을 가장 자세히 다룹니다.
 
-W2 측정 자산엔 functional index 직접 측정이 없어서 — 본 글에선 공식 문서 + Vlad Mihalcea 사례 인용으로 처리. 운영 적용 시 EXPLAIN ANALYZE 로 **실제 push down 확인** 이 필수 (표현식 한 글자라도 다르면 인덱스 무효).
+본 시리즈 측정 자산엔 functional index 직접 측정이 없어서 — 본 글에선 공식 문서 + Vlad Mihalcea 사례 인용으로 처리. 운영 적용 시 EXPLAIN ANALYZE 로 **실제 push down 확인** 이 필수 (표현식 한 글자라도 다르면 인덱스 무효).
 
 ---
 
@@ -557,9 +557,9 @@ InnoDB full-text 는 **소규모 게시판 / 단순 검색** 까지가 운영 �
 
 ## 9. 인덱스 비용 — 공짜가 아닌 인덱스 {#index-cost}
 
-### 9.1 [실측 — Java/Spring] Phase 3 의 **대가**
+### 9.1 [실측 — Java/Spring] 5종 인덱스의 **대가**
 
-W2 Phase 3 에서 5종 인덱스를 추가한 결과 — 읽기 빨라진 **그 옆에** 일어난 비용:
+5종 인덱스를 추가한 결과 — 읽기 빨라진 **그 옆에** 일어난 비용:
 
 | 비용 항목 | 측정값 | 비고 |
 |---|---|---|
@@ -579,7 +579,7 @@ W2 Phase 3 에서 5종 인덱스를 추가한 결과 — 읽기 빨라진 **그 
 ### 9.2 다이어그램 8 — 인덱스 추가 vs 비용
 
 ```
-인덱스 수 별 비용 (W2 Phase 3 기준):
+인덱스 수 별 비용 (본 시리즈 측정 기준):
 
 인덱스 수    INSERT 비용 (× baseline)    Storage (GB)
    0          █  1×                        0
@@ -608,7 +608,7 @@ W2 Phase 3 에서 5종 인덱스를 추가한 결과 — 읽기 빨라진 **그 
 
 - **읽기 비율 99%+ 인 OLAP 테이블**: 인덱스 적극 추가 (쓰기 비용 무시 가능)
 - **쓰기 비율 50%+ 인 OLTP 테이블**: 인덱스 **최소** — 꼭 필요한 것만
-- **batch 적재 + 그 후 읽기 만**: 적재 시 인덱스 비활성 → 적재 후 활성 (W2 Phase 2/3 패턴)
+- **batch 적재 + 그 후 읽기 만**: 적재 시 인덱스 비활성 → 적재 후 활성 (본 시리즈의 적재 → 인덱스 추가 패턴)
 
 ---
 
@@ -616,7 +616,7 @@ W2 Phase 3 에서 5종 인덱스를 추가한 결과 — 읽기 빨라진 **그 
 
 ### 10.1 [실측 — Java/Spring] Q2 의 측정값
 
-W2 Phase 3 의 Q2:
+측정한 Q2:
 
 ```sql
 SELECT id, owner_id, state, created_at
@@ -709,7 +709,7 @@ graph TB
 |---|---|
 | 가능하면 covering 으로 | SELECT 컬럼을 **명시적으로 좁혀서** 인덱스 leaf 안에 들어오도록 |
 | 쓰기 빈도 높은 테이블 | 인덱스 **최소** — 꼭 필요한 것만 |
-| 적재 시 | 인덱스 비활성 → 적재 후 활성 (W2 Phase 2/3 패턴) |
+| 적재 시 | 인덱스 비활성 → 적재 후 활성 (본 시리즈의 적재 → 인덱스 추가 패턴) |
 | 인덱스 추가 전 | EXPLAIN ANALYZE 로 **실측** + write latency 영향 측정 + ADR 기록 |
 
 ### 11.4 강제 룰 (운영 표준)
@@ -747,11 +747,11 @@ graph TB
 
 #### Q2. "Composite index 의 leftmost prefix 룰이란?"
 
-> "복합 인덱스 `(a, b, c)` 는 **왼쪽부터** 차례로 매칭해야 인덱스가 동작합니다. `WHERE a=?` ✅, `WHERE a=? AND b=?` ✅, 전체 ✅. 그런데 `WHERE b=?` 단독은 ❌, `WHERE b=? AND c=?` 도 ❌. 이유: 인덱스의 leaf 가 a → b → c 순으로 **정렬** 되어 있어서 — a 가 빠지면 b 가 **흩어져 있어** binary search 가 안 됩니다. 전화번호부에 비유하면 성+이름 정렬 책에서 '이름이 면수' 만으로는 책 전체를 봐야 함. 같은 원리. 운영 결정: composite 컬럼 순서는 **등치 (=) 먼저, 범위 (<, >) 나중, ORDER BY 컬럼 가장 뒤**. W2 측정에서 `(owner_id, state, created_at, id)` composite 로 Q5 1,497ms → 2.59ms (577배) — leftmost prefix 매칭 + reverse scan 의 효과 ([실측 — Java/Spring])."
+> "복합 인덱스 `(a, b, c)` 는 **왼쪽부터** 차례로 매칭해야 인덱스가 동작합니다. `WHERE a=?` ✅, `WHERE a=? AND b=?` ✅, 전체 ✅. 그런데 `WHERE b=?` 단독은 ❌, `WHERE b=? AND c=?` 도 ❌. 이유: 인덱스의 leaf 가 a → b → c 순으로 **정렬** 되어 있어서 — a 가 빠지면 b 가 **흩어져 있어** binary search 가 안 됩니다. 전화번호부에 비유하면 성+이름 정렬 책에서 '이름이 면수' 만으로는 책 전체를 봐야 함. 같은 원리. 운영 결정: composite 컬럼 순서는 **등치 (=) 먼저, 범위 (<, >) 나중, ORDER BY 컬럼 가장 뒤**. 본 시리즈 측정에서 `(owner_id, state, created_at, id)` composite 로 Q5 1,497ms → 2.59ms (577배) — leftmost prefix 매칭 + reverse scan 의 효과 ([실측 — Java/Spring])."
 
 #### Q3. "인덱스를 추가했는데 쿼리가 느려진 적 있나요?"
 
-> "있습니다. W2 Phase 3 의 Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 인덱스 없을 때 0.658ms 였는데 idx_state_created 추가 후 13.5ms. **인덱스가 **느리게** 만든 케이스**. 이유: full scan + LIMIT 5 조기 종료가 ~20개 row 만 읽고 끝나는 반면, 인덱스 사용은 secondary index → table row lookup 의 random I/O 비용이 더 컸음. 옵티마이저는 통계 기반 cost-based decision — 통계가 현실과 어긋나면 잘못된 plan 선택. 해법: (1) 인덱스 hint (`USE INDEX(PRIMARY)`) 로 강제, (2) `ANALYZE TABLE` 로 통계 갱신, (3) 정말 그 인덱스가 다른 쿼리에 안 쓰이면 제거. 교훈: **EXPLAIN ANALYZE 로 직접 확인**. 옵티마이저는 **대부분** 옳지만 **항상** 옳지 않음 ([실측 — Java/Spring])."
+> "있습니다. 본 시리즈의 Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) — 인덱스 없을 때 0.658ms 였는데 idx_state_created 추가 후 13.5ms. **인덱스가 **느리게** 만든 케이스**. 이유: full scan + LIMIT 5 조기 종료가 ~20개 row 만 읽고 끝나는 반면, 인덱스 사용은 secondary index → table row lookup 의 random I/O 비용이 더 컸음. 옵티마이저는 통계 기반 cost-based decision — 통계가 현실과 어긋나면 잘못된 plan 선택. 해법: (1) 인덱스 hint (`USE INDEX(PRIMARY)`) 로 강제, (2) `ANALYZE TABLE` 로 통계 갱신, (3) 정말 그 인덱스가 다른 쿼리에 안 쓰이면 제거. 교훈: **EXPLAIN ANALYZE 로 직접 확인**. 옵티마이저는 **대부분** 옳지만 **항상** 옳지 않음 ([실측 — Java/Spring])."
 
 #### Q4. "Multi-valued / Functional index 는 언제 쓰나요?"
 
@@ -759,7 +759,7 @@ graph TB
 
 #### Q5. "테이블에 인덱스 N개 추가 = 쓰기 비용 N배인가요?"
 
-> "정확히는 **N+1배** 입니다. clustered index 1개 (테이블 자체) + secondary index N개 = **B-tree N+1개** 가 동시에 존재. INSERT 1건 = 모든 B-tree 의 leaf 갱신. W2 측정에서 인덱스 5종 추가 후 INSERT 비용은 이론상 6배. 그래서 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** (Bulk Data Loading 권장). storage 도 영향 — 1,000만 row 에 5종 인덱스 = 약 1.3GB 추가 (10GB 테이블 대비 +13%) → buffer pool 점유 → clustered hit 율까지 영향. 그래서 **읽기 빠르게 한 인덱스가 쓰기 / storage / 메모리 모두 비용**. **읽기 / 쓰기 비율 + 쓰기 빈도 + storage 예산** 모두 따져서 결정. 인덱스 다이어트 (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring])."
+> "정확히는 **N+1배** 입니다. clustered index 1개 (테이블 자체) + secondary index N개 = **B-tree N+1개** 가 동시에 존재. INSERT 1건 = 모든 B-tree 의 leaf 갱신. 본 시리즈 측정에서 인덱스 5종 추가 후 INSERT 비용은 이론상 6배. 그래서 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** (Bulk Data Loading 권장). storage 도 영향 — 1,000만 row 에 5종 인덱스 = 약 1.3GB 추가 (10GB 테이블 대비 +13%) → buffer pool 점유 → clustered hit 율까지 영향. 그래서 **읽기 빠르게 한 인덱스가 쓰기 / storage / 메모리 모두 비용**. **읽기 / 쓰기 비율 + 쓰기 빈도 + storage 예산** 모두 따져서 결정. 인덱스 다이어트 (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring])."
 
 ---
 

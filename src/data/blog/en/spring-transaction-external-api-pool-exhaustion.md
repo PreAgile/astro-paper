@@ -30,8 +30,8 @@ A harder question follows — **"How should we split it then?"** "Separate the t
 
 This post is the record of pursuing both questions to the end with raw JDBC.
 
-1. **Phase 1 — Reproduce pool exhaustion**: how the external call inside a transaction eats the pool, dissected through two runs
-2. **Phase 2 — Compare remedies**: is splitting enough — comparing **Simple Split / Saga / Outbox** across 60 workers × 9 chaos scenarios
+1. **Step 1 — Reproduce pool exhaustion**: how the external call inside a transaction eats the pool, dissected through two runs
+2. **Step 2 — Compare remedies**: is splitting enough — comparing **Simple Split / Saga / Outbox** across 60 workers × 9 chaos scenarios
 
 To start with the conclusion:
 
@@ -84,7 +84,7 @@ I deliberately skipped JPA. Handling *connection borrow / commit / rollback / cl
 
 ---
 
-## 2. Phase 1 — Reproducing pool exhaustion in two shapes
+## 2. Step 1 — Reproducing pool exhaustion in two shapes
 
 The same pool exhaustion looks *completely different* depending on `connection-timeout`. Two runs to compare.
 
@@ -169,7 +169,7 @@ A common operational trap is **setting timeout too long**. At 30/60 seconds, poo
 
 ## 3. Three remedies — Simple Split / Saga / Outbox
 
-If Phase 1 was "problem measurement," from here it's *remedy measurement*. Three patterns under the same load (`concurrent=60, extDelay=3,000ms, pool=10, timeout=1,000ms` — same as the Phase 1 fail-fast run).
+If Step 1 was "problem measurement," from here it's *remedy measurement*. Three patterns under the same load (`concurrent=60, extDelay=3,000ms, pool=10, timeout=1,000ms` — same as the Step 1 fail-fast run).
 
 Each pattern × 3 chaos modes = **9 scenarios**:
 - `OFF`: normal
@@ -701,12 +701,12 @@ This single query is the alarm basis — same architectural slot as Hikari's `aw
 
 | Pattern | Per-Tx pool occupancy | Wave-accumulated P99 (60 workers) |
 |---|---|---|
-| No split (Phase 1 baseline) | ~3,000 ms (during external call) | 6,350 ms (3 waves) |
+| No split (Step 1 baseline) | ~3,000 ms (during external call) | 6,350 ms (3 waves) |
 | **Simple Split** | ~5 ms (INSERT) | 3,071 ms |
 | **Saga** | ~5 ms × 2 (reserve+confirm) | 3,106 ms |
 | **Outbox** | ~10 ms (orders+outbox single Tx) | 72 ms (ACK) / 92,573 ms (completion avg) |
 
-→ All patterns: 0 pool timeouts. Phase 1 fail-fast run's 50 timeouts are gone.
+→ All patterns: 0 pool timeouts. Step 1 fail-fast run's 50 timeouts are gone.
 
 ### 4.4 Saga vs Outbox — what's actually different
 

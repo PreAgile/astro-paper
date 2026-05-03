@@ -57,9 +57,9 @@ WHERE created_at < ? OR (created_at = ? AND id < ?)
 자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 이 같은 측정값을 **운영 처방** 측면 (cursor 표준 / 토큰화 / PR 차단) 으로 다뤘다면, 본 글은 **왜 옵티마이저가 push down 못 하는가** 의 내부 메커니즘에 집중합니다. [Bug #16247](https://bugs.mysql.com/bug.php?id=16247) 이 오래 known limitation 으로 남아있는 이유, 옵티마이저의 whitelist 가 인식하는 패턴과 못 인식하는 패턴, cost-based 판단의 한계 (Q2 역설 — 인덱스 추가가 느려지는 케이스), 그리고 EXPLAIN ANALYZE 출력 한 줄을 어떻게 읽는가.
 
 본 글의 입력 자산:
-- W2 Phase 3 Q1~Q5 Before/After 측정 + Q2 역설 (1,000만 row, MySQL 8.0.44)
-- W2 Phase 4 EXP-07 row constructor push down 실패 (154ms vs 0.30ms)
-- ADR-BE-009 No-Offset 페이지네이션 결정 (row constructor 금지 룰)
+- 1,000만 row 환경에서 Q1~Q5 Before/After 측정 + Q2 역설 (MySQL 8.0.44)
+- OFFSET vs No-Offset 측정의 row constructor push down 실패 (154ms vs 0.30ms)
+- No-Offset 페이지네이션 결정 사항 (row constructor 금지 룰)
 
 본 글의 깊이: **L3-L4** (시리즈 1편이 B-tree 내부 구조 / 2편이 인덱스 종류 / 본 3편이 **옵티마이저의 인식과 push down**).
 
@@ -101,7 +101,7 @@ EXPLAIN ANALYZE SELECT id FROM orders_w2
 ORDER BY created_at DESC LIMIT 20;
 ```
 
-출력 한 줄 (W2 Phase 3 의 Q3 Before — 인덱스 없을 때 [실측 — Java/Spring]):
+출력 한 줄 (Q3 Before — 인덱스 없을 때 [실측 — Java/Spring]):
 
 ```
 -> Limit: 20 row(s)  (actual time=1608.999..1608.999 rows=20 loops=1)
@@ -161,7 +161,7 @@ EXPLAIN ANALYZE 의 출력은 표가 아니라 **트리** 입니다. 각 줄이 
 
 ### 2.3 다이어그램 2 — 연산자 트리 sample
 
-W2 Phase 3 의 Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`) 의 EXPLAIN ANALYZE 트리:
+Q5 (`WHERE owner_id=? AND state=? ORDER BY created_at DESC LIMIT 20`) 의 EXPLAIN ANALYZE 트리:
 
 ```mermaid
 graph TB
@@ -225,7 +225,7 @@ sequenceDiagram
 
 ### 3.4 [실측 — Java/Spring] — Q3 vs Q3 Before
 
-W2 Phase 3 의 Q3 (`ORDER BY created_at DESC LIMIT 20`):
+Q3 (`ORDER BY created_at DESC LIMIT 20`):
 
 | 단계 | 트리 | rows scanned | actual time |
 |---|---|---|---|
@@ -370,7 +370,7 @@ bug 내용 요약:
 
 ### 6.3 [실측 — Java/Spring] — 154ms vs 0.30ms
 
-자매글 EXP-07 의 핵심 측정 (1,000만 row, 1M 위치 cursor):
+자매글 OFFSET vs No-Offset 측정의 핵심 결과 (1,000만 row, 1M 위치 cursor):
 
 ```sql
 -- (a) row constructor — push down 실패
@@ -446,7 +446,7 @@ bug 가 오래 known limitation 으로 남아있는 이유는 단순한 우선�
 - row constructor → OR 변환 로직 추가는 옵티마이저의 다른 부분과 상호작용 → 회귀 리스크
 - PostgreSQL 같은 다른 DB 가 정상 push down 하므로 "MySQL 만의 문제"
 
-→ 결론: **MySQL 에서는 row constructor 사용 금지**. ADR-BE-009 의 §4.3 룰 5 와 동일.
+→ 결론: **MySQL 에서는 row constructor 사용 금지**. No-Offset 페이지네이션 결정 사항의 §4.3 룰 5 와 동일.
 
 ---
 
@@ -477,7 +477,7 @@ PostgreSQL 은 같은 row constructor 비교를 옵티마이저 ("planner") 가 
 
 > **"표준 SQL = 어디서나 같이 동작" 이 아니다. 의미는 같지만 옵티마이저 구현이 다르므로 plan 도 다르고 latency 도 다르다. 운영하는 DB 에 맞는 형태로 작성 — 그래서 EXPLAIN ANALYZE 로 **항상 검증** 이 표준 워크플로.**
 
-ADR-BE-009 의 §4.4 ("DB 가 PostgreSQL 로 바뀌면 — Option B 가 더 단순") 가 이 함의 그대로.
+No-Offset 페이지네이션 결정 사항의 §4.4 ("DB 가 PostgreSQL 로 바뀌면 — Option B 가 더 단순") 가 이 함의 그대로.
 
 ---
 
@@ -485,9 +485,9 @@ ADR-BE-009 의 §4.4 ("DB 가 PostgreSQL 로 바뀌면 — Option B 가 더 단�
 
 ### 8.1 측정 환경
 
-W2 Phase 3 의 Q2 (`WHERE state = 'CONFIRMED' ORDER BY created_at DESC LIMIT 5`).
+Q2 (`WHERE state = 'CONFIRMED' ORDER BY created_at DESC LIMIT 5`).
 
-> 주의: 본 글의 Q2 는 W2 Phase 3 에서 측정한 단순화된 쿼리 (range 제거, LIMIT 5 의 가장 작은 케이스) 로, "작은 LIMIT + 낮은 cardinality 인덱스 후보" 의 옵티마이저 함정을 가장 명확히 드러내는 형태.
+> 주의: 본 글의 Q2 는 본 시리즈에서 측정한 단순화된 쿼리 (range 제거, LIMIT 5 의 가장 작은 케이스) 로, "작은 LIMIT + 낮은 cardinality 인덱스 후보" 의 옵티마이저 함정을 가장 명확히 드러내는 형태.
 
 ### 8.2 [실측 — Java/Spring] — 인덱스 추가가 느려진 케이스
 
@@ -623,7 +623,7 @@ graph TB
 
 **Cardinality** — 인덱스 키의 distinct 값 추정. `SHOW INDEX FROM table` 의 `Cardinality` 컬럼.
 
-W2 Phase 3 의 cardinality [실측 — Java/Spring]:
+5종 인덱스의 cardinality [실측 — Java/Spring]:
 
 | 인덱스 | cardinality |
 |---|---|
@@ -653,9 +653,9 @@ ANALYZE TABLE orders_w2 UPDATE HISTOGRAM ON state WITH 8 BUCKETS;
 2. `optimizer_trace` 로 옵티마이저의 결정 과정 확인 (§11)
 3. cardinality 가 비현실적이면 `ANALYZE TABLE` 후에도 잘못 잡히는 경우 — `CREATE INDEX ... STATS_PERSISTENT=1, STATS_SAMPLE_PAGES=N` 으로 sampling 페이지 늘리기
 
-### 9.5 [실측 — Java/Spring] — Phase 3 5종 인덱스 + 옵티마이저의 선택
+### 9.5 [실측 — Java/Spring] — 5종 인덱스 + 옵티마이저의 선택
 
-W2 Phase 3 측정 결과를 옵티마이저 관점에서 다시 보면:
+5종 인덱스 측정 결과를 옵티마이저 관점에서 다시 보면:
 
 | Q | 옵티마이저가 선택한 인덱스 | 그 이유 (cost 관점) |
 |---|---|---|
@@ -890,13 +890,13 @@ SELECT * FROM information_schema.OPTIMIZER_TRACE\G
 
 ### 11.5 ADR 화 — 본 글의 운영 룰
 
-ADR-BE-009 (No-Offset 페이지네이션) 의 §4.3 룰을 일반화:
+No-Offset 페이지네이션 결정 사항의 §4.3 룰을 일반화:
 
 1. **row constructor `(a, b) <` / `(a, b) >` 사용 금지** — PR 리뷰에서 차단. 워크어라운드: OR 분리 또는 단순 cursor
 2. **함수 적용 (`LOWER(col)` / `DATE(created_at)` 등) 사용 시 functional index 동반 필수**
 3. **묵시적 형변환 금지** — 컬럼 타입과 비교 값 타입 일치
 4. **ORDER BY + LIMIT 조합은 EXPLAIN ANALYZE 첨부 의무** — Sort 연산자가 끼는지, 인덱스 정렬 활용되는지 확인
-5. **인덱스 hint 는 ADR 동반** — USE INDEX / FORCE INDEX 사용 시 이유 + 제거 기준 문서화
+5. **인덱스 hint 는 결정 문서 동반** — USE INDEX / FORCE INDEX 사용 시 이유 + 제거 기준 문서화
 6. **모든 인덱스 추가 PR 은 EXPLAIN ANALYZE Before/After 첨부** — 자매글 [No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) §6 참조
 
 ---
@@ -926,7 +926,7 @@ ADR-BE-009 (No-Offset 페이지네이션) 의 §4.3 룰을 일반화:
 
 #### Q1. "EXPLAIN ANALYZE 의 `Filter:` 와 `Index Range Scan over` 차이는?"
 
-> "**Filter:** 가 트리에 등장하면 **push down 실패** 신호입니다. 자식 연산자가 모든 row 를 위로 보내고, Filter 가 row 마다 cond 를 평가 — O(N). **Index Range Scan over (cond)** 는 cond 가 **인덱스 안의 range 로 변환** 되어 binary search + leaf walk 로 처리 — O(log N + matching). W2 측정에서 row constructor `(a,b)<(?,?)` 는 Filter 단계로 1M row scan = 154ms, OR 분리 형태는 Range Scan over 로 20 row scan = 0.30ms — **약 500배 차이**. 같은 의미의 SQL 두 개가 **연산자 트리 한 줄 차이** 로 500배 갈라집니다 ([실측 — Java/Spring])."
+> "**Filter:** 가 트리에 등장하면 **push down 실패** 신호입니다. 자식 연산자가 모든 row 를 위로 보내고, Filter 가 row 마다 cond 를 평가 — O(N). **Index Range Scan over (cond)** 는 cond 가 **인덱스 안의 range 로 변환** 되어 binary search + leaf walk 로 처리 — O(log N + matching). 본 시리즈 측정에서 row constructor `(a,b)<(?,?)` 는 Filter 단계로 1M row scan = 154ms, OR 분리 형태는 Range Scan over 로 20 row scan = 0.30ms — **약 500배 차이**. 같은 의미의 SQL 두 개가 **연산자 트리 한 줄 차이** 로 500배 갈라집니다 ([실측 — Java/Spring])."
 
 #### Q2. "Push Down 이란 무엇이고 왜 중요한가?"
 
@@ -934,11 +934,11 @@ ADR-BE-009 (No-Offset 페이지네이션) 의 §4.3 룰을 일반화:
 
 #### Q3. "MySQL 옵티마이저가 row constructor 를 push down 못 하는 이유?"
 
-> "ANSI SQL 표준의 `(a, b) < (?, ?)` 는 의미상 `a < ? OR (a = ? AND b < ?)` 와 **수학적으로 동치** — lexicographic 비교의 정의. 그런데 MySQL 옵티마이저는 row constructor → OR 변환 로직이 **없습니다**. 패턴 매칭으로 동작하는데 row constructor 자체를 range 로 인식 못 함 → Filter 로 fallback. **MySQL Bug #16247** — 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). 워크어라운드 (OR 분리) 가 명확하다 보니 우선순위가 낮아 fix 안 됨. PostgreSQL / Oracle 같은 다른 DB 는 정상 push down — **표준 SQL 의 의미는 같지만 옵티마이저 구현이 DB 마다 다르다**. ADR-BE-009 룰 5: PR 에서 row constructor 차단."
+> "ANSI SQL 표준의 `(a, b) < (?, ?)` 는 의미상 `a < ? OR (a = ? AND b < ?)` 와 **수학적으로 동치** — lexicographic 비교의 정의. 그런데 MySQL 옵티마이저는 row constructor → OR 변환 로직이 **없습니다**. 패턴 매칭으로 동작하는데 row constructor 자체를 range 로 인식 못 함 → Filter 로 fallback. **MySQL Bug #16247** — 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). 워크어라운드 (OR 분리) 가 명확하다 보니 우선순위가 낮아 fix 안 됨. PostgreSQL / Oracle 같은 다른 DB 는 정상 push down — **표준 SQL 의 의미는 같지만 옵티마이저 구현이 DB 마다 다르다**. No-Offset 페이지네이션 결정 사항의 룰 5: PR 에서 row constructor 차단."
 
 #### Q4. "인덱스를 추가했는데 느려진 적 있나요? 어떻게 진단했나요?"
 
-> "W2 Phase 3 의 Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) 에서 발견했습니다 ([실측 — Java/Spring]). state 인덱스 추가 전 0.658ms → 추가 후 13.5ms — **20배 느림**. EXPLAIN ANALYZE 비교했더니 — Before 는 `Table scan rows=25` (LIMIT 5 압력으로 25 row 만 읽고 종료), After 는 `Sort + Index lookup rows=336K` (옵티마이저가 인덱스 사용했지만 LIMIT 5 의 조기 종료 효과를 cost 모델에 반영 못 함). 진단 결론: 옵티마이저는 **cost-based 추정 + 통계 + 휴리스틱** — LIMIT 가 매우 작은 케이스 / cardinality 추정 오차가 큰 케이스 / ORDER BY + LIMIT 조합 — 약점이 있다. `USE INDEX(PRIMARY)` hint 로 PRIMARY 강제 → 0.65ms 회복. 교훈: **EXPLAIN ANALYZE 로 항상 직접 확인**, hint 는 ADR 동반."
+> "Q2 (`WHERE state='CONFIRMED' ORDER BY created_at DESC LIMIT 5`) 에서 발견했습니다 ([실측 — Java/Spring]). state 인덱스 추가 전 0.658ms → 추가 후 13.5ms — **20배 느림**. EXPLAIN ANALYZE 비교했더니 — Before 는 `Table scan rows=25` (LIMIT 5 압력으로 25 row 만 읽고 종료), After 는 `Sort + Index lookup rows=336K` (옵티마이저가 인덱스 사용했지만 LIMIT 5 의 조기 종료 효과를 cost 모델에 반영 못 함). 진단 결론: 옵티마이저는 **cost-based 추정 + 통계 + 휴리스틱** — LIMIT 가 매우 작은 케이스 / cardinality 추정 오차가 큰 케이스 / ORDER BY + LIMIT 조합 — 약점이 있다. `USE INDEX(PRIMARY)` hint 로 PRIMARY 강제 → 0.65ms 회복. 교훈: **EXPLAIN ANALYZE 로 항상 직접 확인**, hint 는 결정 문서 동반."
 
 #### Q5. "EXPLAIN ANALYZE 안 보고 인덱스 결정 가능한가요?"
 
