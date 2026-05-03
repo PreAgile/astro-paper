@@ -91,7 +91,7 @@ page 안에는 여러 row 가 **PK 정렬 순서** 로 저장됩니다. 다이�
 
 → 다이어그램 1 해석. page 안의 user records 는 **PK 순으로 정렬되어 있습니다** (인덱스를 안 걸어도). page directory 는 page 안에서 **binary search** 가 가능하도록 sparse 한 slot 배열을 따로 둠. row 100개를 다 비교 안 하고 **log(N)** 비교로 page 안에서 row 1개를 찾을 수 있게 하는 구조.
 
-`prev` / `next` 포인터는 **doubly-linked list** — 같은 레벨의 다른 page 와 연결됩니다. 이게 §5 의 reverse scan 의 물리적 기반.
+`prev` / `next` 포인터는 **doubly-linked list** — 같은 레벨의 다른 page 와 연결됩니다. 이게 5장 의 reverse scan 의 물리적 기반.
 
 [MySQL 공식 — InnoDB Page Structure](https://dev.mysql.com/doc/refman/8.0/en/innodb-row-format.html) + [Jeremy Cole — InnoDB Page Anatomy](https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/) 가 page 의 byte-level 분해를 가장 자세히 다룹니다.
 
@@ -165,11 +165,11 @@ graph TB
 
 → 6-byte hidden ROWID 의 *공간 이득* 이 위 3가지 *운영 안정성* 보다 결코 크지 않습니다. 그래서 표준은 BIGINT.
 
-### 2.3 함의 — **full table scan = clustered index full scan**
+### 2.3 정리 — **full table scan = clustered index full scan**
 
-clustered index 가 곧 테이블이라는 사실의 직접적 함의 — "full table scan" 이라는 표현은 InnoDB 에서 **clustered index 의 leaf 를 처음부터 끝까지 walk** 하는 것을 뜻합니다. PK 순서로 walk. **PostgreSQL 의 heap scan** (저장 순서 walk) 과 다릅니다.
+clustered index 가 곧 테이블이라는 사실의 직접적 의미는 — "full table scan" 이라는 표현은 InnoDB 에서 **clustered index 의 leaf 를 처음부터 끝까지 walk** 하는 것을 뜻합니다. PK 순서로 walk. **PostgreSQL 의 heap scan** (저장 순서 walk) 과 다릅니다.
 
-EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 §11 에서 다시 봅니다.
+EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 11장 에서 다시 봅니다.
 
 ---
 
@@ -310,7 +310,7 @@ Extra: Using index; Backward index scan
 
 → "covering 인지" 와 "WHERE 가 효율적으로 좁히는지" 는 **별개의 질문**. covering 이어도 WHERE 가 leftmost prefix 안 맞으면 **전체 인덱스 scan** 필요.
 
-자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 의 §3.2 단순 cursor 0.27ms / §3.3 OR 분리 0.30ms 가 이 covering index 위에서 동작한 측정값. 같은 인덱스, 같은 1,000만 row, 다른 SQL 형태.
+자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 의 3.2장 단순 cursor 0.27ms / 3.3장 OR 분리 0.30ms 가 이 covering index 위에서 동작한 측정값. 같은 인덱스, 같은 1,000만 row, 다른 SQL 형태.
 
 ---
 
@@ -318,7 +318,7 @@ Extra: Using index; Backward index scan
 
 ### 5.1 leaf 노드는 **prev / next** 포인터로 연결
 
-§1 의 page 헤더 안에 있는 `prev page id` / `next page id` 가 이 일을 합니다. B+-tree 의 leaf 들이 **doubly-linked list** 를 형성. 같은 레벨의 옆 page 로 **바로** 이동 가능.
+1장 의 page 헤더 안에 있는 `prev page id` / `next page id` 가 이 일을 합니다. B+-tree 의 leaf 들이 **doubly-linked list** 를 형성. 같은 레벨의 옆 page 로 **바로** 이동 가능.
 
 다이어그램 5 — leaf 양방향 linked list:
 
@@ -330,8 +330,8 @@ Extra: Using index; Backward index scan
               Leaf 1 ↔ Leaf 2 ↔ Leaf 3 ↔ Leaf 4 ↔ Leaf 5
               (id=1~100) (101~200) (201~300) (301~400) (401~500)
 
-              ←─── 정방향 (ASC) walk ───→
-              ←─── 역방향 (DESC) walk ─→
+              ──────── 정방향 (ASC) walk ────────→
+              ←──────── 역방향 (DESC) walk ────────
 ```
 
 → 다이어그램 5 해석. leaf 1 의 next 는 leaf 2 의 page id. leaf 2 의 prev 는 leaf 1 의 page id. ASC 정렬 → 왼쪽 leaf 부터 next 따라 walk. DESC 정렬 → 오른쪽 leaf 부터 prev 따라 walk.
@@ -346,7 +346,7 @@ Extra: Using index; Backward index scan
 
 ### 5.3 자매글의 (b) 단순 cursor 0.27ms 가 이 메커니즘
 
-자매글 §3.2 의 `WHERE created_at < ? ORDER BY created_at DESC LIMIT 20` 의 EXPLAIN ANALYZE 한 줄:
+자매글 3.2장 의 `WHERE created_at < ? ORDER BY created_at DESC LIMIT 20` 의 EXPLAIN ANALYZE 한 줄:
 
 ```
 -> Limit: 20 row(s)
@@ -365,23 +365,29 @@ B-tree 위에서 일어날 수 있는 walk 는 4가지입니다.
 
 ### 6.1 다이어그램 6 — 4가지 walk
 
-```mermaid
-graph TB
-    subgraph "1. Index Seek (point lookup)"
-        A1["Root → Internal → Leaf<br/>= O(log N) page<br/>= 3~4 page seek<br/>row 1개"]
-    end
-
-    subgraph "2. Index Range Scan"
-        A2["Root → Internal → Leaf 시작점<br/>+ leaf linked list walk N개<br/>= O(log N + N) page"]
-    end
-
-    subgraph "3. Full Index Scan"
-        A3["Leaf 첫 번째 → linked list 끝까지<br/>= 모든 leaf page<br/>= O(leaf 수)"]
-    end
-
-    subgraph "4. Full Table Scan = Clustered Index Full Scan"
-        A4["Clustered Index 의 leaf 첫 번째<br/>→ 끝까지 walk<br/>= 모든 row 의 모든 컬럼<br/>가장 비쌈"]
-    end
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 1. Index Seek (point lookup)                                 │
+│    Root → Internal → Leaf                                    │
+│    cost: O(log N) = 3~4 page seek                            │
+│    결과: row 1개                                              │
+├──────────────────────────────────────────────────────────────┤
+│ 2. Index Range Scan                                          │
+│    Root → Internal → Leaf 시작점                              │
+│    → leaf linked list 따라 N개 walk                          │
+│    cost: O(log N + N) page                                   │
+│    결과: 매칭 row 들                                          │
+├──────────────────────────────────────────────────────────────┤
+│ 3. Full Index Scan                                           │
+│    Leaf 첫 번째 → linked list 끝까지                          │
+│    cost: O(전체 leaf 수)                                     │
+│    결과: 인덱스 전체 row                                      │
+├──────────────────────────────────────────────────────────────┤
+│ 4. Full Table Scan (= Clustered Index Full Scan)             │
+│    Clustered Leaf 첫 번째 → 끝까지                            │
+│    cost: O(전체 row 수)                                      │
+│    결과: 모든 row + 모든 컬럼  (가장 비쌈)                   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 → 다이어그램 6 해석:
@@ -455,7 +461,7 @@ Leaf 1 → Leaf 2 → ... → Leaf 9,999 → Leaf 10,000 → Leaf 10,001
 | **1,000,000** | **171 ms** | **1,000,020** |
 | 5,000,000 | 765 ms | 5,000,020 |
 
-→ **OFFSET 비용 = 읽고 버리는 row 수에 정확히 비례**. covering index 가 있어도 **건너뛸 수 없는** 본질적 한계. 자매글 §2 에서 page 단위 결과를 풀었으니 본 글에선 **왜 그런지** 의 B-tree 메커니즘만 정리.
+→ **OFFSET 비용 = 읽고 버리는 row 수에 정확히 비례**. covering index 가 있어도 **건너뛸 수 없는** 본질적 한계. 자매글 2장 에서 page 단위 결과를 풀었으니 본 글에선 **왜 그런지** 의 B-tree 메커니즘만 정리.
 
 ---
 
@@ -495,14 +501,14 @@ sequenceDiagram
 
 ### 8.2 [실측 — Java/Spring] cursor 0.30ms
 
-자매글 §3.3 의 OR 분리 cursor 측정:
+자매글 3.3장 의 OR 분리 cursor 측정:
 
 | 방식 | actual time | rows scanned |
 |---|---|---|
 | OFFSET 1,000,000 | 171 ms | 1,000,020 |
 | **OR 분리 cursor** | **0.30 ms** | **20** |
 
-→ **약 570배 차이**. 차이의 본질이 §7 + §8 의 두 다이어그램. OFFSET = 1M page seek (sequential walk). cursor = 4 page seek (binary search).
+→ **약 570배 차이**. 차이의 본질이 7장 + 8장 의 두 다이어그램. OFFSET = 1M page seek (sequential walk). cursor = 4 page seek (binary search).
 
 자매글에서 다룬 (a) row constructor 154ms / (b) 단순 cursor 0.27ms / (c) OR 분리 0.30ms 의 **세 형태 차이** 는 **옵티마이저가 push down 하느냐** 의 문제. **B-tree 메커니즘 자체** 는 cursor 가 push down 잘 되면 항상 binary search primitive. 본 글은 후자에 집중.
 
@@ -526,35 +532,35 @@ CREATE INDEX idx_owner_id             ON orders_w2 (owner_id);
 
 다이어그램 9 — 같은 row 가 6개 B-tree 에 동시에 들어 있음:
 
-```mermaid
-graph TB
-    subgraph "Same Row (id=5,000,001, owner=1234, state=CONFIRMED, region=KR, created_at=2024-...)"
-        Row[("Row<br/>1개")]
-    end
-    subgraph "B-tree 1: Clustered (PK)"
-        T1[("PK 정렬<br/>+ 전체 row 데이터")]
-    end
-    subgraph "B-tree 2: idx_created_at_id"
-        T2[("created_at, PK<br/>covering")]
-    end
-    subgraph "B-tree 3: idx_region_code"
-        T3[("region_code, PK<br/>4종 cardinality")]
-    end
-    subgraph "B-tree 4: idx_owner_state_created"
-        T4[("owner_id, state, created_at, PK<br/>composite")]
-    end
-    subgraph "B-tree 5: idx_state_created"
-        T5[("state, created_at, PK")]
-    end
-    subgraph "B-tree 6: idx_owner_id"
-        T6[("owner_id, PK")]
-    end
-    Row -.같은 row 의 PK 가.-> T1
-    Row -.각 인덱스 leaf 에.-> T2
-    Row -.PK 와 함께.-> T3
-    Row -.동시에 들어 있음.-> T4
-    Row -.->T5
-    Row -.->T6
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Row 1개                                                           │
+│   id=5,000,001 / owner=1234 / state='CONFIRMED' /                │
+│   region='KR' / created_at='2024-...'                            │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ 같은 row 가 6개 B-tree 에 동시에 존재
+                             │ (각 트리에 leaf entry 1개씩)
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  B-tree 1   Clustered (PK)            leaf: PK + 전체 row        │ ← 테이블 자체
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 2   idx_created_at_id         leaf: (created_at, PK)     │
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 3   idx_region_code           leaf: (region_code, PK)    │   (low cardinality)
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 4   idx_owner_state_created   leaf: (owner_id, state,    │   composite
+│             (composite)                     created_at, PK)      │
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 5   idx_state_created         leaf: (state, created_at,  │
+│                                              PK)                 │
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 6   idx_owner_id              leaf: (owner_id, PK)       │
+└──────────────────────────────────────────────────────────────────┘
+
+  → row 1개 = leaf entry 6개  (각 B-tree 에 1개씩)
+  → INSERT 1건 = 6개 B-tree 모두 갱신   (write amplification)
+  → DELETE 1건 = 6개 모두 갱신
+  → UPDATE: 변경된 인덱스 컬럼이 속한 트리만 갱신 (PK 안 바뀌면 secondary 영향 적음)
 ```
 
 → 다이어그램 9 해석. row 1개 = leaf entry 6개 (각 B-tree 에 1개씩). INSERT 1번 = **6개 B-tree 모두 갱신**. DELETE 1번도 마찬가지.
@@ -634,7 +640,7 @@ graph LR
 | 컬럼 | grid 의 한 열 | clustered leaf 의 한 필드 / secondary 인덱스 키 |
 | 정렬 | `ORDER BY` 시 | clustered = PK 순 / secondary = 인덱스 키 순 |
 
-### 10.2 함의
+### 10.2 무엇을 의미하는가
 
 - "테이블 1개" 라는 SQL 의 추상이 — InnoDB 안에서는 **N개 B-tree**. 인덱스 추가는 **새 grid 추가가 아니라 새 B-tree 추가**.
 - "행 1개 INSERT" 가 — InnoDB 안에서는 **N개 B-tree leaf 갱신**.
@@ -648,7 +654,7 @@ graph LR
 
 ### 11.1 InnoDB 에선 **full table scan = clustered index full scan**
 
-§2 의 함의를 한 번 더. `EXPLAIN` 의 `type=ALL` = 흔히 "full table scan" 이라고 부릅니다. 그런데 InnoDB 안에서 **물리적으로** 무슨 일이 일어나는지 보면:
+2장 의 의미를 한 번 더. `EXPLAIN` 의 `type=ALL` = 흔히 "full table scan" 이라고 부릅니다. 그런데 InnoDB 안에서 **물리적으로** 무슨 일이 일어나는지 보면:
 
 - clustered index 의 leaf page 첫 번째 (PK 가장 작은 row 가 있는 page) 부터
 - linked list 의 next 따라 끝까지 walk
@@ -682,40 +688,42 @@ graph LR
 
 | 출처 | 글 | 본 글의 어느 §와 연결 |
 |---|---|---|
-| 토스 SLASH24 | [Next 코어뱅킹 — Oracle→MySQL 전환 + InnoDB MVCC](https://haon.blog/article/toss-slash/next-core-banking/) | §2 clustered index, §3 secondary lookup |
-| LINE Engineering | [MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | §11 type=ALL 검출 |
-| 카카오페이 | [JPA Transactional readOnly + set_option](https://tech.kakaopay.com/post/jpa-transactional-bri/) | §3 secondary index + read 최적화 |
-| Use The Index, Luke! | [Anatomy of an Index](https://use-the-index-luke.com/sql/anatomy) | §3 InnoDB vs PG indirection |
-| Use The Index, Luke! | [No Offset](https://use-the-index-luke.com/no-offset) | §7 OFFSET 한계 |
-| Vlad Mihalcea | [How does MVCC work](https://vladmihalcea.com/how-does-mvcc-multi-version-concurrency-control-work/) | §1 InnoDB 기본 |
-| Vlad Mihalcea | [Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | §9.2 cardinality |
-| Percona | [InnoDB Buffer Pool / B-tree](https://www.percona.com/blog/category/innodb/) | §1.3 page seek |
-| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | §9 다중 인덱스 → 분산 한계 |
-| Jeremy Cole | [The physical structure of InnoDB index pages](https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/) | §1.2 page byte-level |
-| MySQL 공식 | [Clustered and Secondary Indexes](https://dev.mysql.com/doc/refman/8.0/en/innodb-index-types.html) | §2 / §3 |
-| MySQL 공식 | [Descending Indexes](https://dev.mysql.com/doc/refman/8.0/en/descending-indexes.html) | §5.2 reverse scan |
+| 토스 SLASH24 | [Next 코어뱅킹 — Oracle→MySQL 전환 + InnoDB MVCC](https://haon.blog/article/toss-slash/next-core-banking/) | 2장 clustered index, 3장 secondary lookup |
+| LINE Engineering | [MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | 11장 type=ALL 검출 |
+| 카카오페이 | [JPA Transactional readOnly + set_option](https://tech.kakaopay.com/post/jpa-transactional-bri/) | 3장 secondary index + read 최적화 |
+| Use The Index, Luke! | [Anatomy of an Index](https://use-the-index-luke.com/sql/anatomy) | 3장 InnoDB vs PG indirection |
+| Use The Index, Luke! | [No Offset](https://use-the-index-luke.com/no-offset) | 7장 OFFSET 한계 |
+| Vlad Mihalcea | [How does MVCC work](https://vladmihalcea.com/how-does-mvcc-multi-version-concurrency-control-work/) | 1장 InnoDB 기본 |
+| Vlad Mihalcea | [Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | 9.2장 cardinality |
+| Percona | [InnoDB Buffer Pool / B-tree](https://www.percona.com/blog/category/innodb/) | 1.3장 page seek |
+| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | 9장 다중 인덱스 → 분산 한계 |
+| Jeremy Cole | [The physical structure of InnoDB index pages](https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/) | 1.2장 page byte-level |
+| MySQL 공식 | [Clustered and Secondary Indexes](https://dev.mysql.com/doc/refman/8.0/en/innodb-index-types.html) | 2장 / 3장 |
+| MySQL 공식 | [Descending Indexes](https://dev.mysql.com/doc/refman/8.0/en/descending-indexes.html) | 5.2장 reverse scan |
 
-### 12.2 면접 답변 5개
+### 12.2 정리 — 이 글의 답을 자기 말로
 
-#### Q1. "테이블에 인덱스 안 걸면 InnoDB 는 어떻게 row 저장하나요?"
+이 글을 다 읽은 누군가가 *핵심 5가지 질문* 으로 정리해본다면 — 측정으로 풀었던 답을 자기 말로 풀면 다음과 같습니다.
 
-> "**이미 B-tree 에 정렬해서 저장합니다**. PK 가 정의되어 있으면 PK 가 clustered index 의 키 — clustered index 의 leaf 가 **전체 row** 를 담아서 **테이블 자체** 가 됩니다. PK 가 없으면 InnoDB 가 hidden ROWID 6-byte 를 자동으로 만들어서 그것이 clustered key. 그래서 **테이블에 인덱스 0개** 인 상황은 InnoDB 안에선 **불가능** — 항상 clustered index 1개는 존재합니다. 'INSERT 순서대로 쌓인다' 는 흔한 오해. 실제로는 **PK 순서로 물리적으로 정렬되어** 있어요."
+#### Q. "테이블에 인덱스 안 걸면 InnoDB 는 어떻게 row 를 저장하나?"
 
-#### Q2. "secondary index 를 한 번 lookup 으로 못 끝내는 이유?"
+InnoDB 는 **인덱스를 안 걸어도 이미 B-tree 에 정렬해서** 저장합니다. PK 가 정의되어 있으면 PK 가 clustered index 의 키 — clustered index 의 leaf 가 *전체 row* 를 담아서 *테이블 자체* 가 됩니다. PK 가 없으면 InnoDB 가 hidden ROWID 6-byte 를 자동으로 만들어서 그것이 clustered key. 그래서 *테이블에 인덱스 0개* 인 상황은 InnoDB 안에선 *불가능* — 항상 clustered index 1개는 존재합니다. "INSERT 순서대로 쌓인다" 는 흔한 오해 — 실제로는 *PK 순서로 물리적으로 정렬* 되어 있습니다.
 
-> "InnoDB 의 secondary index 는 leaf 에 **PK 값** 을 담습니다 — **물리 row 위치 (page+slot) 가 아니라**. 그래서 `WHERE owner_id=1234` 같은 쿼리는 (1) secondary index 에서 owner_id=1234 인 leaf 를 찾고 → PK 리스트 받아서 (2) 그 PK 들로 clustered index 에서 한 번 더 lookup. **2번 walk**. PostgreSQL 은 leaf 가 heap TID 를 담아서 1번 lookup — 차이가 명확합니다. trade-off: InnoDB 는 row 가 page split 으로 이동해도 **PK 가 안 변하면 secondary index 무영향** 의 이득. PG 는 모든 secondary 를 갱신해야 함 (HOT 최적화로 일부 회피)."
+#### Q. "secondary index 를 한 번 lookup 으로 못 끝내는 이유는?"
 
-#### Q3. "Covering Index 가 빠른 이유?"
+InnoDB 의 secondary index 는 leaf 에 *PK 값* 을 담습니다 — *물리 row 위치 (page+slot) 가 아니라*. 그래서 `WHERE owner_id=1234` 같은 쿼리는 (1) secondary index 에서 owner_id=1234 인 leaf 를 찾고 → PK 리스트 받아서 (2) 그 PK 들로 clustered index 에서 한 번 더 lookup — *2번 walk*. PostgreSQL 은 leaf 가 heap TID (물리 위치) 를 담아서 1번 lookup. 차이가 명확하지만 trade-off — InnoDB 는 row 가 page split 으로 이동해도 *PK 가 안 변하면 secondary index 무영향* 의 이득을 받고, PG 는 모든 secondary 를 갱신해야 함 (HOT 최적화로 일부 회피). 한쪽이 절대 우월하지 않은 *구조적 trade-off*.
 
-> "secondary index 의 leaf 안에 **SELECT 가 요구하는 모든 컬럼** 이 들어 있으면 — clustered index 안 가도 답이 나옵니다. **1번 lookup 으로 끝**. InnoDB 의 secondary index 는 **항상 PK 가 leaf 에 같이 들어 있어서** (created_at, id) 인덱스는 `SELECT id, created_at` 에 자동 covering. EXPLAIN 의 `Using index` = covering 신호. 본 시리즈 측정에서 ORDER BY created_at DESC LIMIT 20 이 인덱스 없을 때 1,609ms (filesort) → covering reverse scan 후 0.65ms — **2,476배** 차이가 그 효과 ([실측 — Java/Spring])."
+#### Q. "Covering Index 가 왜 빠른가? 정의가 정확히 뭔가?"
 
-#### Q4. "OFFSET 이 깊은 페이지에서 무너지는 이유? (B-tree 메커니즘 차원)"
+Covering Index 는 *인덱스 type 이 아니라 인덱스 × 쿼리 조합의 상태* — secondary index 의 leaf 안에 *SELECT 가 요구하는 모든 컬럼* 이 들어 있으면 clustered index 안 가도 답이 나오는 *covering 상태*. **1번 lookup 으로 끝**. InnoDB 의 secondary index 는 *항상 PK 가 leaf 에 같이 들어 있어서* `(created_at, id)` 인덱스는 `SELECT id, created_at` 같은 쿼리에 자동 covering. EXPLAIN 의 `Using index` = covering 신호. 본 글의 측정에서 `ORDER BY created_at DESC LIMIT 20` 이 인덱스 없을 때 1,609ms (filesort) → covering reverse scan 후 0.65ms — **2,476배** 차이 ([실측 — Java/Spring]).
 
-> "B-tree 의 internal node 는 **키의 범위** 만 저장하고 **row 카운터를 안 가집니다**. 그래서 'N번째 row 위치' 를 **바로** 알 수 없어서 — 처음 leaf 부터 N개를 **순차로 읽고 버립니다**. 카운터를 둘 수도 있지 않냐? 매 INSERT/DELETE 마다 root 까지 가는 **경로의 모든 node** 카운터를 갱신해야 해서 — root 가 lock hot spot 이 되어 동시성 throughput 폭락. **비용 > 이득**. 모든 RDBMS (MySQL/PG/Oracle) 가 동일. 본 시리즈 측정에서 OFFSET 1M = 171ms (rows scanned 1,000,020) — **1M 개 읽고 버림** 의 본질이 이 메커니즘 ([실측 — Java/Spring])."
+#### Q. "OFFSET 이 깊은 페이지에서 무너지는 *진짜* 이유는?"
 
-#### Q5. "인덱스 5개 추가 vs 0개 — **쓰기** 비용 차이는?"
+B-tree 의 internal node 는 *키의 범위* 만 저장하고 *row 카운터를 안 가집니다*. 그래서 "N번째 row 위치" 를 *바로* 알 수 없고, 처음 leaf 부터 N개를 *순차로 읽고 버리는* 방법밖에 없음. 왜 카운터를 안 두냐 — 매 INSERT/DELETE 마다 root 까지 가는 *경로의 모든 node* 카운터를 갱신해야 해서, root 가 lock hot spot 이 되어 동시성 throughput 폭락. *비용 > 이득*. 일반적인 B-tree 인덱스 (MySQL/PG/Oracle/SQL Server) 가 동일한 한계를 가짐. 본 글의 측정에서 OFFSET 1M = 171ms (rows scanned 1,000,020) — *1M 개 읽고 버림* 의 본질 ([실측 — Java/Spring]).
 
-> "한 테이블에 인덱스 5개 = clustered 1 + secondary 5 = **B-tree 6개** 가 동시에 존재합니다. INSERT 1건 = 6개 B-tree 의 leaf 갱신. DELETE 1건도 마찬가지. UPDATE 가 인덱스 키 컬럼을 안 건드리면 영향 적지만, 키 컬럼을 건드리면 leaf 위치 이동 (page split 가능). 본 시리즈 환경에서 인덱스 없는 상태 적재가 187K rows/s (53.5초 / 1,000만) — 인덱스 5종 추가 후 같은 적재는 이론상 5~6배 느림. 운영 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** 인 이유. storage 도 1.3GB 추가 → buffer pool 점유로 clustered hit 율까지 영향. 그래서 **인덱스 다이어트** (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring])."
+#### Q. "인덱스 5개 추가 vs 0개 — *쓰기* 비용은 정확히 얼마나 차이?"
+
+한 테이블에 인덱스 5개 = clustered 1 + secondary 5 = *B-tree 6개* 가 동시에 존재. INSERT 1건 = 6개 B-tree 의 leaf 갱신. DELETE 1건도 마찬가지. UPDATE 는 *변경된 인덱스 컬럼이 속한 트리* 만 갱신 (PK 안 바뀌면 secondary 영향 적음). 본 글의 환경에서 *인덱스 없는 상태* 적재가 187K rows/s (53.5초 / 1,000만) — 인덱스 5종 추가 후 같은 적재는 이론상 5~6배 느림. 운영 패턴이 *적재 시 인덱스 비활성 → 적재 후 활성* 인 이유. storage 도 1.3GB 추가 → buffer pool 점유로 clustered hit 율까지 영향. 그래서 *인덱스 다이어트* (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring]).
 
 ---
 
@@ -747,8 +755,8 @@ graph LR
 - **6편 — 인덱스 다이어트**. 본 글의 **N개 B-tree 비용** 을 운영에서 어떻게 회수하는지
 
 자매글:
-- [MySQL No-Offset Cursor 페이지네이션 — page 단위 측정](/posts/mysql-no-offset-cursor-pagination/) (본 글의 §7~§8 의 운영 처방)
-- [B+tree 인덱스와 Page Split: UUID가 INSERT를 죽인다](/posts/mysql-btree-index-page-split-deep-dive/) (본 글의 §1 page 위에 **INSERT 시 page split** 메커니즘)
+- [MySQL No-Offset Cursor 페이지네이션 — page 단위 측정](/posts/mysql-no-offset-cursor-pagination/) (본 글의 7장~8장 의 운영 처방)
+- [B+tree 인덱스와 Page Split: UUID가 INSERT를 죽인다](/posts/mysql-btree-index-page-split-deep-dive/) (본 글의 1장 page 위에 **INSERT 시 page split** 메커니즘)
 - [MySQL InnoDB 아키텍처 이해](/posts/mysql-innodb-architecture-deep-dive/) (본 글이 **index** 측면 / 자매글이 **buffer pool / log / undo** 측면)
 
 ---

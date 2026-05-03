@@ -3,7 +3,6 @@ title: "MySQL InnoDB 격리수준 — phantom read 를 4 격리수준 모두 [�
 description: "ANSI SQL 표준의 RR 은 phantom read 차단을 보장하지 않습니다. 그런데 MySQL InnoDB 의 RR 은 차단합니다. 이 흔한 주장을 직접 측정으로 굳혔습니다 — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 그리고 왜 MySQL RR 이 ANSI 표준보다 강한지 — consistent read snapshot / gap lock / MVCC undo log 세 메커니즘으로 분해해서 결제 도메인에는 RR 만으로 충분하다는 결론을 측정값으로 굳혔습니다."
 author: 김면수
 pubDatetime: 2026-05-03T09:30:00.000Z
-slug: mysql-isolation-phantom-read
 featured: false
 draft: false
 tags:

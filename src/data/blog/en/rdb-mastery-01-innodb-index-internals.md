@@ -91,7 +91,7 @@ A page holds many rows in **PK-sorted order**. Diagram 1 — ASCII layout of a s
 
 → Reading diagram 1: user records inside the page are **sorted by PK** (even when no index is declared). The page directory is a sparse slot array that lets you do **binary search** inside the page — instead of comparing 100 rows linearly, you compare **log(N)** times to land on a single row.
 
-The `prev` / `next` pointers form a **doubly-linked list** that connects this page to its siblings at the same B-tree level. This is the physical foundation for the reverse scan in §5.
+The `prev` / `next` pointers form a **doubly-linked list** that connects this page to its siblings at the same B-tree level. This is the physical foundation for the reverse scan in Section 5.
 
 [MySQL — InnoDB Row Format](https://dev.mysql.com/doc/refman/8.0/en/innodb-row-format.html) plus [Jeremy Cole — InnoDB Page Anatomy](https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/) cover the byte-level breakdown of a page in the most detail.
 
@@ -169,7 +169,7 @@ That's why the operational standard is always an *explicit* PK. The reason `id B
 
 A direct consequence: in InnoDB, what people call a "full table scan" actually means **walking the leaf level of the clustered index from start to end**. PK-ordered walk. This is **different from PostgreSQL's heap scan** (walk in physical insertion order, no sort guarantee).
 
-`type=ALL` in EXPLAIN = clustered-index full scan. Revisited in §11.
+`type=ALL` in EXPLAIN = clustered-index full scan. Revisited in Section 11.
 
 ---
 
@@ -310,7 +310,7 @@ A composite index `(a, b, c)` has leaves `(a, b, c, PK)`. Hence:
 
 → "Is it covering?" and "Does WHERE narrow it efficiently?" are **two different questions**. Even if covering, a WHERE that violates leftmost prefix forces a **full index scan**.
 
-The companion post's §3.2 (single-key cursor at 0.27ms) and §3.3 (OR-split cursor at 0.30ms) both run on top of this covering index. Same index, same 10M rows, different SQL shapes.
+The companion post's Section 3.2 (single-key cursor at 0.27ms) and Section 3.3 (OR-split cursor at 0.30ms) both run on top of this covering index. Same index, same 10M rows, different SQL shapes.
 
 ---
 
@@ -318,7 +318,7 @@ The companion post's §3.2 (single-key cursor at 0.27ms) and §3.3 (OR-split cur
 
 ### 5.1 Leaf nodes connected via **prev / next** pointers
 
-The `prev page id` / `next page id` fields inside the page header (§1) do this work. The leaves of the B+-tree form a **doubly-linked list**. Moving to the immediate sibling at the same level is **direct**.
+The `prev page id` / `next page id` fields inside the page header (Section 1) do this work. The leaves of the B+-tree form a **doubly-linked list**. Moving to the immediate sibling at the same level is **direct**.
 
 Diagram 5 — leaf doubly-linked list:
 
@@ -330,8 +330,8 @@ Diagram 5 — leaf doubly-linked list:
               Leaf 1 ↔ Leaf 2 ↔ Leaf 3 ↔ Leaf 4 ↔ Leaf 5
               (id=1~100) (101~200) (201~300) (301~400) (401~500)
 
-              ←─── forward (ASC) walk ───→
-              ←─── backward (DESC) walk ─→
+              ──────── forward (ASC) walk ────────→
+              ←──────── backward (DESC) walk ────────
 ```
 
 → Reading diagram 5. Leaf 1's `next` = leaf 2's page id; leaf 2's `prev` = leaf 1's page id. ASC sort → walk left-to-right via next. DESC sort → walk right-to-left via prev.
@@ -346,7 +346,7 @@ Diagram 5 — leaf doubly-linked list:
 
 ### 5.3 The companion post's (b) single-key cursor 0.27ms exercises this
 
-The companion §3.2's `WHERE created_at < ? ORDER BY created_at DESC LIMIT 20` produced this EXPLAIN ANALYZE:
+The companion Section 3.2's `WHERE created_at < ? ORDER BY created_at DESC LIMIT 20` produced this EXPLAIN ANALYZE:
 
 ```
 -> Limit: 20 row(s)
@@ -365,23 +365,29 @@ Four kinds of walks can happen on a B-tree.
 
 ### 6.1 Diagram 6 — the four walks
 
-```mermaid
-graph TB
-    subgraph "1. Index Seek (point lookup)"
-        A1["Root → Internal → Leaf<br/>= O(log N) pages<br/>= 3~4 page seeks<br/>1 row"]
-    end
-
-    subgraph "2. Index Range Scan"
-        A2["Root → Internal → Leaf start<br/>+ leaf linked list walk N items<br/>= O(log N + N) pages"]
-    end
-
-    subgraph "3. Full Index Scan"
-        A3["First leaf → linked list end<br/>= every leaf page<br/>= O(leaf count)"]
-    end
-
-    subgraph "4. Full Table Scan = Clustered Full Scan"
-        A4["Clustered first leaf → end walk<br/>= every column of every row<br/>most expensive"]
-    end
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 1. Index Seek (point lookup)                                 │
+│    Root → Internal → Leaf                                    │
+│    cost: O(log N) = 3~4 page seeks                           │
+│    result: 1 row                                             │
+├──────────────────────────────────────────────────────────────┤
+│ 2. Index Range Scan                                          │
+│    Root → Internal → Leaf start                              │
+│    → walk leaf linked list for N items                       │
+│    cost: O(log N + N) pages                                  │
+│    result: matching rows                                     │
+├──────────────────────────────────────────────────────────────┤
+│ 3. Full Index Scan                                           │
+│    First leaf → end of linked list                           │
+│    cost: O(every leaf)                                       │
+│    result: all index rows                                    │
+├──────────────────────────────────────────────────────────────┤
+│ 4. Full Table Scan (= Clustered Index Full Scan)             │
+│    Clustered first leaf → end                                │
+│    cost: O(every row)                                        │
+│    result: every column of every row  (most expensive)       │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 → Reading diagram 6:
@@ -455,7 +461,7 @@ OFFSET-position vs latency, **on top of a covering index**:
 | **1,000,000** | **171 ms** | **1,000,020** |
 | 5,000,000 | 765 ms | 5,000,020 |
 
-→ **OFFSET cost is exactly proportional to the number of rows read and discarded.** Even with a covering index, **you cannot skip**. The companion §2 unwinds the page-level numbers; this post stays with the **why** at the B-tree mechanism layer.
+→ **OFFSET cost is exactly proportional to the number of rows read and discarded.** Even with a covering index, **you cannot skip**. The companion Section 2 unwinds the page-level numbers; this post stays with the **why** at the B-tree mechanism layer.
 
 ---
 
@@ -495,14 +501,14 @@ sequenceDiagram
 
 ### 8.2 [Measured — Java/Spring] cursor 0.30ms
 
-OR-split cursor measurement from companion §3.3:
+OR-split cursor measurement from companion Section 3.3:
 
 | approach | actual time | rows scanned |
 |---|---|---|
 | OFFSET 1,000,000 | 171 ms | 1,000,020 |
 | **OR-split cursor** | **0.30 ms** | **20** |
 
-→ **About 570x.** The two diagrams in §7 + §8 explain the gap. OFFSET = 1M page seeks (sequential walk). Cursor = 4 page seeks (binary search).
+→ **About 570x.** The two diagrams in Section 7 + Section 8 explain the gap. OFFSET = 1M page seeks (sequential walk). Cursor = 4 page seeks (binary search).
 
 The companion's three-shape comparison ((a) row constructor 154ms / (b) single-key cursor 0.27ms / (c) OR-split 0.30ms) is about **whether the optimizer pushes the predicate down**. The **B-tree mechanism itself** delivers binary-search primitive whenever push-down works. This post focuses on the latter.
 
@@ -526,35 +532,35 @@ On the single table `orders_w2`, InnoDB now holds **6 B-trees simultaneously**: 
 
 Diagram 9 — the same row sits in all 6 B-trees:
 
-```mermaid
-graph TB
-    subgraph "Same Row (id=5,000,001, owner=1234, state=CONFIRMED, region=KR, created_at=2024-...)"
-        Row[("Row<br/>1")]
-    end
-    subgraph "B-tree 1: Clustered (PK)"
-        T1[("PK-sorted<br/>+ full row data")]
-    end
-    subgraph "B-tree 2: idx_created_at_id"
-        T2[("created_at, PK<br/>covering")]
-    end
-    subgraph "B-tree 3: idx_region_code"
-        T3[("region_code, PK<br/>cardinality 4")]
-    end
-    subgraph "B-tree 4: idx_owner_state_created"
-        T4[("owner_id, state, created_at, PK<br/>composite")]
-    end
-    subgraph "B-tree 5: idx_state_created"
-        T5[("state, created_at, PK")]
-    end
-    subgraph "B-tree 6: idx_owner_id"
-        T6[("owner_id, PK")]
-    end
-    Row -.row's PK.-> T1
-    Row -.in every leaf.-> T2
-    Row -.alongside PK.-> T3
-    Row -.lives.-> T4
-    Row -.->T5
-    Row -.->T6
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ Row (1)                                                           │
+│   id=5,000,001 / owner=1234 / state='CONFIRMED' /                │
+│   region='KR' / created_at='2024-...'                            │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │ same row exists in 6 B-trees at once
+                             │ (one leaf entry per tree)
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  B-tree 1   Clustered (PK)            leaf: PK + full row        │ ← the table itself
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 2   idx_created_at_id         leaf: (created_at, PK)     │
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 3   idx_region_code           leaf: (region_code, PK)    │   (low cardinality)
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 4   idx_owner_state_created   leaf: (owner_id, state,    │   composite
+│             (composite)                     created_at, PK)      │
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 5   idx_state_created         leaf: (state, created_at,  │
+│                                              PK)                 │
+├──────────────────────────────────────────────────────────────────┤
+│  B-tree 6   idx_owner_id              leaf: (owner_id, PK)       │
+└──────────────────────────────────────────────────────────────────┘
+
+  → 1 row = 6 leaf entries  (one per B-tree)
+  → 1 INSERT = updates to all 6 B-trees   (write amplification)
+  → 1 DELETE = the same — all 6 updated
+  → UPDATE: only the trees whose key columns changed (PK unchanged → secondaries unaffected)
 ```
 
 → Reading diagram 9. One row = 6 leaf entries (one in each B-tree). One INSERT = **all 6 B-trees updated**. One DELETE the same.
@@ -648,7 +654,7 @@ When this mapping breaks, EXPLAIN, the optimizer, and indexes all turn fuzzy.
 
 ### 11.1 In InnoDB, **full table scan = clustered-index full scan**
 
-Restating the implication from §2. EXPLAIN's `type=ALL` is colloquially "full table scan". What actually happens **physically**:
+Restating the implication from Section 2. EXPLAIN's `type=ALL` is colloquially "full table scan". What actually happens **physically**:
 
 - start at the first leaf of the clustered index (the page with the smallest PK)
 - walk the linked-list `next` pointers until the end
@@ -682,40 +688,42 @@ Restating the implication from §2. EXPLAIN's `type=ALL` is colloquially "full t
 
 | source | post | which § does it support |
 |---|---|---|
-| Toss SLASH24 | [Next core banking — Oracle→MySQL + InnoDB MVCC](https://haon.blog/article/toss-slash/next-core-banking/) | §2 clustered index, §3 secondary lookup |
-| LINE Engineering | [MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | §11 type=ALL detection |
-| Kakao Pay | [JPA Transactional readOnly + set_option](https://tech.kakaopay.com/post/jpa-transactional-bri/) | §3 secondary index + read tuning |
-| Use The Index, Luke! | [Anatomy of an Index](https://use-the-index-luke.com/sql/anatomy) | §3 InnoDB vs PG indirection |
-| Use The Index, Luke! | [No Offset](https://use-the-index-luke.com/no-offset) | §7 OFFSET ceiling |
-| Vlad Mihalcea | [How does MVCC work](https://vladmihalcea.com/how-does-mvcc-multi-version-concurrency-control-work/) | §1 InnoDB foundation |
-| Vlad Mihalcea | [Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | §9.2 cardinality |
-| Percona | [InnoDB Buffer Pool / B-tree](https://www.percona.com/blog/category/innodb/) | §1.3 page seek |
-| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | §9 multi-index → distributed limits |
-| Jeremy Cole | [The physical structure of InnoDB index pages](https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/) | §1.2 page byte-level |
-| MySQL official | [Clustered and Secondary Indexes](https://dev.mysql.com/doc/refman/8.0/en/innodb-index-types.html) | §2 / §3 |
-| MySQL official | [Descending Indexes](https://dev.mysql.com/doc/refman/8.0/en/descending-indexes.html) | §5.2 reverse scan |
+| Toss SLASH24 | [Next core banking — Oracle→MySQL + InnoDB MVCC](https://haon.blog/article/toss-slash/next-core-banking/) | Section 2 clustered index, Section 3 secondary lookup |
+| LINE Engineering | [MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | Section 11 type=ALL detection |
+| Kakao Pay | [JPA Transactional readOnly + set_option](https://tech.kakaopay.com/post/jpa-transactional-bri/) | Section 3 secondary index + read tuning |
+| Use The Index, Luke! | [Anatomy of an Index](https://use-the-index-luke.com/sql/anatomy) | Section 3 InnoDB vs PG indirection |
+| Use The Index, Luke! | [No Offset](https://use-the-index-luke.com/no-offset) | Section 7 OFFSET ceiling |
+| Vlad Mihalcea | [How does MVCC work](https://vladmihalcea.com/how-does-mvcc-multi-version-concurrency-control-work/) | Section 1 InnoDB foundation |
+| Vlad Mihalcea | [Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | Section 9.2 cardinality |
+| Percona | [InnoDB Buffer Pool / B-tree](https://www.percona.com/blog/category/innodb/) | Section 1.3 page seek |
+| Discord | [Storing Billions of Messages](https://discord.com/blog/how-discord-stores-billions-of-messages) | Section 9 multi-index → distributed limits |
+| Jeremy Cole | [The physical structure of InnoDB index pages](https://blog.jcole.us/2013/01/07/the-physical-structure-of-innodb-index-pages/) | Section 1.2 page byte-level |
+| MySQL official | [Clustered and Secondary Indexes](https://dev.mysql.com/doc/refman/8.0/en/innodb-index-types.html) | Section 2 / Section 3 |
+| MySQL official | [Descending Indexes](https://dev.mysql.com/doc/refman/8.0/en/descending-indexes.html) | Section 5.2 reverse scan |
 
-### 12.2 Five interview answers
+### 12.2 Recap — putting this article in your own words
 
-#### Q1. "If a table has no index, how does InnoDB store rows?"
+If someone who just finished this article were to summarize it through five core questions, here's how the measurements answer them.
 
-> "**It already stores them sorted inside a B-tree.** If a PK is defined, that PK is the clustered-index key, and the clustered-index leaf carries **the full row**, so the **clustered index is the table itself**. If there's no PK, InnoDB auto-generates a 6-byte hidden ROWID and uses that as the clustered key. So **a zero-index table doesn't exist inside InnoDB** — there is always at least one clustered index. The common 'rows just pile up in INSERT order' is wrong; **rows are physically sorted by PK**."
+#### Q. "If a table has no index, how does InnoDB store rows?"
 
-#### Q2. "Why can't a secondary-index lookup finish in one step?"
+InnoDB **already stores rows sorted inside a B-tree**, even with no index declared. If a PK is defined, the PK becomes the clustered-index key, and the clustered-index leaf carries *the full row* — making it *the table itself*. Without a PK, InnoDB auto-generates a 6-byte hidden ROWID as the clustered key. So **a zero-index table doesn't exist inside InnoDB** — there is always at least one clustered index. The common "rows just pile up in INSERT order" is wrong — they are *physically sorted by PK*.
 
-> "InnoDB's secondary-index leaves carry the **PK value**, not the physical row location. So `WHERE owner_id=1234` goes (1) find owner_id=1234 leaves in the secondary index → get a list of PKs, then (2) look up the clustered index again with each PK. **Two walks.** PostgreSQL puts the heap TID in the leaf and finishes in one walk — clear contrast. The trade-off: InnoDB's secondary indexes are **unaffected when a row moves due to page split** (as long as PK stays put); PG must update every secondary index (HOT optimization avoids some)."
+#### Q. "Why can't a secondary-index lookup finish in one step?"
 
-#### Q3. "Why is a covering index fast?"
+InnoDB's secondary-index leaves carry the *PK value*, not the physical row location (page+slot). So `WHERE owner_id=1234` goes (1) find leaves for owner_id=1234 in the secondary index → get a PK list, then (2) look up the clustered index again with each PK — *two walks*. PostgreSQL puts the heap TID (physical location) in the leaf and finishes in one walk — clear contrast. The trade-off: InnoDB's secondary indexes are *unaffected when a row moves due to page split* (as long as PK stays put); PG must update every secondary index (HOT optimization avoids some). Neither side is universally superior — it's a structural trade-off.
 
-> "If every column the SELECT needs lives **in the secondary-index leaf**, the clustered index is never touched — **one lookup**. InnoDB's secondary indexes **always carry the PK in the leaf**, so an index like (created_at, id) is **automatically covering** for `SELECT id, created_at`. EXPLAIN's `Using index` is the covering signal. In our measurements, `ORDER BY created_at DESC LIMIT 20` went from 1,609ms (filesort, no index) → 0.65ms (covering reverse scan) — **2,476x** ([measured — Java/Spring])."
+#### Q. "Why is a covering index fast? What's the precise definition?"
 
-#### Q4. "Why does OFFSET collapse on deep pages? (B-tree mechanism)"
+A covering index isn't a *type* of index — it's a *state* defined by the index × query combination. When every column the SELECT needs lives **in the secondary-index leaf**, the clustered index is never touched — **one lookup**. InnoDB's secondary indexes *always carry the PK in the leaf*, so an index like `(created_at, id)` is *automatically covering* for queries like `SELECT id, created_at`. EXPLAIN's `Using index` is the covering signal. In this article's measurements, `ORDER BY created_at DESC LIMIT 20` went from 1,609ms (filesort, no index) → 0.65ms (covering reverse scan) — **2,476x** ([measured — Java/Spring]).
 
-> "B-tree internal nodes only store **key ranges**; **they don't carry a row counter**. So 'jump to the N-th row' is impossible — the engine must **read N rows sequentially from the first leaf and discard them**. Why no counter? Because every INSERT/DELETE would have to bump counters on every node along the root path — turning the root into a **lock hot spot** that collapses concurrent throughput. **Cost > benefit.** Every RDBMS (MySQL/PG/Oracle) makes the same call. In our measurements, OFFSET 1M = 171ms with rows scanned = 1,000,020 — **literally read 1M and threw them away** ([measured — Java/Spring])."
+#### Q. "Why does OFFSET collapse on deep pages — the *real* reason?"
 
-#### Q5. "5 indexes vs 0 — what's the **write** cost difference?"
+B-tree internal nodes only store *key ranges*; they don't carry a row counter. So "jump to the N-th row" is impossible — the engine must *read N rows sequentially from the first leaf and discard them*. Why no counter? Because every INSERT/DELETE would have to bump counters on every node along the root path, turning the root into a *lock hot spot* that collapses concurrent throughput. *Cost > benefit*. The general B-tree index (MySQL/PG/Oracle/SQL Server) makes the same call. In this article's measurements, OFFSET 1M = 171ms with rows scanned = 1,000,020 — literally *read 1M and threw them away* ([measured — Java/Spring]).
 
-> "5 indexes on a single table = clustered 1 + secondary 5 = **6 B-trees** simultaneously. One INSERT = updates to leaves on all 6. One DELETE same. UPDATE only touches secondary indexes whose key columns changed, but if a key changes the leaf moves (potential page split). In our measurements, no-index load was 187K rows/s (53.5s for 10M rows); the same load with 5 indexes attached is theoretically 5–6x slower. That's why **disable indexes during bulk load, enable after** is the operational standard. Storage adds 1.3GB → buffer-pool pressure also degrades clustered hit-rate. Hence the operational discipline of an **index diet** (sys.schema_unused_indexes / invisible indexes) ([measured — Java/Spring])."
+#### Q. "5 indexes vs 0 — what's the *exact* write cost difference?"
+
+5 indexes on a single table = clustered 1 + secondary 5 = *6 B-trees* simultaneously. One INSERT = updates to leaves on all 6. One DELETE same. UPDATE only touches the trees whose key columns changed (with PK unchanged, secondaries are unaffected). In this article's environment, *no-index load* was 187K rows/s (53.5s for 10M rows); the same load with 5 indexes attached is theoretically 5–6x slower. That's why *disable indexes during bulk load, enable after* is the operational standard. Storage adds 1.3GB → buffer-pool pressure also degrades clustered hit-rate. Hence the operational discipline of an *index diet* (sys.schema_unused_indexes / invisible indexes) ([measured — Java/Spring]).
 
 ---
 
@@ -747,8 +755,8 @@ This is **post #1 of the RDB Mastery series** — the **internal index structure
 - **#6 — The index diet.** How to reclaim the **N-B-tree cost** in production.
 
 Companion posts:
-- [MySQL No-Offset Cursor Pagination — page-level measurements](/en/posts/mysql-no-offset-cursor-pagination/) (operational prescription matching §7~§8 of this post)
-- [B+tree Index and Page Split: UUIDs Are Killing Your INSERT](/en/posts/mysql-btree-index-page-split-deep-dive/) (page split mechanism on top of §1's page concept)
+- [MySQL No-Offset Cursor Pagination — page-level measurements](/en/posts/mysql-no-offset-cursor-pagination/) (operational prescription matching Section 7~Section 8 of this post)
+- [B+tree Index and Page Split: UUIDs Are Killing Your INSERT](/en/posts/mysql-btree-index-page-split-deep-dive/) (page split mechanism on top of Section 1's page concept)
 - [MySQL InnoDB Architecture Deep Dive](/en/posts/mysql-innodb-architecture-deep-dive/) (this post = index angle / that post = buffer pool / log / undo angle)
 
 ---

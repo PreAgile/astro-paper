@@ -3,7 +3,6 @@ title: "MySQL InnoDB Isolation Levels — Measuring phantom reads across all 4 l
 description: "The ANSI SQL standard does not guarantee that REPEATABLE READ blocks phantom reads. Yet MySQL InnoDB's RR does. I nailed down this commonly-cited claim with direct measurements — RU/RC: phantom occurs (A1=0 → INSERT → A2=1), RR: blocked (A2=0), SERIALIZABLE: INSERT itself waits 1.56s. Then I decomposed why MySQL RR is stronger than the ANSI standard via three mechanisms — consistent read snapshot, gap lock, and MVCC undo log — to nail down with measurements that for payment domains, RR alone is sufficient."
 author: 김면수
 pubDatetime: 2026-05-03T09:30:00.000Z
-slug: mysql-isolation-phantom-read
 featured: false
 draft: false
 tags:

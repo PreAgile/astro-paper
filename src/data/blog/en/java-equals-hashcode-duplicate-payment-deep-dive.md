@@ -2,7 +2,6 @@
 author: MyeonSoo
 pubDatetime: 2026-01-09T14:00:00Z
 title: "When equals/hashCode Goes Wrong: A Duplicate Payment Incident Post-Mortem"
-slug: en/java-equals-hashcode-duplicate-payment-deep-dive
 featured: true
 draft: false
 tags:
