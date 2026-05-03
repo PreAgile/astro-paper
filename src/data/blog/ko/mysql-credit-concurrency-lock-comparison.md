@@ -636,9 +636,9 @@ public class OptimisticDeductExecutor {
 
 **주의**: `@Retryable` 도 AOP proxy 기반. self-invocation 시 작동 안 함 (4장 함정 그대로). **별도 빈** 으로 분리한 이유 중 하나도 이것.
 
-### 7.5 면접에서 이 한 줄로 답하면
+### 7.5 이 챕터의 답을 자기 말로
 
-> "낙관락은 **충돌 빈도** 에 따라 처리량이 N² 으로 갈립니다. 충돌 적은 환경엔 락 안 잡으니 가장 빠름. 100 worker 같은 row 노리면 5,050 회 시도로 비관락의 3배 느림. **운영 결정**: 충돌 빈도가 운영 측정상 5% 미만이면 낙관락, 5% 이상이면 비관락. [실측] 잔액 차감 / 결제 도메인은 비관락이 표준."
+이 챕터가 측정으로 보여준 것은 — 낙관락의 처리량이 **충돌 빈도** 에 따라 N² 으로 갈린다는 것. 충돌 적은 환경에선 락 자체를 잡지 않으니 가장 빠르고, 100 worker 가 같은 row 를 노리는 시나리오에선 5,050 회 시도로 비관락의 3배 느려집니다. 운영 결정의 임계값은 충돌 5% — 측정상 그 아래면 낙관락, 그 위면 비관락. 잔액 차감 / 결제 도메인이 비관락 표준이 된 이유는 도메인 특성상 같은 계정에 트래픽이 모여 충돌 빈도가 본질적으로 높기 때문이지, 모든 도메인의 답이 그렇다는 의미는 아닙니다 ([실측 — Java/Spring]).
 
 ---
 
@@ -959,7 +959,7 @@ spotbugs --include-bug-categories=BAD_PRACTICE \
 
 ---
 
-## 12. 빅테크 사례 + 면접 답변 {#bigtech-references}
+## 12. 빅테크 사례 {#bigtech-references}
 
 ### 12.1 Vlad Mihalcea — Optimistic vs Pessimistic Locking
 
@@ -1022,40 +1022,6 @@ spotbugs --include-bug-categories=BAD_PRACTICE \
 > "A lock obtained with GET_LOCK() is released explicitly by executing RELEASE_LOCK() or implicitly when your session terminates (either normally or abnormally)."
 
 → 본 글 8장의 connection-bound 함정 출처.
-
-### 12.8 면접 답변 — Q1 ~ Q5
-
-#### Q1. "낙관락과 비관락의 차이를 설명해주세요."
-
-> "낙관락은 락을 **물리적으로** 잡지 않고 **version 컬럼** 으로 충돌을 감지합니다. SELECT 시점의 version 을 기록 → UPDATE 시 `WHERE version=?` 추가 → 다른 worker 가 먼저 commit 했으면 0 row affected → 예외 → 재시도. 충돌 적은 환경에 적합합니다.
-> 비관락은 `SELECT ... FOR UPDATE` 로 InnoDB 의 row-level X-lock 을 잡습니다. 다른 worker 는 즉시 wait queue. 정확성 + 재시도 없음 보장. high contention 환경에 표준.
-> [실측] 100 worker 가 같은 row 차감하는 시나리오에서 비관락 180ms / 100% / 잔액 0, 낙관락 549ms / 100% / 잔액 0 — 둘 다 정확하지만 contention 환경엔 낙관락이 3배 느림. N² 재시도 폭증."
-
-#### Q2. "MySQL 의 GET_LOCK 을 분산락으로 써도 되나요?"
-
-> "안 됩니다. GET_LOCK 은 MySQL 의 named lock 으로 connection-bound — connection close 시 자동 release / commit 후에도 lock 유지 같은 함정이 있습니다. Spring 의 HikariCP 같은 connection pool 환경에선 어느 connection 이 어디서 lock 잡았나 추적 불능.
-> [실측] 4 시나리오 시연 — RELEASE_LOCK 안 하고 connection close 하면 자동 release. 운영 코드에선 `try-finally` 명시 release 필수. 그리고 분산락 의도면 Redisson 이 정답 — Pub/Sub + Watchdog 메커니즘으로 멀티 인스턴스 환경 정확히 보호.
-> GET_LOCK 의 진짜 사용처는 매우 좁음 — DB 마이그레이션 / DDL 동시 실행 방지 같은 admin 용도."
-
-#### Q3. "Redisson 분산락이 100 worker 시나리오에서 53/100 success 였습니다. 이게 한계인가요?"
-
-> "그건 한계가 아니라 misuse 입니다. 본 측정은 단일 Spring Boot 인스턴스 + 100 worker thread — 모든 worker 가 같은 JVM 안에 있는 시나리오. 이 환경에선 비관락 (DB row-level X-lock) 이 본질적으로 빠릅니다. 180ms / 100% vs Redisson 321ms / 53%.
-> Redisson 의 진짜 강점은 **멀티 인스턴스** 환경 — 여러 Spring Boot 인스턴스가 같은 lock 을 공유해야 할 때입니다. Pub/Sub 으로 lock 풀림 알림 + Watchdog 으로 lease 자동 연장. 멀티 인스턴스 cron job / Cache stampede 방지 같은 용도가 표준.
-> [실측] 단일 인스턴스 안 동시성에 Redisson 쓴 건 over-engineering. 비관락이 정답."
-
-#### Q4. "self-invocation 함정이 뭔가요?"
-
-> "Spring 의 `@Transactional` / `@Async` / `@Cacheable` 같은 어노테이션은 **AOP proxy** 로 작동합니다. 외부 호출자 → Proxy → Real 객체 순서로, Proxy 가 트랜잭션 begin / commit / rollback 을 끼워 넣습니다.
-> 그런데 **같은 클래스 내부에서 자기 자신의 다른 메서드를 호출** 하면 — `this.method()` 가 Real 객체 자기 자신을 직접 호출 → **Proxy 우회** → `@Transactional` 작동 안 함. 트랜잭션 시작 안 되고 dirty checking 결과 flush 안 됨.
-> [실측] 본 측정에서 첫 결과가 successes=100 인데 잔액 그대로 100. 코드 logic 정상인데 차감 안 됨 — proxy 우회가 원인. 별도 `@Service` 빈으로 분리 (OptimisticDeductExecutor) 해서 외부 빈 호출 만들면 정상.
-> Spring 공식 문서에 명시된 well-known 함정. PR 리뷰 0번 항목."
-
-#### Q5. "락 선택의 결정 트리를 알려주세요."
-
-> "세 질문으로 갈립니다. 첫째, **충돌이 빈번한가** — 빈번하면 비관락 (FOR UPDATE), 드물면 낙관락 (@Version). 100 worker 같은 row 노리면 N² 재시도라 낙관락 3배 느림.
-> 둘째, **분산 환경인가** — 단일 인스턴스면 비관락, 멀티 인스턴스면 Redisson. Redisson 의 강점은 Pub/Sub + Watchdog 으로 인스턴스 간 lock 공유.
-> 셋째, **트랜잭션 boundary 가 짧은가** — 짧으면 (< 100ms) 비관락 OK, 길면 (외부 API 호출 포함) lock wait timeout 위험 → 트랜잭션 분리 또는 Redisson 으로 lease 자동 연장.
-> [실측] 본 시리즈에서 잔액 차감 / 결제 / 인벤토리는 비관락이 표준. GET_LOCK 은 admin 용도 (DB 마이그레이션 락) 만, Redisson 은 멀티 인스턴스 환경에서만."
 
 ---
 
