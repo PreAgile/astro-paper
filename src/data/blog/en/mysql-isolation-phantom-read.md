@@ -1,6 +1,6 @@
 ---
 title: "MySQL InnoDB Isolation Levels — Measuring phantom reads across all 4 levels and decomposing why InnoDB RR is stronger than the ANSI standard"
-description: "The ANSI SQL standard does *not* guarantee that REPEATABLE READ blocks phantom reads. Yet MySQL InnoDB's RR does. I nailed down this commonly-cited claim with direct measurements — RU/RC: phantom occurs (A1=0 → INSERT → A2=1), RR: blocked (A2=0), SERIALIZABLE: INSERT itself waits 1.56s. Then I decomposed *why* MySQL RR is stronger than the ANSI standard via three mechanisms — consistent read snapshot, gap lock, and MVCC undo log — to nail down with measurements that for payment domains, RR alone is sufficient."
+description: "The ANSI SQL standard does **not** guarantee that REPEATABLE READ blocks phantom reads. Yet MySQL InnoDB's RR does. I nailed down this commonly-cited claim with direct measurements — RU/RC: phantom occurs (A1=0 → INSERT → A2=1), RR: blocked (A2=0), SERIALIZABLE: INSERT itself waits 1.56s. Then I decomposed **why** MySQL RR is stronger than the ANSI standard via three mechanisms — consistent read snapshot, gap lock, and MVCC undo log — to nail down with measurements that for payment domains, RR alone is sufficient."
 author: 김면수
 pubDatetime: 2026-05-03T09:30:00.000Z
 slug: mysql-isolation-phantom-read
@@ -27,22 +27,22 @@ During a code review, another method in the payment domain caught my eye. Inside
 
 But a casual question someone tossed out kept rattling around in my head. **"Can the same SELECT in the same transaction return different results?"** My head answered, "Not under RR," but few people can confidently point to **where in the ANSI SQL standard that's *guaranteed***.
 
-When I dug into the references, it got worse. The **ANSI SQL standard's RR (REPEATABLE READ) does *not* guarantee blocking phantom reads** — that's the standard, verbatim. Yet "MySQL InnoDB RR blocks phantoms" is a common claim. *Why?* — most articles end with "MySQL just does that" and no further explanation.
+When I dug into the references, it got worse. The **ANSI SQL standard's RR (REPEATABLE READ) does **not** guarantee blocking phantom reads** — that's the standard, verbatim. Yet "MySQL InnoDB RR blocks phantoms" is a common claim. **Why?** — most articles end with "MySQL just does that" and no further explanation.
 
-This post is a record of running that *why?* down to the metal with raw MySQL commands.
+This post is a record of running that **why?** down to the metal with raw MySQL commands.
 
 1. **Step 1 — Measure all 4 isolation levels**: how phantoms behave differently under RU / RC / RR / SERIALIZABLE in the same scenario
-2. **Step 2 — Decompose the mechanism**: *why* MySQL RR is stronger than the ANSI standard, via *consistent read snapshot / gap lock / MVCC undo log*
+2. **Step 2 — Decompose the mechanism**: **why** MySQL RR is stronger than the ANSI standard, via **consistent read snapshot / gap lock / MVCC undo log**
 3. **Step 3 — Domain mapping**: which isolation level fits payments / credits / dashboards / pagination / settlement batches / idempotency — 6 domains
 
 Bottom line up front:
 
 - **RU / RC trigger phantoms** — A1=0 → Session B INSERT → A2=1. Strictly off-limits for payment domains.
-- **RR blocks phantoms** — A2=0. Consistent read snapshot *covers* the ANSI standard's phantom allowance.
+- **RR blocks phantoms** — A2=0. Consistent read snapshot **covers** the ANSI standard's phantom allowance.
 - **SERIALIZABLE has explicit concurrency cost** — INSERT itself waits 1.56s. No reason to escalate when RR suffices.
 - **MySQL RR ≈ Snapshot Isolation** — comparable in strength to PostgreSQL's Serializable Snapshot Isolation (SSI).
 
-We'll unpack how the head-shrug "RR means no phantoms, right?" is *actually guaranteed* down to the mechanism.
+We'll unpack how the head-shrug "RR means no phantoms, right?" is **actually guaranteed** down to the mechanism.
 
 ---
 
@@ -69,13 +69,13 @@ public void chargeCredit(long userId, BigDecimal amount) {
 }
 ```
 
-Normal operation: fine. But if another transaction slips an INSERT or UPDATE *between the two SELECTs in the same transaction*, the code stays the same yet the business logic breaks.
+Normal operation: fine. But if another transaction slips an INSERT or UPDATE **between the two SELECTs in the same transaction**, the code stays the same yet the business logic breaks.
 
 ### 1.2 Hypotheses
 
-- **(H1)** Phantom reads *occur* under READ COMMITTED. The same query in the same transaction returns different results.
-- **(H2)** MySQL InnoDB's REPEATABLE READ *blocks* phantoms via *consistent read snapshot* — stronger protection than the ANSI standard RR.
-- **(H3)** Under SERIALIZABLE, SELECT acquires a *shared lock*, making concurrent INSERTs *wait*. Concurrency cost is explicit.
+- **(H1)** Phantom reads **occur** under READ COMMITTED. The same query in the same transaction returns different results.
+- **(H2)** MySQL InnoDB's REPEATABLE READ **blocks** phantoms via **consistent read snapshot** — stronger protection than the ANSI standard RR.
+- **(H3)** Under SERIALIZABLE, SELECT acquires a **shared lock**, making concurrent INSERTs **wait**. Concurrency cost is explicit.
 
 ### 1.3 Measurement environment
 
@@ -88,17 +88,17 @@ Normal operation: fine. But if another transaction slips an INSERT or UPDATE *be
 | Scenario | Session A SELECT × 2 with SLEEP 3s in between / Session B INSERT at 1.5s |
 | Label | `[measured — Java/Spring Stage 1]` |
 
-I ran the measurements through the raw `mysql` CLI. To compare *what Spring hides* later when JPA is introduced, you need to handle *isolation level / consistent read / gap lock* directly first, without the `@Transactional` abstraction in the way.
+I ran the measurements through the raw `mysql` CLI. To compare **what Spring hides** later when JPA is introduced, you need to handle **isolation level / consistent read / gap lock** directly first, without the `@Transactional` abstraction in the way.
 
 ---
 
-## 2. The 4 ANSI SQL isolation levels — what the standard *guarantees* and what it does *not*
+## 2. The 4 ANSI SQL isolation levels — what the standard **guarantees** and what it does **not**
 
-Before measurements, let's pin down what the ANSI SQL standard actually guarantees. The standard is what gives the measurements their *meaning*.
+Before measurements, let's pin down what the ANSI SQL standard actually guarantees. The standard is what gives the measurements their **meaning**.
 
 ### 2.1 Definition of the 4 isolation levels
 
-The ANSI SQL-92 standard defines the 4 levels by *which of three anomalies they allow or block*.
+The ANSI SQL-92 standard defines the 4 levels by **which of three anomalies they allow or block**.
 
 | Isolation level | Dirty Read | Non-Repeatable Read | Phantom Read |
 |---|:---:|:---:|:---:|
@@ -111,13 +111,13 @@ The ANSI SQL-92 standard defines the 4 levels by *which of three anomalies they 
 
 | Anomaly | Definition | Example |
 |---|---|---|
-| **Dirty Read** | Reads an *uncommitted* change | Session B INSERTs and *rolls back*. Session A reads that uncommitted row in between. |
-| **Non-Repeatable Read** | Same *row* read twice has different values | Session B UPDATEs an *existing row* and commits. Session A reading that row twice sees different values. |
-| **Phantom Read** | Same *predicate* read twice returns a different *row count* | Session B INSERTs a *new row* and commits. Session A's repeated SELECT with the same WHERE returns a different number of rows. |
+| **Dirty Read** | Reads an **uncommitted** change | Session B INSERTs and **rolls back**. Session A reads that uncommitted row in between. |
+| **Non-Repeatable Read** | Same **row** read twice has different values | Session B UPDATEs an **existing row** and commits. Session A reading that row twice sees different values. |
+| **Phantom Read** | Same **predicate** read twice returns a different **row count** | Session B INSERTs a **new row** and commits. Session A's repeated SELECT with the same WHERE returns a different number of rows. |
 
-→ The crux of phantom reads is changes to **the *result set*, not individual rows**. Non-repeatable reads are about an existing row's *value* changing; phantom reads are about *new rows appearing*.
+→ The crux of phantom reads is changes to **the **result set**, not individual rows**. Non-repeatable reads are about an existing row's **value** changing; phantom reads are about **new rows appearing**.
 
-### 2.3 The standard's *most dangerous line*
+### 2.3 The standard's **most dangerous line**
 
 > **REPEATABLE READ allows phantom reads** (ANSI SQL-92).
 
@@ -130,7 +130,7 @@ That is verbatim from the standard. Concretely:
 
 Nowhere does the standard list "blocks phantoms" as part of RR's guarantees. Hence **PostgreSQL's RR allows phantoms, per the standard**.
 
-But it's common knowledge that MySQL InnoDB blocks phantoms under RR. *Why?* — that's the central question of this post.
+But it's common knowledge that MySQL InnoDB blocks phantoms under RR. **Why?** — that's the central question of this post.
 
 ---
 
@@ -154,8 +154,8 @@ COMMIT
 
 Key measurement points:
 
-- **A1** = SELECT result *before* Session B's INSERT (0 across all isolation levels)
-- **A2** = SELECT result *after* Session B's INSERT
+- **A1** = SELECT result **before** Session B's INSERT (0 across all isolation levels)
+- **A2** = SELECT result **after** Session B's INSERT
 - **A1 ≠ A2** ⇒ **phantom read occurred**
 - **B INSERT wait time** = how long Session B's INSERT took to commit (lock wait under SERIALIZABLE)
 
@@ -181,7 +181,7 @@ sequenceDiagram
     A->>DB: COMMIT
 ```
 
-The crux: **Session B's commit *physically* happens — that is undisputed**. The question is *whether Session A sees that change* — which is what isolation level is fundamentally about.
+The crux: **Session B's commit **physically** happens — that is undisputed**. The question is **whether Session A sees that change** — which is what isolation level is fundamentally about.
 
 ### 3.3 Raw command — common skeleton across all 4 levels
 
@@ -251,7 +251,7 @@ SELECT CONCAT('A2=', COUNT(*)) FROM orders_w2 WHERE owner_id=999999;
 COMMIT;
 ```
 
-RC reads only *committed* rows, but **each SELECT builds a *fresh* snapshot at *that* moment**. So the second SELECT sees Session B's committed row.
+RC reads only **committed** rows, but **each SELECT builds a **fresh** snapshot at **that** moment**. So the second SELECT sees Session B's committed row.
 
 → Querying a balance twice in the same transaction and getting different values = business logic broken. **Off-limits for payment / order domains**.
 
@@ -268,9 +268,9 @@ SELECT CONCAT('A2=', COUNT(*)) FROM orders_w2 WHERE owner_id=999999;
 COMMIT;
 ```
 
-Key finding: **Session B's INSERT *physically* committed**. Other sessions querying see 1. But **it doesn't appear in Session A's *view*** — Session A only sees the snapshot from its transaction's start.
+Key finding: **Session B's INSERT **physically** committed**. Other sessions querying see 1. But **it doesn't appear in Session A's *view*** — Session A only sees the snapshot from its transaction's start.
 
-And **Session B's INSERT itself committed *immediately* (no lock wait)**. RR achieves *physical commit immediate / logical isolation* simultaneously.
+And **Session B's INSERT itself committed **immediately** (no lock wait)**. RR achieves **physical commit immediate / logical isolation** simultaneously.
 
 This is the heart of "MySQL InnoDB RR ≈ Snapshot Isolation" — mechanism breakdown in §5.
 
@@ -289,24 +289,24 @@ COMMIT;
 -- ↑ S-lock releases on commit. Only then can Session B's INSERT proceed
 ```
 
-Under SERIALIZABLE, Session A's SELECT acquires a *shared lock* (S-lock). Session B's INSERT needs an X-lock on the same row range → conflicts with the S-lock → waits.
+Under SERIALIZABLE, Session A's SELECT acquires a **shared lock** (S-lock). Session B's INSERT needs an X-lock on the same row range → conflicts with the S-lock → waits.
 
 Measurement: **B's INSERT waited 1.56s** [measured]. Within Session A's 3-second SLEEP, B attempted INSERT at 1.5s → could only commit after A committed (~1.5s later).
 
-→ **Concurrency cost is explicit**. RR has *immediate physical commit / logical isolation*; SERIALIZABLE *blocks physical concurrency itself*.
+→ **Concurrency cost is explicit**. RR has **immediate physical commit / logical isolation**; SERIALIZABLE **blocks physical concurrency itself**.
 
 ---
 
-## 5. The core finding — three mechanisms by which MySQL InnoDB RR is *stronger* than the ANSI standard
+## 5. The core finding — three mechanisms by which MySQL InnoDB RR is **stronger** than the ANSI standard
 
-This is the heart of the post. The measurements confirm RR blocks phantoms, but a weak *why?* leaves you with a one-liner answer in interviews.
+This is the heart of the post. The measurements confirm RR blocks phantoms, but a weak **why?** leaves you with a one-liner answer in interviews.
 
-There are three mechanisms by which MySQL InnoDB RR *covers* the ANSI standard's phantom allowance.
+There are three mechanisms by which MySQL InnoDB RR **covers** the ANSI standard's phantom allowance.
 
 ### 5.1 Mechanism 1 — Consistent Read Snapshot (most important)
 
-> **A *snapshot* is created at transaction start; every SELECT sees only data as of that moment**.
-> Even if Session B's commit *physically* happens, it *doesn't appear* in Session A's *view*.
+> **A **snapshot** is created at transaction start; every SELECT sees only data as of that moment**.
+> Even if Session B's commit **physically** happens, it **doesn't appear** in Session A's **view**.
 
 This is the central mechanism of the post — the essence of Snapshot Isolation.
 
@@ -346,22 +346,22 @@ sequenceDiagram
 
 The crux:
 
-1. The **read view** = *trx_ids active at transaction start* + *highest trx_id*. This view dictates *which rows are visible*.
-2. Session B's commit happens *physically*, but B's trx_id is *not* in Session A's read view → from A's perspective, the row *does not exist*.
-3. *Past versions* of rows are pulled from the undo log. Even if a more recent committed row exists, the version visible at T0 is what gets returned.
+1. The **read view** = **trx_ids active at transaction start** + **highest trx_id**. This view dictates **which rows are visible**.
+2. Session B's commit happens **physically**, but B's trx_id is **not** in Session A's read view → from A's perspective, the row **does not exist**.
+3. **Past versions** of rows are pulled from the undo log. Even if a more recent committed row exists, the version visible at T0 is what gets returned.
 
-→ **Consistency + zero concurrency cost** simultaneously. Unlike SERIALIZABLE which blocks via locks, the *reader walks back to a past version*.
+→ **Consistency + zero concurrency cost** simultaneously. Unlike SERIALIZABLE which blocks via locks, the **reader walks back to a past version**.
 
 #### Why it's stronger than ANSI standard RR
 
-The ANSI standard RR only blocks *non-repeatable reads* (changing values on the same row). Phantoms (new rows appearing) are permitted by the standard. But **consistent read snapshot fixes the *entire view*, not row-by-row** — *any* change after T0, whether a new row or a value change, is *covered*.
+The ANSI standard RR only blocks **non-repeatable reads** (changing values on the same row). Phantoms (new rows appearing) are permitted by the standard. But **consistent read snapshot fixes the **entire view**, not row-by-row** — **any** change after T0, whether a new row or a value change, is **covered**.
 
 ### 5.2 Mechanism 2 — Gap Lock (auxiliary)
 
 > **next-key lock = record lock + gap lock**.
-> Snapshot alone makes SELECT results safe. When you also need to *block other sessions' INSERTs*, gap locks add the protection.
+> Snapshot alone makes SELECT results safe. When you also need to **block other sessions' INSERTs**, gap locks add the protection.
 
-When you use a *locking read* under RR — `SELECT ... FOR UPDATE` or `SELECT ... LOCK IN SHARE MODE` — what gets acquired is not just a record lock but a **next-key lock**.
+When you use a **locking read** under RR — `SELECT ... FOR UPDATE` or `SELECT ... LOCK IN SHARE MODE` — what gets acquired is not just a record lock but a **next-key lock**.
 
 ```
 Index: ... [owner_id=998] ... [owner_id=1000] ...
@@ -375,7 +375,7 @@ SELECT ... WHERE owner_id BETWEEN 999 AND 1001 FOR UPDATE
 = next-key lock
 ```
 
-→ While this lock is held, a Session B trying `INSERT owner_id=999` *conflicts with the gap lock* and waits. The INSERT itself is blocked.
+→ While this lock is held, a Session B trying `INSERT owner_id=999` **conflicts with the gap lock** and waits. The INSERT itself is blocked.
 
 #### Division of labor with the snapshot
 
@@ -384,12 +384,12 @@ SELECT ... WHERE owner_id BETWEEN 999 AND 1001 FOR UPDATE
 | **Consistent Read Snapshot** | Phantom in SELECT results (new rows invisible) | Zero concurrency cost |
 | **Gap Lock** | INSERT itself (when locking reads are used) | Concurrent INSERTs wait |
 
-→ Plain SELECTs are phantom-safe via snapshot alone. Gap locks only kick in when *locking reads* (`FOR UPDATE`) are used. **The two mechanisms *divide labor*** — the elegance of MySQL RR.
+→ Plain SELECTs are phantom-safe via snapshot alone. Gap locks only kick in when **locking reads** (`FOR UPDATE`) are used. **The two mechanisms *divide labor*** — the elegance of MySQL RR.
 
 ### 5.3 Mechanism 3 — MVCC undo log
 
-> **InnoDB stores *past versions* of rows in the undo log**.
-> Snapshot reads need this as their *data source for past versions*.
+> **InnoDB stores **past versions** of rows in the undo log**.
+> Snapshot reads need this as their **data source for past versions**.
 
 Each InnoDB row has hidden columns `DB_TRX_ID` (last-modifying trx_id) and `DB_ROLL_PTR` (undo log pointer).
 
@@ -404,15 +404,15 @@ row v1:            (initial INSERT)
 When Session A (RR) runs SELECT:
 
 1. Inspect the row's `DB_TRX_ID`
-2. If the trx_id is not in the read view (e.g., T_b is Session B's trx_id created after the read view) → *do not read*
-3. Follow `DB_ROLL_PTR` to read the *past version* in the undo log
-4. Walk the chain until reaching a version *visible* to the read view
+2. If the trx_id is not in the read view (e.g., T_b is Session B's trx_id created after the read view) → **do not read**
+3. Follow `DB_ROLL_PTR` to read the **past version** in the undo log
+4. Walk the chain until reaching a version **visible** to the read view
 
-→ Without the undo log, snapshot isolation is impossible. MVCC is the *physical foundation* of RR.
+→ Without the undo log, snapshot isolation is impossible. MVCC is the **physical foundation** of RR.
 
 #### The cost — long-lived RR transactions
 
-Undo log entries must remain available so that *active transactions* can still see *past versions*. So **the undo log is retained until the oldest transaction ends**. If an RR transaction lives for an hour, undo log entries for every row change in that hour pile up.
+Undo log entries must remain available so that **active transactions** can still see **past versions**. So **the undo log is retained until the oldest transaction ends**. If an RR transaction lives for an hour, undo log entries for every row change in that hour pile up.
 
 → A monitoring target (covered in §9).
 
@@ -434,21 +434,21 @@ graph LR
 
 The crux:
 
-- **Consistent Read Snapshot** is RR's body (the *primary* mechanism for blocking phantoms)
+- **Consistent Read Snapshot** is RR's body (the **primary** mechanism for blocking phantoms)
 - **Gap Lock** is auxiliary (blocks INSERTs themselves, only on locking reads)
-- **MVCC Undo Log** is the physical foundation (the *reason* snapshot reads to past versions are possible)
+- **MVCC Undo Log** is the physical foundation (the **reason** snapshot reads to past versions are possible)
 
-→ **MySQL InnoDB RR = "ANSI SQL RR + part of Snapshot Isolation"**. That's why some compare it in strength to *PostgreSQL's SERIALIZABLE*.
+→ **MySQL InnoDB RR = "ANSI SQL RR + part of Snapshot Isolation"**. That's why some compare it in strength to **PostgreSQL's SERIALIZABLE**.
 
 ---
 
 ## 6. SERIALIZABLE's concurrency cost — INSERT wait of 1.56s
 
-Let's deep-dive into the 1.56s INSERT wait observed in §4.5 under SERIALIZABLE. This is the *decisive* difference between RR and SERIALIZABLE.
+Let's deep-dive into the 1.56s INSERT wait observed in §4.5 under SERIALIZABLE. This is the **decisive** difference between RR and SERIALIZABLE.
 
 ### 6.1 Mechanism — Shared Lock + Exclusive Lock
 
-Under SERIALIZABLE, SELECT acquires a *shared lock* (S-lock).
+Under SERIALIZABLE, SELECT acquires a **shared lock** (S-lock).
 
 ```
 Session A: SELECT COUNT(*) WHERE owner_id=999999
@@ -466,7 +466,7 @@ Session B's INSERT attempts X-lock → conflicts with Session A's S-lock → wai
 |---|---|---|
 | SLEEP 3s, B INSERT at 1.5s | 3s | **1.56s** |
 
-→ **Linear with Session A's transaction length**. Stretching SLEEP to 30s would make B's INSERT wait *roughly 28.5s* (not measured but mechanically clear).
+→ **Linear with Session A's transaction length**. Stretching SLEEP to 30s would make B's INSERT wait **roughly 28.5s** (not measured but mechanically clear).
 
 ### 6.3 RR vs SERIALIZABLE — two latencies in the same scenario
 
@@ -493,21 +493,21 @@ graph LR
 
 The crux:
 
-- **RR** preserves *100% physical concurrency*; only Session A's view is isolated. Session B commits immediately.
-- **SERIALIZABLE** *blocks physical concurrency itself*. Session B waits for Session A's transaction to end.
+- **RR** preserves **100% physical concurrency**; only Session A's view is isolated. Session B commits immediately.
+- **SERIALIZABLE** **blocks physical concurrency itself**. Session B waits for Session A's transaction to end.
 
 → SERIALIZABLE makes sense for **short critical transactions like payment confirm**. Apply it to a transaction over 1 second long, and wait time scales linearly with transaction length — throughput collapses.
 
 ---
 
-## 7. RR's limit — Write skew (an anomaly RR snapshot *cannot* prevent)
+## 7. RR's limit — Write skew (an anomaly RR snapshot **cannot** prevent)
 
-From here we acknowledge *RR isn't a silver bullet*. This is why "RR + pessimistic / optimistic / distributed lock" augmentation is necessary.
+From here we acknowledge **RR isn't a silver bullet**. This is why "RR + pessimistic / optimistic / distributed lock" augmentation is necessary.
 
 ### 7.1 Definition of write skew
 
-> **Two transactions *each* read a row and update *different rows* without knowing about each other**.
-> Each is *consistent in its own view*, but *combined the invariant breaks*.
+> **Two transactions **each** read a row and update **different rows** without knowing about each other**.
+> Each is **consistent in its own view**, but **combined the invariant breaks**.
 
 Classic example: a doctor on-call system. Suppose the invariant is "at least 1 doctor must be on-call":
 
@@ -530,28 +530,28 @@ Result: both off-call. Invariant broken.
 
 ### 7.2 Why RR snapshot can't prevent it
 
-RR's consistent read snapshot only guarantees consistency at *read time*. **Consistency immediately *before write*** is not guaranteed.
+RR's consistent read snapshot only guarantees consistency at **read time**. **Consistency immediately *before write*** is not guaranteed.
 
 - Session 1's SELECT moment: count=2 (OK)
 - Session 2's SELECT moment: count=2 (OK)
 - Session 1's UPDATE: only Doctor A (doesn't touch B)
 - Session 2's UPDATE: only Doctor B (doesn't touch A)
 
-→ Because they update *different rows*, **there's no lock conflict**. RR has no way to detect this.
+→ Because they update **different rows**, **there's no lock conflict**. RR has no way to detect this.
 
 ### 7.3 Augmentation — pessimistic / optimistic / distributed lock
 
-This anomaly must be protected by additional mechanisms *layered on top* of RR.
+This anomaly must be protected by additional mechanisms **layered on top** of RR.
 
 | Augmentation | How | Trade-off |
 |---|---|---|
-| **Pessimistic lock** (`SELECT ... FOR UPDATE`) | X-lock at SELECT time → other sessions' *reads/writes* both wait | Higher concurrency cost |
+| **Pessimistic lock** (`SELECT ... FOR UPDATE`) | X-lock at SELECT time → other sessions' **reads/writes** both wait | Higher concurrency cost |
 | **Optimistic lock** (version column) | At UPDATE time check `WHERE version=?`. Retry on conflict | Higher application complexity |
 | **Distributed lock** (Redisson, etc.) | Acquire lock at the application level | External dependency |
 
 In this repo, payment uses **RR + pessimistic lock**, idempotency-key transitions use **RR + distributed lock** (ADR-BE-007 §4.2). PostgreSQL's SSI (Serializable Snapshot Isolation) auto-detects write skew, but on MySQL you must augment at the application layer.
 
-→ **Acknowledging RR's limit and augmenting it** is the *depth* of an interview answer. "RR blocks all anomalies" is *wrong*.
+→ **Acknowledging RR's limit and augmenting it** is the **depth** of an interview answer. "RR blocks all anomalies" is **wrong**.
 
 ---
 
@@ -570,7 +570,7 @@ Let's revisit ADR-BE-007 §4.2's domain mapping alongside the measurements.
 
 ### 8.1 Two decision criteria
 
-1. **Do we need *consistency of identical queries* in the same transaction?**
+1. **Do we need **consistency of identical queries** in the same transaction?**
    - YES → **RR** (payment / credit / idempotency transitions)
    - NO → **explicit RC** (dashboard / pagination / settlement)
 
@@ -578,15 +578,15 @@ Let's revisit ADR-BE-007 §4.2's domain mapping alongside the measurements.
    - YES → **RR + pessimistic / distributed lock** (credit / idempotency transitions)
    - NO → **RR alone is sufficient** (payment confirm — single-row update)
 
-### 8.2 Why we use RC *explicitly*
+### 8.2 Why we use RC **explicitly**
 
-The repo's *default* is RR (MySQL InnoDB default). RC is used only via *explicit declaration* — `@Transactional(isolation = READ_COMMITTED)`.
+The repo's **default** is RR (MySQL InnoDB default). RC is used only via **explicit declaration** — `@Transactional(isolation = READ_COMMITTED)`.
 
-Reason: when another engineer reads the code, *why RC?* must be visible to recognize intent. It also enforces *up-front review* that RC's phantom semantics don't break correctness.
+Reason: when another engineer reads the code, **why RC?** must be visible to recognize intent. It also enforces **up-front review** that RC's phantom semantics don't break correctness.
 
 ### 8.3 SERIALIZABLE is barely used
 
-As §4.5 / §6 showed, SERIALIZABLE is for *short critical sections only*. In practice, this repo doesn't use it — most cases are well-served by RR + pessimistic / distributed lock.
+As §4.5 / §6 showed, SERIALIZABLE is for **short critical sections only**. In practice, this repo doesn't use it — most cases are well-served by RR + pessimistic / distributed lock.
 
 ---
 
@@ -609,9 +609,9 @@ SELECT @@SESSION.transaction_isolation;
 SELECT @@GLOBAL.transaction_isolation;
 ```
 
-At deploy time, confirm the application property and DB default agree. If `@Transactional(isolation = ...)` isn't explicit on Spring's side, *the DB default* is what applies.
+At deploy time, confirm the application property and DB default agree. If `@Transactional(isolation = ...)` isn't explicit on Spring's side, **the DB default** is what applies.
 
-### 9.2 Long-running transactions — the *root cause* of undo log explosion
+### 9.2 Long-running transactions — the **root cause** of undo log explosion
 
 ```sql
 -- Transactions older than 30 seconds
@@ -627,12 +627,12 @@ WHERE trx_started < NOW() - INTERVAL 30 SECOND
 ORDER BY trx_started ASC;
 ```
 
-This query identifies the *root cause* behind §5.3's undo log explosion. While an RR transaction lives long, *past-version undo log entries* pile up until that transaction ends.
+This query identifies the **root cause** behind §5.3's undo log explosion. While an RR transaction lives long, **past-version undo log entries** pile up until that transaction ends.
 
 → When found, the playbook:
 1. Use `trx_query` to identify which query holds the lock
 2. `KILL` the `trx_mysql_thread_id` (can be automated)
-3. Trace application code — *why* did that transaction live so long? (External call inside the tx?)
+3. Trace application code — **why** did that transaction live so long? (External call inside the tx?)
 
 ### 9.3 Innodb_history_list_length — undo log depth
 
@@ -652,7 +652,7 @@ FROM information_schema.innodb_metrics
 WHERE name = 'trx_rseg_history_len';
 ```
 
-`History list length` = number of *past versions of deleted rows* retained in the undo log. In healthy operation it's in the hundreds to low thousands. **Tens of thousands or higher → suspect long-running transactions**.
+`History list length` = number of **past versions of deleted rows** retained in the undo log. In healthy operation it's in the hundreds to low thousands. **Tens of thousands or higher → suspect long-running transactions**.
 
 → Threshold alert: `History list length > 100,000` (tune by domain).
 
@@ -672,7 +672,7 @@ FROM sys.innodb_lock_waits;
 SELECT * FROM performance_schema.data_lock_waits;
 ```
 
-Zero rows = healthy. *Persistent* rows mean:
+Zero rows = healthy. **Persistent** rows mean:
 - A SERIALIZABLE transaction is running too long → consider switching to RR + pessimistic lock
 - Too many `SELECT FOR UPDATE` → consider narrowing lock scope
 
@@ -685,7 +685,7 @@ FROM information_schema.innodb_trx
 WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 ```
 
-Normally 0 to a few. *Tens persistently* points to application transaction-lifecycle issues (uncommitted, or connection leaks).
+Normally 0 to a few. **Tens persistently** points to application transaction-lifecycle issues (uncommitted, or connection leaks).
 
 ---
 
@@ -697,13 +697,13 @@ Normally 0 to a few. *Tens persistently* points to application transaction-lifec
 
 > "A consistent read means that InnoDB uses multi-versioning to present to a query a snapshot of the database at a point in time. The query sees the changes made by transactions that committed before that point in time, and no changes made by later or uncommitted transactions."
 
-The crux: *snapshot at a point in time*. That's the read view from §5.1.
+The crux: **snapshot at a point in time**. That's the read view from §5.1.
 
 [MySQL 8.0 — Phantom Rows](https://dev.mysql.com/doc/refman/8.0/en/innodb-next-key-locking.html):
 
 > "InnoDB uses an algorithm called next-key locking that combines index-row locking with gap locking. ... When InnoDB searches or scans an index, it can set shared or exclusive locks on the index records it encounters. Thus, the row-level locks are actually index-record locks. In addition, a next-key lock on an index record also affects the gap before that index record."
 
-The crux: *next-key lock = record lock + gap lock*. That's the gap lock from §5.2.
+The crux: **next-key lock = record lock + gap lock**. That's the gap lock from §5.2.
 
 ### 10.2 PostgreSQL comparison — same RR, but phantoms allowed
 
@@ -711,7 +711,7 @@ The crux: *next-key lock = record lock + gap lock*. That's the gap lock from §5
 
 > "Note that in PostgreSQL it is possible to request any of the four standard transaction isolation levels, but internally only three distinct isolation levels are implemented, namely Read Committed, Repeatable Read, and Serializable. ..."
 
-The crux: PostgreSQL's RR is also snapshot-based, but **anomalies like write skew require escalating to SERIALIZABLE (SSI) to block**. PostgreSQL's RR offers slightly weaker *write*-side guarantees than MySQL's; in exchange, its SERIALIZABLE is implemented as *efficient SSI*, making the escalation a viable trade-off.
+The crux: PostgreSQL's RR is also snapshot-based, but **anomalies like write skew require escalating to SERIALIZABLE (SSI) to block**. PostgreSQL's RR offers slightly weaker **write**-side guarantees than MySQL's; in exchange, its SERIALIZABLE is implemented as **efficient SSI**, making the escalation a viable trade-off.
 
 → **Re-measure isolation behavior when migrating MySQL → PostgreSQL**. Same name, different behavior.
 
@@ -721,11 +721,11 @@ The crux: PostgreSQL's RR is also snapshot-based, but **anomalies like write ske
 
 > "Multi-Version Concurrency Control (MVCC) is a technique used to provide isolation in concurrent transactions, while preventing the readers from blocking the writers and vice versa."
 
-The crux: *readers don't block writers, and vice versa*. This is the essence of "zero concurrency cost" from §5.1. SERIALIZABLE has readers and writers *blocking each other* — hence the throughput collapse.
+The crux: **readers don't block writers, and vice versa**. This is the essence of "zero concurrency cost" from §5.1. SERIALIZABLE has readers and writers **blocking each other** — hence the throughput collapse.
 
 ### 10.4 Hermitage — comprehensive isolation-level anomaly tests
 
-[Hermitage — Testing the "I" in ACID](https://github.com/ept/hermitage) is a test suite that *tabulates* anomaly behavior across MySQL / PostgreSQL / Oracle / SQL Server's isolation levels. The same scenario style as EXP-06 in this post, applied to *every anomaly*.
+[Hermitage — Testing the "I" in ACID](https://github.com/ept/hermitage) is a test suite that **tabulates** anomaly behavior across MySQL / PostgreSQL / Oracle / SQL Server's isolation levels. The same scenario style as EXP-06 in this post, applied to **every anomaly**.
 
 → "Don't just trust my measurement" — Hermitage offers a cross-validation against this post's [measured] results.
 
@@ -733,7 +733,7 @@ The crux: *readers don't block writers, and vice versa*. This is the essence of 
 
 ## 11. Operational failure scenarios (3 AM scenarios)
 
-### 11.1 Scenario 1 — RR transaction lives too long, *snapshot cost* explodes
+### 11.1 Scenario 1 — RR transaction lives too long, **snapshot cost** explodes
 
 3 AM alert: `Innodb_history_list_length > 100,000`. Undo log disk usage rising.
 
@@ -744,11 +744,11 @@ The crux: *readers don't block writers, and vice versa*. This is the essence of 
 | After identification | `KILL <thread_id>` to terminate. Undo log purge starts automatically |
 | User impact | None or a brief latency spike |
 | Rollback option | Auto-recovery after kill. Application's retry logic handles it |
-| Postmortem | Trace application code — *why* was the transaction long? External call inside the transaction? OSIV? |
+| Postmortem | Trace application code — **why** was the transaction long? External call inside the transaction? OSIV? |
 
-A common cause: **external API calls inside transactions** (the exact pattern from the [companion post EXP-09](/en/spring-transaction-external-api-pool-exhaustion)). Combine RR with that, and you get pool exhaustion *and* undo log explosion at once.
+A common cause: **external API calls inside transactions** (the exact pattern from the [companion post EXP-09](/en/spring-transaction-external-api-pool-exhaustion)). Combine RR with that, and you get pool exhaustion **and** undo log explosion at once.
 
-### 11.2 Scenario 2 — Write skew occurs (the anomaly RR *did not* prevent)
+### 11.2 Scenario 2 — Write skew occurs (the anomaly RR **did not** prevent)
 
 3 AM alert: negative balance or duplicate credit deduction.
 
@@ -758,7 +758,7 @@ A common cause: **external API calls inside transactions** (the exact pattern fr
 | First 5 minutes | Trace concurrent transactions in the last N minutes (binlog or `general_log`). Confirm the write-skew pattern |
 | After identification | Apply pessimistic lock (`SELECT FOR UPDATE`) or distributed lock (Redisson) |
 | User impact | Trust damage from bad data — operator audits and compensates |
-| Rollback option | No auto-recovery. *Manual* data correction + code fix |
+| Rollback option | No auto-recovery. **Manual** data correction + code fix |
 
 The crux: **RR alone allows write skew**. The first time you encounter it, it's tempting to blame the isolation level — the right answer is **augmenting at the application layer**, not changing the isolation level.
 
@@ -770,7 +770,7 @@ The crux: **RR alone allows write skew**. The first time you encounter it, it's 
 |---|---|
 | First alert | Payment P99 up. `data_lock_waits` non-empty |
 | First 5 minutes | Identify transactions using SERIALIZABLE (grep code for `isolation = SERIALIZABLE`) |
-| After identification | Measure those transactions' lengths. Over 1 second is *dangerous* |
+| After identification | Measure those transactions' lengths. Over 1 second is **dangerous** |
 | Temporary fix | Consider moving to RR + pessimistic lock. Shorten transactions themselves |
 | User impact | Payment latency rises. `lock wait timeout` may fail some transactions |
 | Rollback option | Code change + redeploy. Consider transaction split / saga pattern |
@@ -783,14 +783,14 @@ A common trap: **using SERIALIZABLE outside of *short critical sections***. Stri
 
 ### 12.1 Assumptions broken by measurement
 
-- "RR means no phantoms" → **half answer**. ANSI standard RR allows phantoms; only *MySQL InnoDB RR* blocks them. PostgreSQL RR allows phantoms.
+- "RR means no phantoms" → **half answer**. ANSI standard RR allows phantoms; only **MySQL InnoDB RR** blocks them. PostgreSQL RR allows phantoms.
 - "You need SERIALIZABLE to block phantoms" → **NO**. MySQL RR's consistent read snapshot suffices (§4.4 [measured]).
 - "RR blocks all anomalies" → **NO**. Write skew slips through (§7). Augment with pessimistic / optimistic / distributed locks.
-- "SERIALIZABLE is the safest" → **half answer**. It blocks *physical concurrency itself* → throughput collapses (§6.2 [measured] 1.56s wait).
+- "SERIALIZABLE is the safest" → **half answer**. It blocks **physical concurrency itself** → throughput collapses (§6.2 [measured] 1.56s wait).
 
-### 12.2 Measurements as drivers of *follow-up learning*
+### 12.2 Measurements as drivers of **follow-up learning**
 
-Without these measurements, the *why?* behind subsequent decisions is anemic.
+Without these measurements, the **why?** behind subsequent decisions is anemic.
 
 | Measurement | Follow-up decision |
 |---|---|
@@ -802,7 +802,7 @@ Without these measurements, the *why?* behind subsequent decisions is anemic.
 
 ### 12.3 The one-liner
 
-> **"MySQL InnoDB RR differs from ANSI standard RR"** is *half an answer*. ***Why* it differs, mechanism by mechanism**, is the depth.
+> **"MySQL InnoDB RR differs from ANSI standard RR"** is **half an answer**. ***Why* it differs, mechanism by mechanism**, is the depth.
 > - Mechanism 1: **Consistent Read Snapshot** (T0 view fixed — the body of phantom blocking)
 > - Mechanism 2: **Gap Lock** (auxiliary — blocks INSERTs themselves on locking reads)
 > - Mechanism 3: **MVCC Undo Log** (the physical foundation — past versions are how snapshots work)
@@ -814,23 +814,23 @@ Without these measurements, the *why?* behind subsequent decisions is anemic.
 
 ### Q1. "How did you decide on a MySQL isolation level?"
 
-> "Based on EXP-06 [measured] across all 4 isolation levels in the same scenario — Session A SELECTs twice with Session B INSERTing in between. RU/RC trigger phantoms (A1=0 → INSERT → A2=1), RR blocks them (A2=0), SERIALIZABLE has the INSERT itself wait (1.56s). Payment / credit domains break their business logic if *same-query consistency in the same transaction* fails, so we adopted **MySQL InnoDB's default RR**. Measurements make it clear there's no need to escalate to SERIALIZABLE."
+> "Based on EXP-06 [measured] across all 4 isolation levels in the same scenario — Session A SELECTs twice with Session B INSERTing in between. RU/RC trigger phantoms (A1=0 → INSERT → A2=1), RR blocks them (A2=0), SERIALIZABLE has the INSERT itself wait (1.56s). Payment / credit domains break their business logic if **same-query consistency in the same transaction** fails, so we adopted **MySQL InnoDB's default RR**. Measurements make it clear there's no need to escalate to SERIALIZABLE."
 
 ### Q2. "Are MySQL's RR and PostgreSQL's RR different?"
 
-> "Yes. The ANSI SQL standard's RR doesn't *guarantee* blocking phantoms — so PostgreSQL RR allows phantoms per the standard. But MySQL InnoDB RR uses three mechanisms — (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log — to block phantoms, effectively close to Snapshot Isolation. That's why ADR-BE-007's *re-measure on migration* criterion exists — when migrating MySQL → PostgreSQL, isolation behavior must be re-measured."
+> "Yes. The ANSI SQL standard's RR doesn't **guarantee** blocking phantoms — so PostgreSQL RR allows phantoms per the standard. But MySQL InnoDB RR uses three mechanisms — (1) consistent read snapshot, (2) gap lock, (3) MVCC undo log — to block phantoms, effectively close to Snapshot Isolation. That's why ADR-BE-007's **re-measure on migration** criterion exists — when migrating MySQL → PostgreSQL, isolation behavior must be re-measured."
 
 ### Q3. "When do you actually use SERIALIZABLE?"
 
-> "In this repo, only *short critical* sections — one step of balance deduction or an idempotency-key INIT → PROCESSING transition. Strictly off-limits for transactions over 1 second. The reason is [measured] — during Session A's 3-second SLEEP, Session B's INSERT waited 1.56s. Wait time scales *linearly* with transaction length, so throughput collapses. Most cases are well-served by RR + pessimistic lock or RR + distributed lock."
+> "In this repo, only **short critical** sections — one step of balance deduction or an idempotency-key INIT → PROCESSING transition. Strictly off-limits for transactions over 1 second. The reason is [measured] — during Session A's 3-second SLEEP, Session B's INSERT waited 1.56s. Wait time scales **linearly** with transaction length, so throughput collapses. Most cases are well-served by RR + pessimistic lock or RR + distributed lock."
 
 ### Q4. "What anomaly does RR fail to prevent?"
 
-> "Write skew. Two transactions *each* read rows and update *different rows* without knowing about each other — both consistent in their own view, but combined the invariant breaks. RR's consistent read snapshot only guarantees consistency at *read time*; updating *different rows* causes no lock conflict, so detection is impossible. In this repo, credit deduction uses RR + pessimistic lock (`SELECT FOR UPDATE`) and idempotency-key transitions use RR + distributed lock (Redisson) to augment (ADR-BE-007 §4.2). PostgreSQL's SSI auto-detects this; on MySQL you augment at the application layer."
+> "Write skew. Two transactions **each** read rows and update **different rows** without knowing about each other — both consistent in their own view, but combined the invariant breaks. RR's consistent read snapshot only guarantees consistency at **read time**; updating **different rows** causes no lock conflict, so detection is impossible. In this repo, credit deduction uses RR + pessimistic lock (`SELECT FOR UPDATE`) and idempotency-key transitions use RR + distributed lock (Redisson) to augment (ADR-BE-007 §4.2). PostgreSQL's SSI auto-detects this; on MySQL you augment at the application layer."
 
 ### Q5. "How do you monitor RR in production?"
 
-> "Three things. First, `Innodb_history_list_length` — undo log depth. The longer an RR transaction runs, the longer *past versions* are retained. Alert when it crosses 100,000. Second, `information_schema.innodb_trx WHERE trx_started < NOW() - INTERVAL 30 SECOND` — long-running transaction detection. Once found, `KILL` and trace the application code (external call inside the transaction?). Third, `performance_schema.data_lock_waits` — lock wait monitoring when pessimistic locks or SERIALIZABLE are in use. These three metrics are *direct signals* that RR's foundation — MVCC — is healthy."
+> "Three things. First, `Innodb_history_list_length` — undo log depth. The longer an RR transaction runs, the longer **past versions** are retained. Alert when it crosses 100,000. Second, `information_schema.innodb_trx WHERE trx_started < NOW() - INTERVAL 30 SECOND` — long-running transaction detection. Once found, `KILL` and trace the application code (external call inside the transaction?). Third, `performance_schema.data_lock_waits` — lock wait monitoring when pessimistic locks or SERIALIZABLE are in use. These three metrics are **direct signals** that RR's foundation — MVCC — is healthy."
 
 ---
 

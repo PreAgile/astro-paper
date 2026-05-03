@@ -1,6 +1,6 @@
 ---
-title: "MySQL No-Offset Cursor Pagination — At 10M rows, OFFSET 1M takes 171ms / Cursor 0.30ms, and the *500x trap* between them, traced down to a single line"
-description: "On a 10M-row table, OFFSET 1M takes 171ms while a No-Offset cursor takes 0.30ms — about 570x faster, reproduced by direct measurement. But how you write the No-Offset code splits another 500x. The ANSI SQL row constructor `(a,b)<(?,?)` is logically equivalent to the OR-split form, yet the MySQL optimizer *cannot push it down to an index range* (154ms — about the same as OFFSET). The single line in EXPLAIN ANALYZE — *Filter:* vs *Covering index range scan over* — is the root cause. A production retrospective combined with a reproducible learning environment."
+title: "MySQL No-Offset Cursor Pagination — At 10M rows, OFFSET 1M takes 171ms / Cursor 0.30ms, and the **500x trap** between them, traced down to a single line"
+description: "On a 10M-row table, OFFSET 1M takes 171ms while a No-Offset cursor takes 0.30ms — about 570x faster, reproduced by direct measurement. But how you write the No-Offset code splits another 500x. The ANSI SQL row constructor `(a,b)<(?,?)` is logically equivalent to the OR-split form, yet the MySQL optimizer **cannot push it down to an index range** (154ms — about the same as OFFSET). The single line in EXPLAIN ANALYZE — **Filter:** vs **Covering index range scan over** — is the root cause. A production retrospective combined with a reproducible learning environment."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00Z
 featured: true
@@ -21,27 +21,27 @@ tags:
 
 ## Intro
 
-The merchant dashboard had an *order list* screen. `LIMIT 20 OFFSET ?` — the most common shape. Pages 1, 10, 100 were all fast.
+The merchant dashboard had an **order list** screen. `LIMIT 20 OFFSET ?` — the most common shape. Pages 1, 10, 100 were all fast.
 
-Then one day a merchant jumped to page 50,000 to look up *transactions from a few months ago*. That single click crashed the P99. Same endpoint, same index, same SQL — but a single OFFSET value was creating hundreds of milliseconds of latency.
+Then one day a merchant jumped to page 50,000 to look up **transactions from a few months ago**. That single click crashed the P99. Same endpoint, same index, same SQL — but a single OFFSET value was creating hundreds of milliseconds of latency.
 
 In your head, you know the answer — "OFFSET breaks at deep pages, switch to cursor pagination." But a harder question follows: **"how do you write that cursor pagination?"**
 
-The ANSI SQL standard gives us a *row constructor*: `WHERE (created_at, id) < (?, ?)`. The semantics are clear, one line is enough. If you write it that way — *before you measure* — you trust that the index will work.
+The ANSI SQL standard gives us a **row constructor**: `WHERE (created_at, id) < (?, ?)`. The semantics are clear, one line is enough. If you write it that way — **before you measure** — you trust that the index will work.
 
-Then you measure. It comes back at 154ms, almost identical to OFFSET. The *logically equivalent* OR-split form clocks in at 0.30ms. **The same SQL intent runs 500x apart.**
+Then you measure. It comes back at 154ms, almost identical to OFFSET. The **logically equivalent** OR-split form clocks in at 0.30ms. **The same SQL intent runs 500x apart.**
 
 This post traces that one-line difference all the way down through EXPLAIN ANALYZE output.
 
-1. **The intrinsic cost of OFFSET**: confirming the *linear growth* with four measurements at positions 1K → 5M
+1. **The intrinsic cost of OFFSET**: confirming the **linear growth** with four measurements at positions 1K → 5M
 2. **Three forms of No-Offset**: row constructor / simple cursor / OR-split — at the same 1M position, 154ms / 0.27ms / 0.30ms
-3. **Why the 500x split**: the MySQL optimizer's structural limitation in not being able to *push down a row constructor to an index range*
+3. **Why the 500x split**: the MySQL optimizer's structural limitation in not being able to **push down a row constructor to an index range**
 4. **Production application**: cursor tokenization (base64 + HMAC), six mandatory rules, PR-blocking policy
 
 The conclusion up front:
 
 - **OFFSET 1M = 171ms / No-Offset = 0.30ms — about 570x difference** (10M rows, [measured — Java/Spring])
-- **And if your No-Offset code uses a row constructor, it's 154ms** — almost the same as OFFSET. *Same semantics, but the optimizer can't recognize it*
+- **And if your No-Offset code uses a row constructor, it's 154ms** — almost the same as OFFSET. **Same semantics, but the optimizer can't recognize it**
 - The crux is one line in EXPLAIN ANALYZE: `Filter:` (1M scan) vs `Covering index range scan over` (20 rows). **The rows=20 vs rows=1M difference is the root cause**
 - For production, encode the cursor as a base64 + HMAC token. Block the row-constructor form at PR review
 
@@ -53,7 +53,7 @@ Let's break down — line by line — why "use a cursor and you're done" is only
 
 ### 1.1 Domain
 
-The service is the backend of a multi-platform commerce SaaS. Orders flow in from external commerce platforms (B-corp, C-corp, Y-corp, D-corp) and sync into our DB, where they're displayed on the *merchant dashboard* in reverse chronological order.
+The service is the backend of a multi-platform commerce SaaS. Orders flow in from external commerce platforms (B-corp, C-corp, Y-corp, D-corp) and sync into our DB, where they're displayed on the **merchant dashboard** in reverse chronological order.
 
 What the merchant sees is simple:
 
@@ -67,7 +67,7 @@ Order #20251003-C3D4  | 12:33 | $18.50 | CONFIRMED
 < 1 2 3 ... 49,998 49,999 50,000 >
 ```
 
-In daily use they only browse pages 1–10. But when something like a *refund dispute* or *tax filing* happens, the merchant jumps to *deep pages* — page 50,000.
+In daily use they only browse pages 1–10. But when something like a **refund dispute** or **tax filing** happens, the merchant jumps to **deep pages** — page 50,000.
 
 The common SQL is:
 
@@ -82,8 +82,8 @@ For OFFSET 0–200, no problem. The moment OFFSET crosses 1,000,000 — the code
 
 ### 1.2 Hypotheses
 
-- (H1) Latency grows *linearly* with OFFSET. The *number of rows read and discarded* is the cost
-- (H2) No-Offset (composite-key cursor) responds in *single-digit ms* regardless of OFFSET position
+- (H1) Latency grows **linearly** with OFFSET. The **number of rows read and discarded** is the cost
+- (H2) No-Offset (composite-key cursor) responds in **single-digit ms** regardless of OFFSET position
 - (H3) There may be a difference between the row constructor `(created_at, id) < (?, ?)` and the split-OR form — the MySQL optimizer might handle them differently
 
 ### 1.3 Measurement environment
@@ -101,9 +101,9 @@ InnoDB buffer pool warmed up before measuring — cold-cache effects are a separ
 
 ---
 
-## 2. The intrinsic cost of OFFSET — *the rows you read and discard* are the cost
+## 2. The intrinsic cost of OFFSET — **the rows you read and discard** are the cost
 
-First, let's measure *how badly* OFFSET breaks.
+First, let's measure **how badly** OFFSET breaks.
 
 ### 2.1 Latency by OFFSET position
 
@@ -125,7 +125,7 @@ LIMIT 20 OFFSET ?;
 
 → **Linear growth**. Going from OFFSET 1,000 → 1,000,000 (1,000x) raises latency 0.443 → 171ms (about 386x). Slightly sublinear — explained by InnoDB buffer pool cache effects.
 
-(H1) verified: ✅ Roughly linear. 1M / 1K = 1,000x vs 386x latency — InnoDB reverse-scans *contiguous pages*, partial cache hits make it sublinear.
+(H1) verified: ✅ Roughly linear. 1M / 1K = 1,000x vs 386x latency — InnoDB reverse-scans **contiguous pages**, partial cache hits make it sublinear.
 
 ### 2.2 The meaning of OFFSET in one line of EXPLAIN ANALYZE
 
@@ -137,24 +137,24 @@ The key line for OFFSET 1,000,000:
       (cost=... rows=1000020) (actual time=... rows=1000020 loops=1)
 ```
 
-The line that matters is **`actual ... rows=1000020`**. InnoDB reverse-scans the covering index, reads *all* 1,000,020 rows, *throws away* the first 1,000,000, and returns only the last 20 to the client.
+The line that matters is **`actual ... rows=1000020`**. InnoDB reverse-scans the covering index, reads **all** 1,000,020 rows, **throws away** the first 1,000,000, and returns only the last 20 to the client.
 
-→ **The real cost of OFFSET = the number of rows read and discarded**. Even with an index, even covering — *you cannot skip ahead*. The InnoDB index structure has no mechanism to *jump directly* to the Nth row — you have to read N rows *sequentially*.
+→ **The real cost of OFFSET = the number of rows read and discarded**. Even with an index, even covering — **you cannot skip ahead**. The InnoDB index structure has no mechanism to **jump directly** to the Nth row — you have to read N rows **sequentially**.
 
-That's the intrinsic cost of OFFSET pagination. Simple-looking SQL, *cost exactly proportional to OFFSET*.
+That's the intrinsic cost of OFFSET pagination. Simple-looking SQL, **cost exactly proportional to OFFSET**.
 
 <details>
-<summary><b>Why OFFSET *can't* skip ahead — InnoDB index structure</b> (expand)</summary>
+<summary><b>Why OFFSET can't skip ahead — InnoDB index structure</b> (expand)</summary>
 
-InnoDB uses B+-tree indexes. Leaf nodes hold *all rows* in *sorted order*.
+InnoDB uses B+-tree indexes. Leaf nodes hold **all rows** in **sorted order**.
 
-For "jump to the Nth row" to work, the index would need *ordinal-position* metadata — e.g., "row #20,000 lives at slot Y of page X."
+For "jump to the Nth row" to work, the index would need **ordinal-position** metadata — e.g., "row #20,000 lives at slot Y of page X."
 
 InnoDB does not store this metadata. The index only maps `(key value) → row`, not `(ordinal position) → row`.
 
-So `OFFSET 1000000` leaves the optimizer no choice but *"read sequentially from the first index row through the 1,000,000th, then return the next 20."*
+So `OFFSET 1000000` leaves the optimizer no choice but **"read sequentially from the first index row through the 1,000,000th, then return the next 20."**
 
-PostgreSQL is the same (B+-tree). So is Oracle. So is SQL Server. It's a limitation deeply baked into *the standard index structure of all major RDBMS*.
+PostgreSQL is the same (B+-tree). So is Oracle. So is SQL Server. It's a limitation deeply baked into **the standard index structure of all major RDBMS**.
 
 → Which is why cursor pagination is recommended uniformly across all major RDBMS.
 
@@ -164,9 +164,9 @@ PostgreSQL is the same (B+-tree). So is Oracle. So is SQL Server. It's a limitat
 
 ## 3. No-Offset composite-key cursor — three SQL forms for the same 1M position
 
-OFFSET breaks, so cursor pagination is the answer — that part is well-known. But *how to write the cursor pagination* is where the real story lies.
+OFFSET breaks, so cursor pagination is the answer — that part is well-known. But **how to write the cursor pagination** is where the real story lies.
 
-We measured three No-Offset queries that read the same *1,000,000th page*. The cursor value is unified: the `(created_at, id)` of the last row at the OFFSET 1M position.
+We measured three No-Offset queries that read the same **1,000,000th page**. The cursor value is unified: the `(created_at, id)` of the last row at the OFFSET 1M position.
 
 ### 3.1 (a) Row constructor — the ANSI SQL standard form
 
@@ -178,7 +178,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT 20;
 ```
 
-The ANSI SQL *row constructor* (tuple comparison) form. The semantics are clear — "rows where (created_at, id) is less than some tuple."
+The ANSI SQL **row constructor** (tuple comparison) form. The semantics are clear — "rows where (created_at, id) is less than some tuple."
 
 | Metric | Value |
 |---|---|
@@ -193,9 +193,9 @@ Key EXPLAIN ANALYZE line:
       (cost=... rows=1e+6) (actual time=... rows=1e+6 loops=1)
 ```
 
-→ **The row-constructor comparison is applied at the `Filter:` step**. Decisive evidence that the optimizer *did not push the comparison down to an index range*. It reverse-scans 1,000,000 rows and applies the *Filter step* on top — stops once 20 rows match.
+→ **The row-constructor comparison is applied at the `Filter:` step**. Decisive evidence that the optimizer **did not push the comparison down to an index range**. It reverse-scans 1,000,000 rows and applies the **Filter step** on top — stops once 20 rows match.
 
-The result: latency basically the same as OFFSET 1M (171ms). A case where you *wrote cursor pagination but got no index benefit*.
+The result: latency basically the same as OFFSET 1M (171ms). A case where you **wrote cursor pagination but got no index benefit**.
 
 ### 3.2 (b) Simple cursor — `created_at < ?` only
 
@@ -207,7 +207,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT 20;
 ```
 
-The simplest form. Define the cursor with *only created_at*, drop id from the cursor.
+The simplest form. Define the cursor with **only created_at**, drop id from the cursor.
 
 | Metric | Value |
 |---|---|
@@ -223,9 +223,9 @@ Key EXPLAIN ANALYZE line:
       (cost=... rows=20) (actual time=... rows=20 loops=1)
 ```
 
-→ **`Covering index range scan over`**. The optimizer correctly translates `created_at < ?` into an *index range*. **rows=20** — exactly 20 rows read on the index. *Instead of reading 1M rows and discarding them like OFFSET*, it *jumps directly* to the cursor position on the index and reads 20 rows from there.
+→ **`Covering index range scan over`**. The optimizer correctly translates `created_at < ?` into an **index range**. **rows=20** — exactly 20 rows read on the index. **Instead of reading 1M rows and discarding them like OFFSET**, it **jumps directly** to the cursor position on the index and reads 20 rows from there.
 
-This is what cursor pagination really looks like — *independent of OFFSET position*. Whether the cursor is at the 1Mth or 5Mth row, latency stays at 0.3ms.
+This is what cursor pagination really looks like — **independent of OFFSET position**. Whether the cursor is at the 1Mth or 5Mth row, latency stays at 0.3ms.
 
 ### 3.3 (c) OR-split — `created_at < ? OR (created_at = ? AND id < ?)`
 
@@ -238,7 +238,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT 20;
 ```
 
-*Logically identical* to (a) row constructor, but split into an OR. The cursor stays a *composite key* (created_at + id) for accuracy, but written in a shape the MySQL optimizer can read.
+**Logically identical** to (a) row constructor, but split into an OR. The cursor stays a **composite key** (created_at + id) for accuracy, but written in a shape the MySQL optimizer can read.
 
 | Metric | Value |
 |---|---|
@@ -255,9 +255,9 @@ Key EXPLAIN ANALYZE line:
       (reverse) (cost=... rows=20) (actual time=... rows=20 loops=1)
 ```
 
-→ **`Covering index range scan over (... OR ...)`**. The optimizer recognizes both branches of the OR as *index ranges* and processes them as a union. **rows=20**.
+→ **`Covering index range scan over (... OR ...)`**. The optimizer recognizes both branches of the OR as **index ranges** and processes them as a union. **rows=20**.
 
-This is the precise cursor-pagination form for production. Latency essentially the same as (b) simple cursor, but *correct* even when many rows share the same created_at.
+This is the precise cursor-pagination form for production. Latency essentially the same as (b) simple cursor, but **correct** even when many rows share the same created_at.
 
 ### 3.4 OFFSET vs three No-Offset forms — one table
 
@@ -272,43 +272,43 @@ This is the precise cursor-pagination form for production. Latency essentially t
 
 (H3) verified: ✅ The difference between row constructor and OR-split is unmistakable — same semantics, different optimizer treatment.
 
-→ The decisive finding is the **(a) vs (c)** comparison. *Same-meaning* SQL runs **513x apart**. The next section explains why.
+→ The decisive finding is the **(a) vs (c)** comparison. **Same-meaning** SQL runs **513x apart**. The next section explains why.
 
 ---
 
 ## 4. Why the row constructor cannot be pushed down — a structural MySQL optimizer limitation
 
-### 4.1 EXPLAIN ANALYZE: *Filter:* vs *range scan over* — the one line that matters
+### 4.1 EXPLAIN ANALYZE: **Filter:** vs **range scan over** — the one line that matters
 
 Lining up the key EXPLAIN ANALYZE lines for all three forms:
 
 | Form | Key line | Meaning |
 |---|---|---|
-| (a) row constructor | `Filter: ((created_at, id) < ...) ... Covering index scan reverse, rows=1e+6` | *Full index scan* + Filter step |
-| (b) simple cursor | `Covering index range scan over (created_at < ...) reverse, rows=20` | *Index range scan* (jumps to cursor position) |
+| (a) row constructor | `Filter: ((created_at, id) < ...) ... Covering index scan reverse, rows=1e+6` | **Full index scan** + Filter step |
+| (b) simple cursor | `Covering index range scan over (created_at < ...) reverse, rows=20` | **Index range scan** (jumps to cursor position) |
 | (c) OR-split | `Covering index range scan over (created_at < ...) OR (= AND <), rows=20` | Both OR branches as index ranges |
 
 → **The single-line difference between `Filter:` and `range scan over` is the source of the 500x latency gap**.
 
-`Filter:` means the optimizer *cannot use the condition during index traversal*. It *fully scans* the index, *evaluates the condition* on top, and picks rows that match. With a covering index there's no disk I/O, but *processing every row in memory* still costs the same.
+`Filter:` means the optimizer **cannot use the condition during index traversal**. It **fully scans** the index, **evaluates the condition** on top, and picks rows that match. With a covering index there's no disk I/O, but **processing every row in memory** still costs the same.
 
-`range scan over` means the optimizer *uses the condition to determine the index's start/end positions exactly*. It *jumps directly* to the cursor position and reads only 20 rows from there. **The rows=20 vs rows=1e+6 difference is the source of the 500x latency gap**.
+`range scan over` means the optimizer **uses the condition to determine the index's start/end positions exactly**. It **jumps directly** to the cursor position and reads only 20 rows from there. **The rows=20 vs rows=1e+6 difference is the source of the 500x latency gap**.
 
 ### 4.2 The MySQL optimizer's row-constructor limitation — known behavior
 
-The MySQL optimizer does *not* automatically rewrite `(a, b) < (?, ?)` into the equivalent OR form. Even though the two are *logically equivalent*, the optimizer fails to *recognize that equivalence* and cannot push the comparison down to an index range.
+The MySQL optimizer does **not** automatically rewrite `(a, b) < (?, ?)` into the equivalent OR form. Even though the two are **logically equivalent**, the optimizer fails to **recognize that equivalence** and cannot push the comparison down to an index range.
 
-[MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) — "Row comparisons should use range scan" — filed in 2006, *still open* today. Unfixed for 19 years. In other words, *as long as you use MySQL*, the row constructor form is unsuitable for cursor pagination.
+[MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) — "Row comparisons should use range scan" — filed in 2006, **still open** today. Unfixed for 19 years. In other words, **as long as you use MySQL**, the row constructor form is unsuitable for cursor pagination.
 
-→ A painful lesson: even with the same semantics, you have to write SQL in the shape *the optimizer can read*.
+→ A painful lesson: even with the same semantics, you have to write SQL in the shape **the optimizer can read**.
 
-### 4.3 PostgreSQL comparison — the same row constructor *works correctly*
+### 4.3 PostgreSQL comparison — the same row constructor **works correctly**
 
-How does the same SQL behave in PostgreSQL? The PostgreSQL optimizer translates row-constructor comparisons into *exact index ranges*.
+How does the same SQL behave in PostgreSQL? The PostgreSQL optimizer translates row-constructor comparisons into **exact index ranges**.
 
-PostgreSQL's `(created_at, id) < (?, ?)` works as documented in [Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) — given a composite index, it produces an *exact index range scan*. This is a *documented feature* of the PostgreSQL optimizer.
+PostgreSQL's `(created_at, id) < (?, ?)` works as documented in [Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) — given a composite index, it produces an **exact index range scan**. This is a **documented feature** of the PostgreSQL optimizer.
 
-→ Striking that the same SQL produces *completely different latency* depending on the RDBMS. Even ANSI SQL standard syntax has performance characteristics that hinge on *DB implementation*.
+→ Striking that the same SQL produces **completely different latency** depending on the RDBMS. Even ANSI SQL standard syntax has performance characteristics that hinge on **DB implementation**.
 
 | | MySQL 8.0 | PostgreSQL |
 |---|---|---|
@@ -319,20 +319,20 @@ PostgreSQL's `(created_at, id) < (?, ?)` works as documented in [Multicolumn Ind
 
 ### 4.4 In an interview, in one line
 
-> "Even ANSI SQL standard syntax can produce different index behavior depending on the *optimizer implementation*. MySQL's row constructor has a known limitation: *it can't be pushed down to an index range* — Bug #16247 has been open for 19 years. So you have to *write it as a split OR* for the optimizer to recognize it. EXPLAIN ANALYZE shows it directly: `Filter:` (1M scan) vs `Covering index range scan over` (rows=20) — that one line is the source of the 500x latency gap."
+> "Even ANSI SQL standard syntax can produce different index behavior depending on the **optimizer implementation**. MySQL's row constructor has a known limitation: **it can't be pushed down to an index range** — Bug #16247 has been open for 19 years. So you have to **write it as a split OR** for the optimizer to recognize it. EXPLAIN ANALYZE shows it directly: `Filter:` (1M scan) vs `Covering index range scan over` (rows=20) — that one line is the source of the 500x latency gap."
 
 <details>
 <summary><b>Why can't the optimizer rewrite a row constructor into the OR form?</b> (expand)</summary>
 
-In theory, the optimizer could *automatically rewrite* `(a, b) < (?, ?)` into `a < ? OR (a = ? AND b < ?)`. MySQL does not. Why?
+In theory, the optimizer could **automatically rewrite** `(a, b) < (?, ?)` into `a < ? OR (a = ? AND b < ?)`. MySQL does not. Why?
 
-Optimizer *transformation rules* — *when to apply which rewrite* — are encoded in the source. Adding a rule means re-validating *the safety and cost of the transformation* across every case. If the rewrite isn't *always a win*, the rule doesn't get added.
+Optimizer **transformation rules** — **when to apply which rewrite** — are encoded in the source. Adding a rule means re-validating **the safety and cost of the transformation** across every case. If the rewrite isn't **always a win**, the rule doesn't get added.
 
-Rewriting a row constructor into OR form: a win when an index exists, neutral when it doesn't. So from the optimizer's perspective it's a *not-always-a-win* transformation, with low priority. That's why Bug #16247 stays open for 19 years.
+Rewriting a row constructor into OR form: a win when an index exists, neutral when it doesn't. So from the optimizer's perspective it's a **not-always-a-win** transformation, with low priority. That's why Bug #16247 stays open for 19 years.
 
-PostgreSQL implements this rewrite *explicitly* — applied only when a composite index exists. The difference between MySQL's and PostgreSQL's optimizer philosophies surfaces here.
+PostgreSQL implements this rewrite **explicitly** — applied only when a composite index exists. The difference between MySQL's and PostgreSQL's optimizer philosophies surfaces here.
 
-→ A case where the comfortable assumption that *the optimizer is smart* breaks. The optimizer is just *a collection of code-encoded transformation rules*. Which rewrites are in and which are out has to be *verified by measurement*.
+→ A case where the comfortable assumption that **the optimizer is smart** breaks. The optimizer is just **a collection of code-encoded transformation rules**. Which rewrites are in and which are out has to be **verified by measurement**.
 
 </details>
 
@@ -358,7 +358,7 @@ LIMIT 20;
 
 ### 5.2 Cursor tokenization — base64 + HMAC
 
-When exposing the cursor to clients, *don't expose internal column names or raw timestamps*. Encode with base64 and sign with HMAC to prevent tampering.
+When exposing the cursor to clients, **don't expose internal column names or raw timestamps**. Encode with base64 and sign with HMAC to prevent tampering.
 
 ```java
 public class CursorToken {
@@ -394,11 +394,11 @@ Response shape:
 }
 ```
 
-→ Clients treat the token as an *opaque string*. Internal column changes have no client impact (e.g., adding *uuid instead of id* to the cursor definition requires no client code changes).
+→ Clients treat the token as an **opaque string**. Internal column changes have no client impact (e.g., adding **uuid instead of id** to the cursor definition requires no client code changes).
 
 ### 5.3 Six mandatory rules
 
-For cursor pagination to *actually* work in production, all of these have to be enforced.
+For cursor pagination to **actually** work in production, all of these have to be enforced.
 
 | # | Rule | How to verify |
 |---|---|---|
@@ -421,12 +421,12 @@ if grep -rE 'WHERE\s+\([a-zA-Z_,\s]+\)\s*[<>]' src/main/resources/db/; then
 fi
 ```
 
-The *real production value* is that this blocks at the PR stage. Once a row constructor reaches production, it cascades: P99 spike → alert → rollback → migration — high cost. A single lint line at PR review costs 1/100.
+The **real production value** is that this blocks at the PR stage. Once a row constructor reaches production, it cascades: P99 spike → alert → rollback → migration — high cost. A single lint line at PR review costs 1/100.
 
 ### 5.5 Conditions under which this decision is wrong
 
-- The OR-split form measures in *hundreds of ms* in production → revisit the index (composite index missing / low cardinality)
-- A domain with *extremely many rows sharing the same created_at* → consider adding a column to the cursor definition (e.g., shop_id, batch_id)
+- The OR-split form measures in **hundreds of ms** in production → revisit the index (composite index missing / low cardinality)
+- A domain with **extremely many rows sharing the same created_at** → consider adding a column to the cursor definition (e.g., shop_id, batch_id)
 - DB switches to PostgreSQL — PostgreSQL pushes down row constructors correctly → row constructor form becomes simpler
 
 ---
@@ -435,13 +435,13 @@ The *real production value* is that this blocks at the PR stage. Once a row cons
 
 ### 6.1 Stripe — the prototype of cursor as standard
 
-[Stripe API — Pagination](https://stripe.com/docs/api/pagination) makes *every* list endpoint cursor-based:
+[Stripe API — Pagination](https://stripe.com/docs/api/pagination) makes **every** list endpoint cursor-based:
 
 ```http
 GET /v1/charges?limit=20&starting_after=ch_3MtwBwLkdIwHu7ix28a3tqPa
 ```
 
-`starting_after` / `ending_before` parameters — Stripe standard. *Same latency even on deep pages* is guaranteed.
+`starting_after` / `ending_before` parameters — Stripe standard. **Same latency even on deep pages** is guaranteed.
 
 ### 6.2 Notion — cursor standard plus an explicit has_more
 
@@ -455,7 +455,7 @@ GET /v1/charges?limit=20&starting_after=ch_3MtwBwLkdIwHu7ix28a3tqPa
 }
 ```
 
-The `has_more` flag explicitly marks the last page. The cursor is an *opaque token* — no internal structure exposed.
+The `has_more` flag explicitly marks the last page. The cursor is an **opaque token** — no internal structure exposed.
 
 ### 6.3 Slack — cursor-based pagination, by name
 
@@ -463,15 +463,15 @@ The `has_more` flag explicitly marks the last page. The cursor is an *opaque tok
 
 > "Cursor-based pagination is the most reliable type for traversing large lists. Cursor-based pagination works by returning a pointer to a specific item in the dataset."
 
-`response_metadata.next_cursor` is the standard. Slack also makes *every list endpoint* cursor-based.
+`response_metadata.next_cursor` is the standard. Slack also makes **every list endpoint** cursor-based.
 
 ### 6.4 Use The Index, Luke! — "No Offset" as standard
 
-[Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) names OFFSET an *anti-pattern* explicitly:
+[Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) names OFFSET an **anti-pattern** explicitly:
 
 > "OFFSET is bad for both performance and correctness. The seek method (also known as keyset pagination) is the alternative."
 
-This site is essentially the *bible* of RDBMS index learning. Cursor pagination = "seek method" = "keyset pagination" — different names for the same pattern.
+This site is essentially the **bible** of RDBMS index learning. Cursor pagination = "seek method" = "keyset pagination" — different names for the same pattern.
 
 ### 6.5 Vlad Mihalcea — the OR-split form as the standard pattern
 
@@ -483,17 +483,17 @@ ORDER BY created_at DESC, id DESC
 LIMIT 20
 ```
 
-Detailed implementation guidance for Hibernate / JPA contexts. The most cited source for *Java/Spring backends*.
+Detailed implementation guidance for Hibernate / JPA contexts. The most cited source for **Java/Spring backends**.
 
 ### 6.6 In one line
 
-> Global API standards (Stripe / Notion / Slack), the index-learning standard (Use The Index, Luke!), the Java/Spring standard (Vlad Mihalcea) — all *cursor pagination*. OFFSET is acceptable only for *small N* or *internal admin*.
+> Global API standards (Stripe / Notion / Slack), the index-learning standard (Use The Index, Luke!), the Java/Spring standard (Vlad Mihalcea) — all **cursor pagination**. OFFSET is acceptable only for **small N** or **internal admin**.
 
 ---
 
 ## 7. Production failure scenarios (the 3 AM playbook)
 
-### 7.1 Scenario 1 — operator enters via *deep-page OFFSET*
+### 7.1 Scenario 1 — operator enters via **deep-page OFFSET**
 
 A merchant jumps to page 50,000 from dashboard search. The OFFSET 1,000,000 query runs as-is.
 
@@ -503,19 +503,19 @@ A merchant jumps to page 50,000 from dashboard search. The OFFSET 1,000,000 quer
 | **First 5 minutes** | 1) SLOW LOG → identify large-OFFSET queries<br/>2) Search dashboard code → find OFFSET pagination remnants<br/>3) Open a cursor-pagination migration PR |
 | **User impact** | Deep-page users see hundreds of ms to seconds response time |
 
-→ Temporary mitigation: disable *deep-page jumping* in the dashboard (only next/prev buttons). Permanent fix: cursor migration.
+→ Temporary mitigation: disable **deep-page jumping** in the dashboard (only next/prev buttons). Permanent fix: cursor migration.
 
 ### 7.2 Scenario 2 — simple cursor drops rows when many rows share the same created_at
 
-Right after a bulk INSERT batch (e.g., external-platform sync) — 100+ rows end up with the same `created_at` (millisecond precision). With (b) simple cursor `WHERE created_at < ?`, after reading 20 of those 100 rows, the next page uses `created_at < (that ms)` — and *the remaining 80 rows are skipped*.
+Right after a bulk INSERT batch (e.g., external-platform sync) — 100+ rows end up with the same `created_at` (millisecond precision). With (b) simple cursor `WHERE created_at < ?`, after reading 20 of those 100 rows, the next page uses `created_at < (that ms)` — and **the remaining 80 rows are skipped**.
 
 | Stage | Signal |
 |---|---|
 | **First alert** | User report: "missing rows in the order list" |
 | **First 5 minutes** | 1) `SELECT created_at, COUNT(*) FROM orders GROUP BY created_at HAVING COUNT(*) > 1` to confirm same-instant rows<br/>2) Switch cursor form (b) → (c) OR-split |
-| **User impact** | Pagination *correctness* breaks (operational trust damaged) |
+| **User impact** | Pagination **correctness** breaks (operational trust damaged) |
 
-→ The simple cursor has *the same performance* but breaks correctness. That's why the OR-split form is the operational standard.
+→ The simple cursor has **the same performance** but breaks correctness. That's why the OR-split form is the operational standard.
 
 ### 7.3 Scenario 3 — someone writes a row constructor in a PR
 
@@ -523,7 +523,7 @@ Right after a bulk INSERT batch (e.g., external-platform sync) — 100+ rows end
 WHERE (created_at, id) < (:lastCreatedAt, :lastId)
 ```
 
-The PR author writes it thinking *this is the ANSI SQL standard, so it's correct*. The semantics are exact.
+The PR author writes it thinking **this is the ANSI SQL standard, so it's correct**. The semantics are exact.
 
 | Stage | Signal |
 |---|---|
@@ -531,7 +531,7 @@ The PR author writes it thinking *this is the ANSI SQL standard, so it's correct
 | **First 5 minutes** | 1) Lint blocks automatically (§5.4)<br/>2) If lint misses, reviewer cites §4 rule and blocks |
 | **User impact** | 0 (blocked pre-emptively) |
 
-→ Not post-hoc monitoring but *PR-time blocking* is the key. Once a row constructor reaches production, it's *invisible without EXPLAIN ANALYZE* (because the semantics are equivalent).
+→ Not post-hoc monitoring but **PR-time blocking** is the key. Once a row constructor reaches production, it's **invisible without EXPLAIN ANALYZE** (because the semantics are equivalent).
 
 ---
 
@@ -539,12 +539,12 @@ The PR author writes it thinking *this is the ANSI SQL standard, so it's correct
 
 ### 8.1 Assumptions broken by measurement
 
-- "OFFSET is slow on deep pages, but vague about *how slow*" → **linear growth, 1M = 171ms (measured)**
+- "OFFSET is slow on deep pages, but vague about **how slow**" → **linear growth, 1M = 171ms (measured)**
 - "Cursor pagination and you're done" → **half-answer** (the SQL form decides 500x)
 - "ANSI SQL standard form is the safest" → **unsuitable in MySQL due to optimizer limitation**
 - "The optimizer is smart enough to auto-rewrite to OR" → **MySQL hasn't done it for 19 years (Bug #16247)**
 
-### 8.2 How measurement seeds *follow-up learning*
+### 8.2 How measurement seeds **follow-up learning**
 
 | Measurement | Follow-up decision |
 |---|---|
@@ -556,7 +556,7 @@ The PR author writes it thinking *this is the ANSI SQL standard, so it's correct
 
 ### 8.3 The single line
 
-> **OFFSET's cost is the *number of rows read and discarded***. At 10M rows: OFFSET 1M = 171ms / cursor = 0.30ms — *about 570x*. But *how you write the cursor code* is the real point — the row-constructor form can't be pushed down by MySQL's optimizer, so it's 154ms (about the same as OFFSET). The single-line difference between `Filter:` and `Covering index range scan over` in EXPLAIN ANALYZE is the source of the 500x latency gap.
+> **OFFSET's cost is the *number of rows read and discarded***. At 10M rows: OFFSET 1M = 171ms / cursor = 0.30ms — **about 570x**. But **how you write the cursor code** is the real point — the row-constructor form can't be pushed down by MySQL's optimizer, so it's 154ms (about the same as OFFSET). The single-line difference between `Filter:` and `Covering index range scan over` in EXPLAIN ANALYZE is the source of the 500x latency gap.
 
 ---
 
@@ -564,19 +564,19 @@ The PR author writes it thinking *this is the ANSI SQL standard, so it's correct
 
 ### Q1. "How did you implement pagination?"
 
-> "I used a composite-key cursor on (created_at, id) in OR-split form. At 10M rows, OFFSET 1M was 171ms while No-Offset was 0.30ms — **about 570x** ([measured — Java/Spring]). Stripe / Notion / Slack all standardize on cursor-based APIs, which is what convinced me to go that way. In production we encode the cursor as a base64 + HMAC token so *internal structure isn't exposed to clients*."
+> "I used a composite-key cursor on (created_at, id) in OR-split form. At 10M rows, OFFSET 1M was 171ms while No-Offset was 0.30ms — **about 570x** ([measured — Java/Spring]). Stripe / Notion / Slack all standardize on cursor-based APIs, which is what convinced me to go that way. In production we encode the cursor as a base64 + HMAC token so **internal structure isn't exposed to clients**."
 
 ### Q2. "Why didn't you use the row constructor `(a, b) < (?, ?)`?"
 
-> "MySQL's optimizer has a known limitation: it *can't push down row constructors to index ranges*. Running EXPLAIN ANALYZE directly, you see it applied at the `Filter:` step, scanning 1M rows. The logically equivalent OR-split form gets pushed down as `Covering index range scan over` — only rows=20 are read. *Same semantics, but 154ms vs 0.30ms — about 500x*. MySQL Bug #16247 has been open for 19 years; PostgreSQL handles this correctly."
+> "MySQL's optimizer has a known limitation: it **can't push down row constructors to index ranges**. Running EXPLAIN ANALYZE directly, you see it applied at the `Filter:` step, scanning 1M rows. The logically equivalent OR-split form gets pushed down as `Covering index range scan over` — only rows=20 are read. **Same semantics, but 154ms vs 0.30ms — about 500x**. MySQL Bug #16247 has been open for 19 years; PostgreSQL handles this correctly."
 
 ### Q3. "Why not the simple cursor `created_at < ?`?"
 
-> "Performance is essentially the same (0.27 vs 0.30ms). But when *many rows share the same created_at* — like a bulk INSERT batch — a single-column cursor drops rows. For example, if 100 rows are inserted at the same millisecond and you cursor on that ms, the next page skips 80 of them. The OR-split compares (created_at, id) together for *correctness*. We standardized on OR-split for operational safety."
+> "Performance is essentially the same (0.27 vs 0.30ms). But when **many rows share the same created_at** — like a bulk INSERT batch — a single-column cursor drops rows. For example, if 100 rows are inserted at the same millisecond and you cursor on that ms, the next page skips 80 of them. The OR-split compares (created_at, id) together for **correctness**. We standardized on OR-split for operational safety."
 
 ### Q4. "Do you ever use OFFSET pagination?"
 
-> "Small OFFSETs (≤ 1,000) are fine — [measured] 0.443ms. The SQL is simpler than a cursor, so it's a better fit for *internal admin* or *sample first page*. Never for *deep pages* on user-facing surfaces — 5M OFFSET measured at 765ms, and that's because OFFSET cost is *exactly proportional to the number of rows read and discarded*. That's an intrinsic limitation of InnoDB index structure — *you cannot skip ahead*."
+> "Small OFFSETs (≤ 1,000) are fine — [measured] 0.443ms. The SQL is simpler than a cursor, so it's a better fit for **internal admin** or **sample first page**. Never for **deep pages** on user-facing surfaces — 5M OFFSET measured at 765ms, and that's because OFFSET cost is **exactly proportional to the number of rows read and discarded**. That's an intrinsic limitation of InnoDB index structure — **you cannot skip ahead**."
 
 ---
 
@@ -590,8 +590,8 @@ This measurement only looked at single-query latency from EXPLAIN ANALYZE. In pr
 
 Next post:
 
-- How *phantom rows* are handled with cursor pagination + INSERT under Repeatable Read
-- When to introduce the *third column* to a composite cursor (shop_id, batch_id, etc.)
+- How **phantom rows** are handled with cursor pagination + INSERT under Repeatable Read
+- When to introduce the **third column** to a composite cursor (shop_id, batch_id, etc.)
 - ElasticSearch / OpenSearch search_after vs RDBMS cursor — same pattern, different implementations
 
 ---
