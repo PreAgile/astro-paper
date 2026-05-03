@@ -154,7 +154,7 @@ InnoDB does not store this metadata. The index only maps `(key value) → row`, 
 
 So `OFFSET 1000000` leaves the optimizer no choice but **"read sequentially from the first index row through the 1,000,000th, then return the next 20."**
 
-PostgreSQL is the same (B+-tree). So is Oracle. So is SQL Server. It's a limitation deeply baked into **the standard index structure of all major RDBMS**.
+PostgreSQL is the same (B+-tree). So is Oracle. So is SQL Server. It's a limitation deeply baked into **the general B-tree index structure**.
 
 → Which is why cursor pagination is recommended uniformly across all major RDBMS.
 
@@ -298,7 +298,7 @@ Lining up the key EXPLAIN ANALYZE lines for all three forms:
 
 The MySQL optimizer does **not** automatically rewrite `(a, b) < (?, ?)` into the equivalent OR form. Even though the two are **logically equivalent**, the optimizer fails to **recognize that equivalence** and cannot push the comparison down to an index range.
 
-[MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) — "Row comparisons should use range scan" — filed in 2006, **still open** today. Unfixed for 19 years. In other words, **as long as you use MySQL**, the row constructor form is unsuitable for cursor pagination.
+[MySQL Bug #16247](https://bugs.mysql.com/bug.php?id=16247) — "Row comparisons should use range scan" — filed in 2006 and a **long-standing known limitation** (currently marked duplicate in the tracker). The behavior remains unfixed — in other words, **as long as you use MySQL**, the row constructor form is unsuitable for cursor pagination.
 
 → A painful lesson: even with the same semantics, you have to write SQL in the shape **the optimizer can read**.
 
@@ -319,7 +319,7 @@ PostgreSQL's `(created_at, id) < (?, ?)` works as documented in [Multicolumn Ind
 
 ### 4.4 In an interview, in one line
 
-> "Even ANSI SQL standard syntax can produce different index behavior depending on the **optimizer implementation**. MySQL's row constructor has a known limitation: **it can't be pushed down to an index range** — Bug #16247 has been open for 19 years. So you have to **write it as a split OR** for the optimizer to recognize it. EXPLAIN ANALYZE shows it directly: `Filter:` (1M scan) vs `Covering index range scan over` (rows=20) — that one line is the source of the 500x latency gap."
+> "Even ANSI SQL standard syntax can produce different index behavior depending on the **optimizer implementation**. MySQL's row constructor has a known limitation: **it can't be pushed down to an index range** — Bug #16247, filed in 2006, is a long-standing known limitation (currently marked duplicate in the tracker). So you have to **write it as a split OR** for the optimizer to recognize it. EXPLAIN ANALYZE shows it directly: `Filter:` (1M scan) vs `Covering index range scan over` (rows=20) — that one line is the source of the 500x latency gap."
 
 <details>
 <summary><b>Why can't the optimizer rewrite a row constructor into the OR form?</b> (expand)</summary>
@@ -328,7 +328,7 @@ In theory, the optimizer could **automatically rewrite** `(a, b) < (?, ?)` into 
 
 Optimizer **transformation rules** — **when to apply which rewrite** — are encoded in the source. Adding a rule means re-validating **the safety and cost of the transformation** across every case. If the rewrite isn't **always a win**, the rule doesn't get added.
 
-Rewriting a row constructor into OR form: a win when an index exists, neutral when it doesn't. So from the optimizer's perspective it's a **not-always-a-win** transformation, with low priority. That's why Bug #16247 stays open for 19 years.
+Rewriting a row constructor into OR form: a win when an index exists, neutral when it doesn't. So from the optimizer's perspective it's a **not-always-a-win** transformation, with low priority. That's why Bug #16247 has remained a long-standing known limitation.
 
 PostgreSQL implements this rewrite **explicitly** — applied only when a composite index exists. The difference between MySQL's and PostgreSQL's optimizer philosophies surfaces here.
 
@@ -542,7 +542,7 @@ The PR author writes it thinking **this is the ANSI SQL standard, so it's correc
 - "OFFSET is slow on deep pages, but vague about **how slow**" → **linear growth, 1M = 171ms (measured)**
 - "Cursor pagination and you're done" → **half-answer** (the SQL form decides 500x)
 - "ANSI SQL standard form is the safest" → **unsuitable in MySQL due to optimizer limitation**
-- "The optimizer is smart enough to auto-rewrite to OR" → **MySQL hasn't done it for 19 years (Bug #16247)**
+- "The optimizer is smart enough to auto-rewrite to OR" → **MySQL hasn't — Bug #16247 is a long-standing known limitation (currently marked duplicate in the tracker)**
 
 ### 8.2 How measurement seeds **follow-up learning**
 
@@ -566,11 +566,11 @@ If someone who just finished this article asked, "so what was that all about?" �
 
 ### Q. "Why does OFFSET pagination break down at 10M rows?"
 
-OFFSET cost scales **exactly with the number of rows read and discarded** — [measured] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. Having an index doesn't help, even a covering one. **InnoDB's B+-tree index doesn't store *ordinal-position* metadata**, so there's no way to jump straight to the Nth row — you have to read rows 1 through N sequentially and throw away the unwanted ones. PostgreSQL, Oracle, SQL Server all share this limitation — it's intrinsic to the standard RDBMS index structure. That's why cursor pagination is *the standard answer across all major databases*.
+OFFSET cost scales **exactly with the number of rows read and discarded** — [measured] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. Having an index doesn't help, even a covering one. **InnoDB's B+-tree index doesn't store *ordinal-position* metadata**, so there's no way to jump straight to the Nth row — you have to read rows 1 through N sequentially and throw away the unwanted ones. PostgreSQL, Oracle, and SQL Server use the same general B-tree index structure, so the same constraint applies. That's why cursor pagination is *the widely-adopted standard pattern for high-volume sequential traversal APIs*.
 
 ### Q. "Row constructor `(a,b) < (?,?)` and the OR-split form mean the same thing — why a 500x gap?"
 
-Mathematically they're a lexicographic comparison and return the same set of rows. The catch is that **MySQL's optimizer has a structural limit: it can't push a row constructor down to an *index range scan*** — Bug #16247 has been open for 19 years. EXPLAIN ANALYZE shows it on a single line: the row constructor lands as `Filter:` and scans 1,000,000 rows (154ms), while the OR-split runs as `Covering index range scan over` and scans only rows=20 (0.30ms). PostgreSQL pushes the *same SQL* down correctly — the real lesson is that **how each DB's optimizer interprets the ANSI SQL standard is what actually decides the cost**.
+Mathematically they're a lexicographic comparison and return the same set of rows. The catch is that **MySQL's optimizer has a structural limit: it can't push a row constructor down to an *index range scan*** — Bug #16247, filed in 2006, is a long-standing known limitation (currently marked duplicate in the tracker). EXPLAIN ANALYZE shows it on a single line: the row constructor lands as `Filter:` and scans 1,000,000 rows (154ms), while the OR-split runs as `Covering index range scan over` and scans only rows=20 (0.30ms). PostgreSQL pushes the *same SQL* down correctly — the real lesson is that **how each DB's optimizer interprets the ANSI SQL standard is what actually decides the cost**.
 
 ### Q. "Simple cursor `created_at < ?` vs OR-split — which is the production default?"
 
@@ -605,7 +605,7 @@ Next post:
 - [Slack API — Cursor-based Pagination](https://api.slack.com/docs/pagination) — "most reliable type for traversing large lists"
 - [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) — OFFSET = anti-pattern
 - [Vlad Mihalcea — Keyset Pagination](https://vladmihalcea.com/sql-seek-keyset-pagination/) — OR-split form as the standard pattern (Java/Spring)
-- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — known limitation, open for 19 years
+- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — filed in 2006, a long-standing known limitation (currently marked duplicate in the tracker)
 - [PostgreSQL — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) — row constructor works correctly
 - [MySQL Reference — EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.0/en/explain.html#explain-analyze) — interpreting `actual time` / `rows`
 - This measurement — raw data is kept in a separate learning note (inside the portfolio repo)

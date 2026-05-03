@@ -412,9 +412,9 @@ OFFSET 1,000,000 = "처음 1,000,000개 건너뛰고 그 다음 20개" — 직�
 
 **매 INSERT 마다 root 까지 가는 **경로의 모든 internal node** 의 카운터를 +1 해야 합니다.** DELETE 도 마찬가지로 -1. height 4인 트리면 INSERT 1개 = 4개 node 의 카운터 갱신. 그런데 그 카운터가 **모든 트랜잭션의 lock 경합점** — 동시에 INSERT 100개 들어오면 root 의 카운터가 hot spot 이 되어 **lock 경합으로 throughput 폭락**.
 
-OFFSET 빨라지는 이득보다 INSERT/DELETE 동시성 비용이 훨씬 큽니다. 그래서 **모든 RDBMS** (MySQL / PostgreSQL / Oracle / SQL Server) 가 카운터를 안 둡니다. B-tree 의 **근본 trade-off**.
+OFFSET 빨라지는 이득보다 INSERT/DELETE 동시성 비용이 훨씬 큽니다. 그래서 **일반적인 B-tree 인덱스** (MySQL / PostgreSQL / Oracle / SQL Server 등) 는 ordinal-position 메타데이터를 유지하지 않습니다. B-tree 의 **근본 trade-off**.
 
-[MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) 와 [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) 가 OFFSET 의 본질적 한계를 가장 자세히 다룹니다.
+[Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) 이 OFFSET 의 본질적 한계 (B-tree 의 ordinal-position 부재) 를 가장 자세히 다룹니다.
 
 ### 7.3 다이어그램 7 — OFFSET 의 sequential walk + 버리기
 
@@ -771,6 +771,6 @@ graph LR
 
 ### 알려진 한계
 
-- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — 19년째 열려 있는 옵티마이저 limitation
+- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — row constructor push-down 의 알려진 옵티마이저 limitation (트래커는 현재 duplicate 처리). 본 글의 OFFSET 섹션과는 무관 — 자매글 [No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination#row-constructor-pushdown-failure)
 
 본 측정의 raw 데이터는 별도 학습 노트에 보관 (포트폴리오 repo 내부). 1,000만 row 환경 / 인덱스 5종 cardinality / Q1~Q5 Before/After / OFFSET vs cursor 4점 측정.

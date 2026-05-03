@@ -154,7 +154,7 @@ InnoDB는 이런 메타데이터가 **없습니다**. 인덱스는 `(key 값) �
 
 따라서 `OFFSET 1000000`은 옵티마이저 입장에서 **"인덱스의 첫 row부터 1,000,000번째까지 순차로 읽고, 그 다음 20개를 반환"** 외에 다른 방법이 없습니다.
 
-PostgreSQL도 마찬가지입니다 (B+-tree 인덱스). Oracle도, SQL Server도. **RDBMS의 표준 인덱스 구조**에 깊이 박힌 한계입니다.
+PostgreSQL도 마찬가지입니다 (B+-tree 인덱스). Oracle도, SQL Server도. **일반적인 B-tree 인덱스 구조**에 깊이 박힌 한계입니다.
 
 → 그래서 cursor 페이지네이션이 **모든** 주요 RDBMS에서 동일하게 권장됩니다.
 
@@ -319,7 +319,7 @@ PostgreSQL의 `(created_at, id) < (?, ?)`는 [Multicolumn Indexes](https://www.p
 
 ### 4.4 면접에서 이 한 줄로 답하면
 
-> "같은 ANSI SQL 표준 형태라도 **옵티마이저 구현**에 따라 인덱스 효과가 갈립니다. MySQL의 row constructor는 **index range로 push down 못 하는** 알려진 한계 — Bug #16247이 19년째 열려 있습니다. 그래서 **분리된 OR 형태로 작성해야** 옵티마이저가 정확히 인식. EXPLAIN ANALYZE의 **Filter:** (1M scan) vs **Covering index range scan over** (rows=20) — 이 한 줄이 latency 500배 차이의 원인."
+> "같은 ANSI SQL 표준 형태라도 **옵티마이저 구현**에 따라 인덱스 효과가 갈립니다. MySQL의 row constructor는 **index range로 push down 못 하는** 알려진 한계 — Bug #16247은 2006년에 등록된 오래된 known limitation (현재 트래커는 duplicate 처리). 그래서 **분리된 OR 형태로 작성해야** 옵티마이저가 정확히 인식. EXPLAIN ANALYZE의 **Filter:** (1M scan) vs **Covering index range scan over** (rows=20) — 이 한 줄이 latency 500배 차이의 원인."
 
 <details>
 <summary><b>왜 옵티마이저가 row constructor를 OR 형태로 변환 못 하는가</b> (펼치기)</summary>
@@ -328,7 +328,7 @@ PostgreSQL의 `(created_at, id) < (?, ?)`는 [Multicolumn Indexes](https://www.p
 
 옵티마이저의 **변환 규칙(transformation rules)** 은 **언제 어떤 변환을 적용할 것인가** 가 코드로 박혀 있습니다. 변환 규칙이 추가되면 — 모든 케이스에서 **변환의 안전성과 비용** 을 다시 검증해야 합니다. 변환 자체가 **항상 이득**이라는 보장이 없으면 안 추가합니다.
 
-row constructor의 OR 변환은 — 인덱스가 있으면 이득이지만, **없으면** 같음. 그래서 옵티마이저 입장에선 **항상 이득은 아닌** 변환이라 우선순위가 낮음. Bug #16247이 19년째 열려 있는 이유.
+row constructor의 OR 변환은 — 인덱스가 있으면 이득이지만, **없으면** 같음. 그래서 옵티마이저 입장에선 **항상 이득은 아닌** 변환이라 우선순위가 낮음. Bug #16247이 오래 known limitation으로 남은 이유.
 
 PostgreSQL은 이 변환을 **명시적으로** 구현 — composite index 가 있는 경우만 변환 적용. MySQL과 PostgreSQL의 옵티마이저 철학 차이가 여기서 드러납니다.
 
@@ -542,7 +542,7 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 - "OFFSET은 깊은 페이지에서 느리지만, **얼마나** 느린지 막연" → **선형 증가, 1M = 171ms (실측)**
 - "cursor 페이지네이션 쓰면 끝" → **반쪽 답** (어떤 SQL 형태인가에 따라 500배 차이)
 - "ANSI SQL 표준 형태가 가장 안전" → **MySQL에선 옵티마이저 한계로 부적합**
-- "옵티마이저가 똑똑하니까 OR로 자동 변환할 것" → **MySQL 19년째 안 함 (Bug #16247)**
+- "옵티마이저가 똑똑하니까 OR로 자동 변환할 것" → **MySQL은 안 함 — Bug #16247은 오래된 known limitation (현재 트래커 duplicate)**
 
 ### 8.2 측정값이 만드는 **후속 학습 동기**
 
@@ -566,11 +566,11 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 
 ### Q. "OFFSET 페이지네이션이 1,000만 row 환경에서 무너지는 진짜 이유는?"
 
-OFFSET 의 비용은 **읽고 버리는 row 수** 와 정확히 비례합니다 — [실측] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. 인덱스가 있어도, covering 이어도 마찬가지. **InnoDB 의 B+-tree 인덱스가 *서수 위치 메타데이터를 가지지 않기* 때문**에 N번째 row 로 직접 점프할 수 없고, 1번째부터 N번째까지 *순차로 읽고 버리는* 방법밖에 없습니다. PostgreSQL · Oracle · SQL Server 도 같은 한계 — RDBMS 표준 인덱스 구조의 본질입니다. 그래서 cursor 페이지네이션이 *모든 주요 DB 의 표준 답*.
+OFFSET 의 비용은 **읽고 버리는 row 수** 와 정확히 비례합니다 — [실측] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. 인덱스가 있어도, covering 이어도 마찬가지. **InnoDB 의 B+-tree 인덱스가 *서수 위치 메타데이터를 가지지 않기* 때문**에 N번째 row 로 직접 점프할 수 없고, 1번째부터 N번째까지 *순차로 읽고 버리는* 방법밖에 없습니다. PostgreSQL · Oracle · SQL Server 의 일반적인 B-tree 인덱스도 동일한 구조라 같은 한계가 적용됩니다. 그래서 cursor 페이지네이션이 *대용량 순차 탐색 API 에서 널리 쓰이는 표준 패턴*.
 
 ### Q. "row constructor `(a,b) < (?,?)` 와 OR 분리 형태가 같은 의미인데 왜 500배 차이가 나나요?"
 
-수학적으로는 lexicographic 비교 — 동일한 row 집합을 반환합니다. 그런데 **MySQL 옵티마이저가 row constructor 를 *index range scan 으로 push down 못 하는* 한계** 가 있습니다 — Bug #16247 이 19년째 open. EXPLAIN ANALYZE 한 줄로 검증되는 차이: row constructor 는 `Filter:` 단계로 1,000,000 row 전수 스캔 (154ms), OR 분리는 `Covering index range scan over` 로 rows=20 만 스캔 (0.30ms). PostgreSQL 은 *같은 SQL* 을 정상 push down — **DB 별 옵티마이저 구현이 ANSI SQL 표준 의미를 *어떻게 해석하느냐* 가 본질**.
+수학적으로는 lexicographic 비교 — 동일한 row 집합을 반환합니다. 그런데 **MySQL 옵티마이저가 row constructor 를 *index range scan 으로 push down 못 하는* 한계** 가 있습니다 — Bug #16247 은 2006년에 등록된 오래된 known limitation (트래커는 현재 duplicate 처리). EXPLAIN ANALYZE 한 줄로 검증되는 차이: row constructor 는 `Filter:` 단계로 1,000,000 row 전수 스캔 (154ms), OR 분리는 `Covering index range scan over` 로 rows=20 만 스캔 (0.30ms). PostgreSQL 은 *같은 SQL* 을 정상 push down — **DB 별 옵티마이저 구현이 ANSI SQL 표준 의미를 *어떻게 해석하느냐* 가 본질**.
 
 ### Q. "단순 cursor `created_at < ?` 와 OR 분리 형태 — 운영 표준은 어느 쪽?"
 
@@ -605,7 +605,7 @@ OFFSET 의 비용은 **읽고 버리는 row 수** 와 정확히 비례합니다 
 - [Slack API — Cursor-based Pagination](https://api.slack.com/docs/pagination) — "most reliable type for traversing large lists"
 - [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) — OFFSET = anti-pattern
 - [Vlad Mihalcea — Keyset Pagination](https://vladmihalcea.com/sql-seek-keyset-pagination/) — OR 분리 형태 표준 패턴 (Java/Spring)
-- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — 19년째 열려 있는 known limitation
+- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — 2006년 등록된 오래된 known limitation (트래커는 현재 duplicate 처리)
 - [PostgreSQL — Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html) — row constructor가 정상 동작
 - [MySQL Reference — EXPLAIN ANALYZE](https://dev.mysql.com/doc/refman/8.0/en/explain.html#explain-analyze) — `actual time` / `rows` 해석
 - 본 측정 — raw 데이터는 별도 학습 노트에 보관 (포트폴리오 repo 내부)

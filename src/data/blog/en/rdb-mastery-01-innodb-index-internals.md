@@ -412,9 +412,9 @@ Why. B-tree internal nodes only store **key ranges**: "id 1–5M is the left chi
 
 **Every INSERT would have to bump counters on every internal node along the root path.** DELETE, the same with -1. With tree height 4, one INSERT = 4 counter updates. But that counter would be **a contention point for every concurrent transaction** — 100 simultaneous INSERTs would turn the root's counter into a hot spot, **collapsing throughput under lock contention**.
 
-The win on OFFSET is dwarfed by the loss on INSERT/DELETE concurrency. So **every RDBMS** (MySQL / PostgreSQL / Oracle / SQL Server) avoids the counter. A **fundamental B-tree trade-off**.
+The win on OFFSET is dwarfed by the loss on INSERT/DELETE concurrency. So **the general B-tree index** (as implemented in MySQL / PostgreSQL / Oracle / SQL Server etc.) does not maintain ordinal-position metadata. A **fundamental B-tree trade-off**.
 
-[MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) and [Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) cover this OFFSET ceiling in detail.
+[Use The Index, Luke! — No Offset](https://use-the-index-luke.com/no-offset) covers this OFFSET ceiling — rooted in the absence of ordinal-position metadata in B-tree indexes — in detail.
 
 ### 7.3 Diagram 7 — OFFSET sequential walk + discard
 
@@ -771,6 +771,6 @@ Companion posts:
 
 ### Known limitation
 
-- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — open for 19 years, optimizer limitation
+- [MySQL Bug #16247 — Row comparisons should use range scan](https://bugs.mysql.com/bug.php?id=16247) — known optimizer limitation around row-constructor push-down (currently marked duplicate in the tracker). Unrelated to this article's OFFSET section — see the sister post [No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination#row-constructor-pushdown-failure)
 
 Raw data from this measurement is kept inside the portfolio repo (10M-row environment / cardinalities of 5 indexes / Q1~Q5 Before/After / OFFSET vs cursor 4-point measurements).
