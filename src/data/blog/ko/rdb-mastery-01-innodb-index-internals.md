@@ -877,7 +877,7 @@ graph LR
 | type | 의미 | 본 글의 walk |
 |---|---|---|
 | `const` / `eq_ref` | PK / unique 1 row | Index Seek |
-| `ref` | secondary index = 등치 | Index Range Scan (좁은) |
+| `ref` | secondary index = 동등 | Index Range Scan (좁은) |
 | `range` | secondary index BETWEEN/`<` | Index Range Scan |
 | `index` | full index scan (covering 시 leaf 만) | Full Index Scan |
 | `ALL` | clustered index full leaf scan | **Full Table Scan = Clustered Full Scan** |
