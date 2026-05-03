@@ -2,7 +2,7 @@
 title: "RDB Mastery #3 — Mastering EXPLAIN ANALYZE: Push Down Traps and the Real Mechanics of Index Selection"
 description: "Once you can read a single line of an EXPLAIN ANALYZE operator tree, you can directly verify the optimizer's decisions. Filter vs Index Range Scan over — a one-word difference that splits push down success from failure. The ANSI SQL standard row constructor (a,b)<(?,?) doesn't match the MySQL optimizer's whitelist patterns and fails to push down — Bug #16247, filed in 2006, is a long-standing known limitation (currently marked duplicate in the tracker). Index Selection is also a cost-based judgment by the optimizer — the Q2 paradox (with a small LIMIT 5, the optimizer picks the wrong index and adding an index makes it slower). The optimizer is not right 100 percent of the time. We unpack the push-down mechanism and the internals of cost-based index selection by reading 5 EXPLAIN ANALYZE outputs line by line, measured on 10 million rows."
 author: 김면수
-pubDatetime: 2026-05-03T16:00:00.000Z
+pubDatetime: 2026-05-03T17:30:00.000Z
 slug: rdb-mastery-03-explain-pushdown
 featured: true
 draft: false
