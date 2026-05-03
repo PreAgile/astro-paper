@@ -194,7 +194,7 @@ Leaf of idx_owner_state_created (owner_id, state, created_at):
 
 → Reading Diagram 3. `WHERE owner_id = 1234` — binary search jumps to the leaf region where owner=1234, then walks. **100% index utilisation.** `WHERE owner_id = 1234 AND state = 'C'` — additional binary search inside owner=1234 finds the state='C' slice. **100% index utilisation.** But `WHERE state = 'C'` alone — the leaf is primarily sorted by owner_id, so state='C' rows are **scattered**. Binary search cannot help → full leaf walk required → **the index cannot be used**.
 
-The phone-book analogy: in a directory sorted by surname-then-given-name, "surname Kim" is fast (front of the sort matches), but "given name Myeonsoo" forces you to **scan the entire book** because given names are scattered. Same principle.
+The phone-book analogy: in a directory sorted by surname-then-given-name, "surname Kim" is fast (front of the sort matches), but "given name John" forces you to **scan the entire book** because given names are scattered. Same principle.
 
 ### 3.3 [Measured — Java/Spring] Q5 — composite lookup + reverse scan
 
@@ -749,7 +749,7 @@ What this article catalogued is **six types**. **B-tree** (default; equality / r
 
 #### Q. "What is the leftmost-prefix rule for composite indexes?"
 
-What this article showed by measurement is — a composite `(a, b, c)` requires matching from the left. `WHERE a=?` works, `WHERE a=? AND b=?` works, full prefix works. But `WHERE b=?` alone fails to use the index, `WHERE b=? AND c=?` also fails. The reason: the leaf is sorted as a → b → c, and without a, b is **scattered** across the leaf — binary search no longer applies. The phone-book analogy: in a directory sorted by surname-then-given-name, finding "given name Myeonsoo" alone forces a full scan. Same principle. Operationally: composite column order is **equality (=) first, range (<, >) next, ORDER BY last**. In this article's measurements, `(owner_id, state, created_at, id)` made Q5 go from 1,497ms to 2.59ms (577x) — leftmost-prefix matching + reverse scan combined ([Measured — Java/Spring]).
+What this article showed by measurement is — a composite `(a, b, c)` requires matching from the left. `WHERE a=?` works, `WHERE a=? AND b=?` works, full prefix works. But `WHERE b=?` alone fails to use the index, `WHERE b=? AND c=?` also fails. The reason: the leaf is sorted as a → b → c, and without a, b is **scattered** across the leaf — binary search no longer applies. The phone-book analogy: in a directory sorted by surname-then-given-name, finding "given name John" alone forces a full scan. Same principle. Operationally: composite column order is **equality (=) first, range (<, >) next, ORDER BY last**. In this article's measurements, `(owner_id, state, created_at, id)` made Q5 go from 1,497ms to 2.59ms (577x) — leftmost-prefix matching + reverse scan combined ([Measured — Java/Spring]).
 
 #### Q. "Have you ever added an index and the query got slower?"
 

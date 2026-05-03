@@ -62,8 +62,8 @@ tags:
 
 | 종류 | 내부 구조 | 사용처 | 어느 storage engine |
 |---|---|---|---|
-| **B-tree** | B+-tree | 등치 / 범위 / 정렬 (디폴트) | InnoDB / MyISAM |
-| **Hash** | 해시 테이블 | 등치만 | Memory engine 전용 |
+| **B-tree** | B+-tree | 동등 / 범위 / 정렬 (디폴트) | InnoDB / MyISAM |
+| **Hash** | 해시 테이블 | 동등만 | Memory engine 전용 |
 | **Spatial** | R-tree | GEOMETRY 좌표 | InnoDB / MyISAM |
 | **Full-text** | 역인덱스 (inverted index) | 자연어 검색 (`MATCH ... AGAINST`) | InnoDB / MyISAM |
 | **Multi-valued** (8.0+) | B-tree 변형 | JSON 배열의 각 원소 | InnoDB |
@@ -72,31 +72,29 @@ tags:
 ### 1.2 다이어그램 1 — 6가지 인덱스의 내부 구조 비교
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. B-tree (B+-tree)                                          │
-│    Root → Internal → Leaf (linked list)                      │
-│    범위 + 정렬 + 등치 모두                                   │
-│                                                              │
-│ 2. Hash (Memory engine)                                      │
-│    bucket[h(key) % N] → key, value                          │
-│    등치 O(1) / 범위 X / 정렬 X                               │
-│                                                              │
-│ 3. Spatial (R-tree)                                          │
-│    Bounding box 의 트리                                      │
-│    "이 좌표 근처 N개" 검색                                   │
-│                                                              │
-│ 4. Full-text (Inverted Index)                                │
-│    word → [doc1, doc3, doc7, ...]                           │
-│    "검색어 포함된 문서 찾기"                                 │
-│                                                              │
-│ 5. Multi-valued (8.0+, B-tree 변형)                          │
-│    JSON [tag1, tag2, tag3] → 3개 leaf entry                 │
-│    "JSON_CONTAINS(tags, ?)"                                  │
-│                                                              │
-│ 6. Functional (8.0.13+, B-tree)                              │
-│    LOWER('Foo') → 'foo' 가 leaf 키                          │
-│    "WHERE LOWER(col) = ?" push down                          │
-└─────────────────────────────────────────────────────────────┘
+[ 1. B-tree (B+-tree) ]
+    Root -> Internal -> Leaf (linked list)
+    범위 + 정렬 + 동등 모두
+
+[ 2. Hash (Memory engine) ]
+    bucket[h(key) % N] -> key, value
+    동등 O(1) / 범위 X / 정렬 X
+
+[ 3. Spatial (R-tree) ]
+    Bounding box 의 트리
+    "이 좌표 근처 N개" 검색
+
+[ 4. Full-text (Inverted Index) ]
+    word -> [doc1, doc3, doc7, ...]
+    "검색어 포함된 문서 찾기"
+
+[ 5. Multi-valued (8.0+, B-tree 변형) ]
+    JSON [tag1, tag2, tag3] -> 3개 leaf entry
+    "JSON_CONTAINS(tags, ?)"
+
+[ 6. Functional (8.0.13+, B-tree) ]
+    LOWER('Foo') -> 'foo' 가 leaf 키
+    "WHERE LOWER(col) = ?" push down
 ```
 
 → 다이어그램 1 해석. 6가지 종류 중 **InnoDB 에서 만들 수 있는 것** 은 5가지 (B-tree / Spatial / Full-text / Multi-valued / Functional). Hash 는 Memory engine 전용. 그리고 Spatial / Full-text 는 특수 컬럼 (GEOMETRY / TEXT) 에만 — 일반 운영에서 만나는 인덱스는 사실상 **B-tree 와 그 변형 (Multi-valued / Functional)**.
@@ -119,20 +117,27 @@ tags:
 
 ### 2.2 다이어그램 2 — clustered / secondary / composite 의 leaf 비교
 
-```mermaid
-graph TB
-    subgraph "Clustered Index (= 테이블 자체)"
-        C1["Leaf<br/>PK=5,000,001<br/>+ owner_id, state, region, created_at, amount, ... 전체 row"]
-    end
-    subgraph "Secondary Index (단일 컬럼)"
-        S1["Leaf<br/>(owner_id=1234, PK=5,000,001)<br/>(owner_id=1234, PK=5,000,123)<br/>(owner_id=1234, PK=8,234,567)"]
-    end
-    subgraph "Composite Index (다중 컬럼)"
-        M1["Leaf<br/>(owner=1234, state='C', created='2024-...', PK=5M+1)<br/>(owner=1234, state='C', created='2024-...', PK=5M+123)<br/>..."]
-    end
-    subgraph "Covering Index (covering = SELECT 컬럼 모두 leaf 에)"
-        V1["Leaf<br/>(created_at='2024-...', PK=5,000,001)<br/>SELECT id, created_at 시 clustered 안 감"]
-    end
+```
+[ Clustered Index (= 테이블 자체) ]
+  Leaf: PK=5,000,001
+        + owner_id, state, region, created_at, amount, ...
+        (= 전체 row 가 leaf 에 그대로)
+
+[ Secondary Index (단일 컬럼) ]
+  Leaf: (owner_id=1234, PK=5,000,001)
+        (owner_id=1234, PK=5,000,123)
+        (owner_id=1234, PK=8,234,567)
+  -> SELECT * 면 PK 로 clustered 다시 찾아감 (Index Lookup)
+
+[ Composite Index (다중 컬럼) ]
+  Leaf: (owner=1234, state='C', created='2024-...', PK=5M+1)
+        (owner=1234, state='C', created='2024-...', PK=5M+123)
+        ...
+  -> 여러 키가 한 leaf 에 묶임 -- leftmost prefix 매칭
+
+[ Covering Index (SELECT 컬럼이 leaf 안에) ]
+  Leaf: (created_at='2024-...', PK=5,000,001)
+  -> SELECT id, created_at 시 clustered 안 가도 됨
 ```
 
 → 다이어그램 2 해석. **clustered** leaf 는 **전체 row**. **secondary** leaf 는 **(키, PK)**. **composite** leaf 는 **(키1, 키2, 키3, PK)** — 여러 키가 한 leaf 에 묶임. **covering** 은 SELECT 컬럼이 leaf 안에 있어서 clustered 안 가도 됨.
@@ -194,7 +199,7 @@ idx_owner_state_created (owner_id, state, created_at) 의 leaf:
 
 → 다이어그램 3 해석. `WHERE owner_id = 1234` — owner=1234 인 leaf 영역으로 binary search 점프 → 그 안 walk. **인덱스 효과 100%**. `WHERE owner_id = 1234 AND state = 'C'` — owner=1234 안에서 state='C' 부분으로 추가 binary search → **인덱스 효과 100%**. 그런데 `WHERE state = 'C'` 단독 — leaf 가 owner_id 순으로 1차 정렬돼 있어서 state='C' 가 **흩어져 있음**. binary search 가 안 됨 → 전체 leaf walk 필요. 그래서 **인덱스 사용 못 함**.
 
-전화번호부에 비유하면 — 성+이름 순으로 정렬된 책에서 "성이 김씨" 는 빨리 찾지만 (앞쪽 정렬 매칭), "이름이 면수" 는 **전체 책을 다 봐야** 찾을 수 있음. 이름은 흩어져 있으니까. 같은 원리.
+전화번호부에 비유하면 — 성+이름 순으로 정렬된 책에서 "성이 김씨" 는 빨리 찾지만 (앞쪽 정렬 매칭), "이름이 길동" 는 **전체 책을 다 봐야** 찾을 수 있음. 이름은 흩어져 있으니까. 같은 원리.
 
 ### 3.3 [실측 — Java/Spring] Q5 — composite 의 lookup + reverse scan
 
@@ -231,11 +236,11 @@ Extra: Backward index scan
 
 composite 인덱스 만들 때 컬럼 순서 결정의 표준 룰:
 
-1. **WHERE 의 등치 (=) 컬럼 먼저, 범위 (<, >) 컬럼 나중**: 등치는 leaf 영역을 **한 점** 으로 좁히지만 범위는 **구간** 으로 좁히므로, 등치 후 범위가 효율적
-2. **Cardinality 높은 컬럼 먼저 (단, 등치 컬럼 안에서)**: 같은 등치라면 selectivity 큰 게 앞
+1. **WHERE 의 동등 (=) 컬럼 먼저, 범위 (<, >) 컬럼 나중**: 동등은 leaf 영역을 **한 점** 으로 좁히지만 범위는 **구간** 으로 좁히므로, 동등 후 범위가 효율적
+2. **Cardinality 높은 컬럼 먼저 (단, 동등 컬럼 안에서)**: 같은 동등이라면 selectivity 큰 게 앞
 3. **ORDER BY 컬럼은 가장 뒤** (B-tree 의 자연 정렬과 맞아 filesort 회피)
 
-본 시리즈의 `(owner_id, state, created_at)` 가 정확히 이 룰을 따른 형태. owner_id (10K 명) + state (4종, 등치) → created_at (정렬용). 등치 → 정렬 순서.
+본 시리즈의 `(owner_id, state, created_at)` 가 정확히 이 룰을 따른 형태. owner_id (10K 명) + state (4종, 동등) → created_at (정렬용). 동등 → 정렬 순서.
 
 ---
 
@@ -510,7 +515,7 @@ WHERE LOWER(email) = 'alice@foo.com'
 
 → InnoDB 사용자는 hash 인덱스를 **직접** 만들지 않습니다. 대신 InnoDB 가 자주 lookup 되는 B-tree 노드를 **내부적으로 hash index 로 캐싱** — adaptive hash. `innodb_adaptive_hash_index` 변수로 on/off. 운영에서는 디폴트 ON 유지가 표준.
 
-Memory engine 의 hash 인덱스는 — **고속 임시 lookup** 용. 등치 (=) O(1) / 범위 X / 정렬 X. session-scoped 캐시 같은 특수 사용처에만 적합.
+Memory engine 의 hash 인덱스는 — **고속 임시 lookup** 용. 동등 (=) O(1) / 범위 X / 정렬 X. session-scoped 캐시 같은 특수 사용처에만 적합.
 
 ### 8.2 Spatial 인덱스 — R-tree 구조
 
@@ -699,8 +704,8 @@ graph TB
 | 룰 | 적용 |
 |---|---|
 | 단독 인덱스의 cardinality | selectivity 0.01 이상 (= 1% 이하) — 그 이하는 단독 인덱스 X |
-| Composite 컬럼 순서 | 등치 (=) 컬럼 먼저 → 범위 (<, >) 컬럼 나중 → ORDER BY 컬럼 가장 뒤 |
-| Composite 첫 컬럼 | cardinality 큰 것 (selectivity 큰 것) — 단, 등치 안에서 |
+| Composite 컬럼 순서 | 동등 (=) 컬럼 먼저 → 범위 (<, >) 컬럼 나중 → ORDER BY 컬럼 가장 뒤 |
+| Composite 첫 컬럼 | cardinality 큰 것 (selectivity 큰 것) — 단, 동등 안에서 |
 | 낮은 cardinality 컬럼 | composite 의 **후순위** 로만 사용 (region / state / boolean) |
 
 ### 11.3 Covering / 쓰기 최소화
@@ -745,11 +750,11 @@ graph TB
 
 #### Q. "MySQL 의 인덱스 종류는?"
 
-이 글이 정리한 인덱스 종류는 **6가지**. **B-tree** (디폴트, 등치/범위/정렬 모두), **Hash** (Memory engine 전용 — InnoDB 는 **adaptive hash** 로 자동 최적화), **Spatial** (R-tree, GEOMETRY 컬럼), **Full-text** (역인덱스, 자연어 검색), **Multi-valued** (8.0+, JSON 배열의 각 원소가 leaf), **Functional** (8.0.13+, `LOWER()` 같은 표현식 결과가 키). InnoDB 가 만들 수 있는 것은 5가지 (Hash 제외). 운영에서 가장 자주 결정에 들어가는 것은 **B-tree 와 그 변형** (composite / covering / multi-valued / functional).
+이 글이 정리한 인덱스 종류는 **6가지**. **B-tree** (디폴트, 동등/범위/정렬 모두), **Hash** (Memory engine 전용 — InnoDB 는 **adaptive hash** 로 자동 최적화), **Spatial** (R-tree, GEOMETRY 컬럼), **Full-text** (역인덱스, 자연어 검색), **Multi-valued** (8.0+, JSON 배열의 각 원소가 leaf), **Functional** (8.0.13+, `LOWER()` 같은 표현식 결과가 키). InnoDB 가 만들 수 있는 것은 5가지 (Hash 제외). 운영에서 가장 자주 결정에 들어가는 것은 **B-tree 와 그 변형** (composite / covering / multi-valued / functional).
 
 #### Q. "Composite index 의 leftmost prefix 룰이란?"
 
-이 글이 측정으로 보여준 것은 — 복합 인덱스 `(a, b, c)` 는 **왼쪽부터** 차례로 매칭해야 인덱스가 동작한다는 사실. `WHERE a=?` 사용, `WHERE a=? AND b=?` 사용, 전체 사용. 그런데 `WHERE b=?` 단독은 인덱스 무효, `WHERE b=? AND c=?` 도 무효. 이유는 인덱스의 leaf 가 a → b → c 순으로 **정렬** 되어 있어서 — a 가 빠지면 b 가 **흩어져 있어** binary search 가 안 되기 때문. 전화번호부에 비유하면 성+이름 정렬 책에서 "이름이 면수" 만으로는 책 전체를 봐야 함. 같은 원리. 운영 결정: composite 컬럼 순서는 **등치 (=) 먼저, 범위 (<, >) 나중, ORDER BY 컬럼 가장 뒤**. 본 시리즈 측정에서 `(owner_id, state, created_at, id)` composite 로 Q5 1,497ms → 2.59ms (577배) — leftmost prefix 매칭 + reverse scan 의 효과 ([실측 — Java/Spring]).
+이 글이 측정으로 보여준 것은 — 복합 인덱스 `(a, b, c)` 는 **왼쪽부터** 차례로 매칭해야 인덱스가 동작한다는 사실. `WHERE a=?` 사용, `WHERE a=? AND b=?` 사용, 전체 사용. 그런데 `WHERE b=?` 단독은 인덱스 무효, `WHERE b=? AND c=?` 도 무효. 이유는 인덱스의 leaf 가 a → b → c 순으로 **정렬** 되어 있어서 — a 가 빠지면 b 가 **흩어져 있어** binary search 가 안 되기 때문. 전화번호부에 비유하면 성+이름 정렬 책에서 "이름이 길동" 만으로는 책 전체를 봐야 함. 같은 원리. 운영 결정: composite 컬럼 순서는 **동등 (=) 먼저, 범위 (<, >) 나중, ORDER BY 컬럼 가장 뒤**. 본 시리즈 측정에서 `(owner_id, state, created_at, id)` composite 로 Q5 1,497ms → 2.59ms (577배) — leftmost prefix 매칭 + reverse scan 의 효과 ([실측 — Java/Spring]).
 
 #### Q. "인덱스를 추가했는데 쿼리가 느려진 적 있나요?"
 
