@@ -1,14 +1,13 @@
 import { defineConfig, envField } from "astro/config";
 import tailwindcss from "@tailwindcss/vite";
 import sitemap from "@astrojs/sitemap";
-import remarkToc from "remark-toc";
-import remarkCollapse from "remark-collapse";
 import {
   transformerNotationDiff,
   transformerNotationHighlight,
   transformerNotationWordHighlight,
 } from "@shikijs/transformers";
 import { transformerFileName } from "./src/utils/transformers/fileName";
+import { rehypeAsciiSlug } from "./src/utils/rehypeAsciiSlug";
 import { SITE } from "./src/config";
 
 // https://astro.build/config
@@ -34,7 +33,11 @@ export default defineConfig({
     }),
   ],
   markdown: {
-    remarkPlugins: [remarkToc, [remarkCollapse, { test: "Table of contents" }]],
+    rehypePlugins: [
+      // Heading IDs (explicit `{#id}` wins, else transliterate Korean → ASCII)
+      // + regenerate Table-of-contents `<details>` with matching anchor links.
+      rehypeAsciiSlug,
+    ],
     shikiConfig: {
       // For more themes, visit https://shiki.style/themes
       themes: { light: "min-light", dark: "night-owl" },

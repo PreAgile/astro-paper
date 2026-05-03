@@ -1,6 +1,6 @@
 ---
 title: "MySQL InnoDB 격리수준 — phantom read 를 4 격리수준 모두 [실측]하고 RR 이 ANSI 표준보다 강한 이유를 메커니즘으로 분해했습니다"
-description: "ANSI SQL 표준의 RR 은 phantom read 차단을 **보장하지 않습니다**. 그런데 MySQL InnoDB 의 RR 은 차단합니다. 이 흔한 주장을 직접 측정으로 굳혔습니다 — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 그리고 **왜** MySQL RR 이 ANSI 표준보다 강한지 — consistent read snapshot / gap lock / MVCC undo log 세 메커니즘으로 분해해서 결제 도메인에는 RR 만으로 충분하다는 결론을 측정값으로 굳혔습니다."
+description: "ANSI SQL 표준의 RR 은 phantom read 차단을 보장하지 않습니다. 그런데 MySQL InnoDB 의 RR 은 차단합니다. 이 흔한 주장을 직접 측정으로 굳혔습니다 — RU/RC 는 phantom 발생 (A1=0 → INSERT → A2=1), RR 은 차단 (A2=0), SERIALIZABLE 은 INSERT 자체 wait (1.56초). 그리고 왜 MySQL RR 이 ANSI 표준보다 강한지 — consistent read snapshot / gap lock / MVCC undo log 세 메커니즘으로 분해해서 결제 도메인에는 RR 만으로 충분하다는 결론을 측정값으로 굳혔습니다."
 author: 김면수
 pubDatetime: 2026-05-03T09:30:00.000Z
 slug: mysql-isolation-phantom-read
@@ -21,7 +21,7 @@ tags:
 
 ## Table of contents
 
-## 들어가며
+## 들어가며 {#intro}
 
 코드 리뷰 중 결제 도메인의 한 메서드가 또 눈에 들어왔습니다. `@Transactional` 안에서 잔액을 두 번 조회하고 그 차이로 차감 금액을 결정하는 — 흔한 모양이었습니다. 평소엔 문제없이 돌아가던 코드였습니다.
 
@@ -46,7 +46,7 @@ tags:
 
 ---
 
-## 1. Context — 왜 이 문제를 다시 파고들었나
+## 1. Context — 왜 이 문제를 다시 파고들었나 {#context}
 
 ### 1.1 도메인
 
@@ -91,7 +91,7 @@ public void chargeCredit(long userId, BigDecimal amount) {
 
 ---
 
-## 2. ANSI SQL 4 격리수준 — 표준이 **보장하는 것**과 **보장 안 하는 것**
+## 2. ANSI SQL 4 격리수준 — 표준이 **보장하는 것**과 **보장 안 하는 것** {#four-isolation-levels}
 
 측정 들어가기 전에 ANSI SQL 표준이 정확히 무엇을 보장하는지 짚고 갑니다. 이 표준이 측정 결과의 **의미**를 결정합니다.
 
@@ -133,7 +133,7 @@ ANSI SQL-92 표준은 4 격리수준을 **세 가지 anomaly 의 허용/차단**
 
 ---
 
-## 3. 측정 시나리오 설계
+## 3. 측정 시나리오 설계 {#measurement-design}
 
 ### 3.1 시나리오
 
@@ -208,7 +208,7 @@ docker exec commerce-comment-platform-be-mysql \
 
 ---
 
-## 4. 측정 결과 — 4 격리수준 모두 [실측]
+## 4. 측정 결과 — 4 격리수준 모두 [실측] {#measurement-results}
 
 ### 4.1 종합 표 [실측 — Java/Spring Stage 1]
 
@@ -297,7 +297,7 @@ SERIALIZABLE 에서 Session A 의 SELECT 가 **shared lock** (S-lock) 을 잡습
 
 ---
 
-## 5. 핵심 발견 — MySQL InnoDB RR 이 ANSI 표준보다 **강한** 메커니즘 3가지
+## 5. 핵심 발견 — MySQL InnoDB RR 이 ANSI 표준보다 **강한** 메커니즘 3가지 {#rr-stronger-than-ansi}
 
 여기가 본 글의 핵심입니다. 측정값으로 RR 이 phantom 을 차단하는 것을 확인했지만, **왜?** 가 빈약하면 면접에서 한 줄 답변밖에 못 합니다.
 
@@ -442,7 +442,7 @@ graph LR
 
 ---
 
-## 6. SERIALIZABLE 의 동시성 비용 — INSERT wait 1.56초
+## 6. SERIALIZABLE 의 동시성 비용 — INSERT wait 1.56초 {#serializable-cost}
 
 §4.5 에서 확인한 SERIALIZABLE 의 INSERT wait 1.56초를 깊이 봅니다. 이게 RR 과 SERIALIZABLE 의 **결정적** 차이입니다.
 
@@ -500,7 +500,7 @@ graph LR
 
 ---
 
-## 7. RR 의 한계 — Write Skew (RR snapshot 으로 **못 막는** anomaly)
+## 7. RR 의 한계 — Write Skew (RR snapshot 으로 **못 막는** anomaly) {#rr-write-skew-limit}
 
 여기서부터 **RR 도 만능이 아니다** 라는 한계를 짚습니다. 이게 "RR + 비관락 / 낙관락 / 분산락" 보강이 필요한 이유.
 
@@ -555,7 +555,7 @@ RR 의 consistent read snapshot 은 **읽기** 시점의 일관성만 보장합�
 
 ---
 
-## 8. 도메인별 매핑 — 어떤 격리수준을 어디 쓰나
+## 8. 도메인별 매핑 — 어떤 격리수준을 어디 쓰나 {#domain-mapping}
 
 ADR-BE-007 §4.2 의 도메인 매핑을 측정값과 함께 봅니다.
 
@@ -590,7 +590,7 @@ ADR-BE-007 §4.2 의 도메인 매핑을 측정값과 함께 봅니다.
 
 ---
 
-## 9. 운영 모니터링
+## 9. 운영 모니터링 {#monitoring}
 
 RR 격리수준 채택 시 운영에서 봐야 할 메트릭들. §5.3 의 undo log 비용이 핵심 모니터링 대상.
 
@@ -689,7 +689,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ---
 
-## 10. 빅테크 사례
+## 10. 빅테크 사례 {#bigtech-references}
 
 ### 10.1 MySQL 공식 문서 — RR 의 메커니즘 두 줄
 
@@ -731,7 +731,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ---
 
-## 11. 운영 실패 시나리오 (3 AM 시나리오)
+## 11. 운영 실패 시나리오 (3 AM 시나리오) {#failure-scenarios}
 
 ### 11.1 시나리오 1 — RR 트랜잭션이 너무 길어서 **snapshot 비용** 폭증
 
@@ -779,7 +779,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ---
 
-## 12. 무엇을 배웠나
+## 12. 무엇을 배웠나 {#key-takeaways}
 
 ### 12.1 측정으로 깨진 가정들
 
@@ -810,7 +810,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ---
 
-## 13. 면접 답변
+## 13. 면접 답변 {#interview-answers}
 
 ### Q1. "MySQL 격리수준 어떻게 정하셨나요?"
 
@@ -834,7 +834,7 @@ WHERE trx_started < NOW() - INTERVAL 5 SECOND;
 
 ---
 
-## 참고자료
+## 참고자료 {#references}
 
 - [MySQL 8.0 — Consistent Nonlocking Reads](https://dev.mysql.com/doc/refman/8.0/en/innodb-consistent-read.html) — RR 의 snapshot 메커니즘 공식 정의
 - [MySQL 8.0 — Phantom Rows / Next-Key Locking](https://dev.mysql.com/doc/refman/8.0/en/innodb-next-key-locking.html) — gap lock + next-key lock 으로 phantom 차단

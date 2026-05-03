@@ -1,6 +1,6 @@
 ---
 title: "MySQL InnoDB Isolation Levels — Measuring phantom reads across all 4 levels and decomposing why InnoDB RR is stronger than the ANSI standard"
-description: "The ANSI SQL standard does **not** guarantee that REPEATABLE READ blocks phantom reads. Yet MySQL InnoDB's RR does. I nailed down this commonly-cited claim with direct measurements — RU/RC: phantom occurs (A1=0 → INSERT → A2=1), RR: blocked (A2=0), SERIALIZABLE: INSERT itself waits 1.56s. Then I decomposed **why** MySQL RR is stronger than the ANSI standard via three mechanisms — consistent read snapshot, gap lock, and MVCC undo log — to nail down with measurements that for payment domains, RR alone is sufficient."
+description: "The ANSI SQL standard does not guarantee that REPEATABLE READ blocks phantom reads. Yet MySQL InnoDB's RR does. I nailed down this commonly-cited claim with direct measurements — RU/RC: phantom occurs (A1=0 → INSERT → A2=1), RR: blocked (A2=0), SERIALIZABLE: INSERT itself waits 1.56s. Then I decomposed why MySQL RR is stronger than the ANSI standard via three mechanisms — consistent read snapshot, gap lock, and MVCC undo log — to nail down with measurements that for payment domains, RR alone is sufficient."
 author: 김면수
 pubDatetime: 2026-05-03T09:30:00.000Z
 slug: mysql-isolation-phantom-read
@@ -21,7 +21,7 @@ tags:
 
 ## Table of contents
 
-## Introduction
+## Introduction {#intro}
 
 During a code review, another method in the payment domain caught my eye. Inside a `@Transactional` block, it queried a balance twice and decided the deduction amount based on the difference — a common shape. The code had been running fine in production.
 
@@ -46,7 +46,7 @@ We'll unpack how the head-shrug "RR means no phantoms, right?" is **actually gua
 
 ---
 
-## 1. Context — Why I dug into this again
+## 1. Context — Why I dug into this again {#context}
 
 ### 1.1 The domain
 
@@ -92,7 +92,7 @@ I ran the measurements through the raw `mysql` CLI. To compare **what Spring hid
 
 ---
 
-## 2. The 4 ANSI SQL isolation levels — what the standard **guarantees** and what it does **not**
+## 2. The 4 ANSI SQL isolation levels — what the standard **guarantees** and what it does **not** {#four-isolation-levels}
 
 Before measurements, let's pin down what the ANSI SQL standard actually guarantees. The standard is what gives the measurements their **meaning**.
 
@@ -134,7 +134,7 @@ But it's common knowledge that MySQL InnoDB blocks phantoms under RR. **Why?** �
 
 ---
 
-## 3. Designing the measurement
+## 3. Designing the measurement {#measurement-design}
 
 ### 3.1 Scenario
 
@@ -209,7 +209,7 @@ Substitute `<ISOLATION>` with `READ UNCOMMITTED` / `READ COMMITTED` / `REPEATABL
 
 ---
 
-## 4. Measurement results — all 4 isolation levels [measured]
+## 4. Measurement results — all 4 isolation levels [measured] {#measurement-results}
 
 ### 4.1 Summary table [measured — Java/Spring Stage 1]
 
@@ -297,7 +297,7 @@ Measurement: **B's INSERT waited 1.56s** [measured]. Within Session A's 3-second
 
 ---
 
-## 5. The core finding — three mechanisms by which MySQL InnoDB RR is **stronger** than the ANSI standard
+## 5. The core finding — three mechanisms by which MySQL InnoDB RR is **stronger** than the ANSI standard {#rr-stronger-than-ansi}
 
 This is the heart of the post. The measurements confirm RR blocks phantoms, but a weak **why?** leaves you with a one-liner answer in interviews.
 
@@ -442,7 +442,7 @@ The crux:
 
 ---
 
-## 6. SERIALIZABLE's concurrency cost — INSERT wait of 1.56s
+## 6. SERIALIZABLE's concurrency cost — INSERT wait of 1.56s {#serializable-cost}
 
 Let's deep-dive into the 1.56s INSERT wait observed in §4.5 under SERIALIZABLE. This is the **decisive** difference between RR and SERIALIZABLE.
 
@@ -500,7 +500,7 @@ The crux:
 
 ---
 
-## 7. RR's limit — Write skew (an anomaly RR snapshot **cannot** prevent)
+## 7. RR's limit — Write skew (an anomaly RR snapshot **cannot** prevent) {#rr-write-skew-limit}
 
 From here we acknowledge **RR isn't a silver bullet**. This is why "RR + pessimistic / optimistic / distributed lock" augmentation is necessary.
 
@@ -555,7 +555,7 @@ In this repo, payment uses **RR + pessimistic lock**, idempotency-key transition
 
 ---
 
-## 8. Domain mapping — which isolation level goes where
+## 8. Domain mapping — which isolation level goes where {#domain-mapping}
 
 Let's revisit ADR-BE-007 §4.2's domain mapping alongside the measurements.
 
@@ -590,7 +590,7 @@ As §4.5 / §6 showed, SERIALIZABLE is for **short critical sections only**. In 
 
 ---
 
-## 9. Operational monitoring
+## 9. Operational monitoring {#monitoring}
 
 Metrics to watch when RR is the default. The undo log cost from §5.3 is the central monitoring target.
 
@@ -689,7 +689,7 @@ Normally 0 to a few. **Tens persistently** points to application transaction-lif
 
 ---
 
-## 10. Big-tech references
+## 10. Big-tech references {#bigtech-references}
 
 ### 10.1 MySQL official docs — RR's mechanism in two lines
 
@@ -731,7 +731,7 @@ The crux: **readers don't block writers, and vice versa**. This is the essence o
 
 ---
 
-## 11. Operational failure scenarios (3 AM scenarios)
+## 11. Operational failure scenarios (3 AM scenarios) {#failure-scenarios}
 
 ### 11.1 Scenario 1 — RR transaction lives too long, **snapshot cost** explodes
 
@@ -779,7 +779,7 @@ A common trap: **using SERIALIZABLE outside of *short critical sections***. Stri
 
 ---
 
-## 12. What I learned
+## 12. What I learned {#key-takeaways}
 
 ### 12.1 Assumptions broken by measurement
 
@@ -810,7 +810,7 @@ Without these measurements, the **why?** behind subsequent decisions is anemic.
 
 ---
 
-## 13. Interview answers
+## 13. Interview answers {#interview-answers}
 
 ### Q1. "How did you decide on a MySQL isolation level?"
 
@@ -834,7 +834,7 @@ Without these measurements, the **why?** behind subsequent decisions is anemic.
 
 ---
 
-## References
+## References {#references}
 
 - [MySQL 8.0 — Consistent Nonlocking Reads](https://dev.mysql.com/doc/refman/8.0/en/innodb-consistent-read.html) — official definition of RR's snapshot mechanism
 - [MySQL 8.0 — Phantom Rows / Next-Key Locking](https://dev.mysql.com/doc/refman/8.0/en/innodb-next-key-locking.html) — phantom blocking via gap lock + next-key lock

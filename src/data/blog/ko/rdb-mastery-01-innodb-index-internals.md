@@ -22,7 +22,7 @@ tags:
 
 ## Table of contents
 
-## 들어가며 — 인덱스 안 걸어도 InnoDB 는 이미 B-tree 안에 row 를 정렬해서 저장한다
+## 들어가며 — 인덱스 안 걸어도 InnoDB 는 이미 B-tree 안에 row 를 정렬해서 저장한다 {#intro}
 
 "테이블에 인덱스 안 걸면 어떻게 저장돼요?" 라는 질문을 면접에서 받았다고 가정해 봅니다. 흔한 답은 두 가지입니다.
 
@@ -48,7 +48,7 @@ tags:
 
 ---
 
-## 1. InnoDB 의 기본 단위 — Page (16KB) / Row / Index
+## 1. InnoDB 의 기본 단위 — Page (16KB) / Row / Index {#innodb-units-page-row-index}
 
 ### 1.1 page = InnoDB 의 **물리적 단위**
 
@@ -106,7 +106,7 @@ page 1장에 100개 row 가 들어가면 1,000만 row = page **10만 장**. 이 
 
 ---
 
-## 2. 모든 InnoDB 테이블은 B-tree — Clustered Index
+## 2. 모든 InnoDB 테이블은 B-tree — Clustered Index {#clustered-index-table-as-btree}
 
 ### 2.1 PK 가 있을 때: PK = clustered index = **테이블 자체**
 
@@ -162,7 +162,7 @@ EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 §11 에서 다시 �
 
 ---
 
-## 3. Secondary Index — **PK 를 가리키는** 별도 B-tree
+## 3. Secondary Index — **PK 를 가리키는** 별도 B-tree {#secondary-index-pk-pointer}
 
 ### 3.1 secondary index 의 leaf 안에는 **PK 값** 이 들어 있다
 
@@ -232,7 +232,7 @@ W2 Phase 3 에서 측정한 Q5 (`WHERE owner_id=? AND state=? ORDER BY created_a
 
 ---
 
-## 4. Covering Index — **PK 까지 안 가도 답이 있는** 인덱스
+## 4. Covering Index — **PK 까지 안 가도 답이 있는** 인덱스 {#covering-index}
 
 ### 4.1 정의
 
@@ -303,7 +303,7 @@ Extra: Using index; Backward index scan
 
 ---
 
-## 5. B-tree 의 물리적 walk — leaf 의 양방향 linked list
+## 5. B-tree 의 물리적 walk — leaf 의 양방향 linked list {#btree-walk-leaf-linked-list}
 
 ### 5.1 leaf 노드는 **prev / next** 포인터로 연결
 
@@ -348,7 +348,7 @@ Extra: Using index; Backward index scan
 
 ---
 
-## 6. 4가지 walk 패턴 비교
+## 6. 4가지 walk 패턴 비교 {#four-walk-patterns}
 
 B-tree 위에서 일어날 수 있는 walk 는 4가지입니다.
 
@@ -398,7 +398,7 @@ W2 Phase 3 의 5종 쿼리를 이 분류에 매핑:
 
 ---
 
-## 7. OFFSET 의 한계 — **왜 모두 읽고 버리는가**
+## 7. OFFSET 의 한계 — **왜 모두 읽고 버리는가** {#offset-limit}
 
 ### 7.1 B-tree 는 **row 카운터를 안 가진다**
 
@@ -448,7 +448,7 @@ Leaf 1 → Leaf 2 → ... → Leaf 9,999 → Leaf 10,000 → Leaf 10,001
 
 ---
 
-## 8. Cursor 가 빠른 이유 — **binary search primitive**
+## 8. Cursor 가 빠른 이유 — **binary search primitive** {#cursor-binary-search}
 
 ### 8.1 `WHERE created_at < ?` = B-tree 의 **진짜 primitive**
 
@@ -497,7 +497,7 @@ sequenceDiagram
 
 ---
 
-## 9. 다중 인덱스 — 같은 테이블에 **N개 B-tree**
+## 9. 다중 인덱스 — 같은 테이블에 **N개 B-tree** {#multiple-indexes}
 
 ### 9.1 인덱스 5개 = B-tree 6개 (clustered + 5)
 
@@ -587,7 +587,7 @@ W2 Phase 3 기준 (대략):
 
 ---
 
-## 10. 논리 vs 물리
+## 10. 논리 vs 물리 {#logical-vs-physical}
 
 ### 10.1 같은 테이블의 두 시점
 
@@ -633,7 +633,7 @@ graph LR
 
 ---
 
-## 11. Full Table Scan 의 의미 재정립
+## 11. Full Table Scan 의 의미 재정립 {#full-table-scan-redefined}
 
 ### 11.1 InnoDB 에선 **full table scan = clustered index full scan**
 
@@ -665,7 +665,7 @@ graph LR
 
 ---
 
-## 12. 빅테크 사례 + 면접 답변
+## 12. 빅테크 사례 + 면접 답변 {#bigtech-references}
 
 ### 12.1 빅테크 사례 (URL 검증 ≥ 6개)
 
@@ -708,7 +708,7 @@ graph LR
 
 ---
 
-## 13. 무엇을 배웠나
+## 13. 무엇을 배웠나 {#key-takeaways}
 
 ### 13.1 측정으로 깨진 가정들
 
@@ -725,7 +725,7 @@ graph LR
 
 ---
 
-## 14. 다음 글 — 시리즈로 이어집니다
+## 14. 다음 글 — 시리즈로 이어집니다 {#next-post}
 
 본 글은 **RDB Mastery 시리즈 1편**. **index 의 내부 구조** 측면. 다음 편들에서:
 
@@ -742,7 +742,7 @@ graph LR
 
 ---
 
-## 참고자료
+## 참고자료 {#references}
 
 ### 공식 문서
 

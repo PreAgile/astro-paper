@@ -1,6 +1,6 @@
 ---
-title: "MySQL No-Offset Cursor Pagination — At 10M rows, OFFSET 1M takes 171ms / Cursor 0.30ms, and the **500x trap** between them, traced down to a single line"
-description: "On a 10M-row table, OFFSET 1M takes 171ms while a No-Offset cursor takes 0.30ms — about 570x faster, reproduced by direct measurement. But how you write the No-Offset code splits another 500x. The ANSI SQL row constructor `(a,b)<(?,?)` is logically equivalent to the OR-split form, yet the MySQL optimizer **cannot push it down to an index range** (154ms — about the same as OFFSET). The single line in EXPLAIN ANALYZE — **Filter:** vs **Covering index range scan over** — is the root cause. A production retrospective combined with a reproducible learning environment."
+title: "MySQL No-Offset Cursor Pagination — At 10M rows, OFFSET 1M takes 171ms / Cursor 0.30ms, and the 500x trap between them, traced down to a single line"
+description: "On a 10M-row table, OFFSET 1M takes 171ms while a No-Offset cursor takes 0.30ms — about 570x faster, reproduced by direct measurement. But how you write the No-Offset code splits another 500x. The ANSI SQL row constructor `(a,b)<(?,?)` is logically equivalent to the OR-split form, yet the MySQL optimizer cannot push it down to an index range (154ms — about the same as OFFSET). The single line in EXPLAIN ANALYZE — Filter: vs Covering index range scan over — is the root cause. A production retrospective combined with a reproducible learning environment."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00Z
 featured: true
@@ -19,7 +19,7 @@ tags:
 
 ## Table of contents
 
-## Intro
+## Intro {#intro}
 
 The merchant dashboard had an **order list** screen. `LIMIT 20 OFFSET ?` — the most common shape. Pages 1, 10, 100 were all fast.
 
@@ -49,7 +49,7 @@ Let's break down — line by line — why "use a cursor and you're done" is only
 
 ---
 
-## 1. Context — why deep pages actually become a real production problem
+## 1. Context — why deep pages actually become a real production problem {#context}
 
 ### 1.1 Domain
 
@@ -101,7 +101,7 @@ InnoDB buffer pool warmed up before measuring — cold-cache effects are a separ
 
 ---
 
-## 2. The intrinsic cost of OFFSET — **the rows you read and discard** are the cost
+## 2. The intrinsic cost of OFFSET — **the rows you read and discard** are the cost {#offset-cost}
 
 First, let's measure **how badly** OFFSET breaks.
 
@@ -162,7 +162,7 @@ PostgreSQL is the same (B+-tree). So is Oracle. So is SQL Server. It's a limitat
 
 ---
 
-## 3. No-Offset composite-key cursor — three SQL forms for the same 1M position
+## 3. No-Offset composite-key cursor — three SQL forms for the same 1M position {#cursor-three-forms}
 
 OFFSET breaks, so cursor pagination is the answer — that part is well-known. But **how to write the cursor pagination** is where the real story lies.
 
@@ -276,7 +276,7 @@ This is the precise cursor-pagination form for production. Latency essentially t
 
 ---
 
-## 4. Why the row constructor cannot be pushed down — a structural MySQL optimizer limitation
+## 4. Why the row constructor cannot be pushed down — a structural MySQL optimizer limitation {#row-constructor-pushdown-failure}
 
 ### 4.1 EXPLAIN ANALYZE: **Filter:** vs **range scan over** — the one line that matters
 
@@ -338,7 +338,7 @@ PostgreSQL implements this rewrite **explicitly** — applied only when a compos
 
 ---
 
-## 5. Production application — cursor tokenization + six mandatory rules
+## 5. Production application — cursor tokenization + six mandatory rules {#production-cursor-tokenization}
 
 ### 5.1 Standard SQL form
 
@@ -431,7 +431,7 @@ The **real production value** is that this blocks at the PR stage. Once a row co
 
 ---
 
-## 6. Big-tech precedents — why cursor pagination is the standard
+## 6. Big-tech precedents — why cursor pagination is the standard {#bigtech-references}
 
 ### 6.1 Stripe — the prototype of cursor as standard
 
@@ -491,7 +491,7 @@ Detailed implementation guidance for Hibernate / JPA contexts. The most cited so
 
 ---
 
-## 7. Production failure scenarios (the 3 AM playbook)
+## 7. Production failure scenarios (the 3 AM playbook) {#failure-scenarios}
 
 ### 7.1 Scenario 1 — operator enters via **deep-page OFFSET**
 
@@ -535,7 +535,7 @@ The PR author writes it thinking **this is the ANSI SQL standard, so it's correc
 
 ---
 
-## 8. What we learned
+## 8. What we learned {#key-takeaways}
 
 ### 8.1 Assumptions broken by measurement
 
@@ -560,27 +560,29 @@ The PR author writes it thinking **this is the ANSI SQL standard, so it's correc
 
 ---
 
-## 9. Interview answers
+## 9. Recap — putting this article in your own words {#recap}
 
-### Q1. "How did you implement pagination?"
+If someone who just finished this article asked, "so what was that all about?" — here's how the measurements answer the natural follow-up questions.
 
-> "I used a composite-key cursor on (created_at, id) in OR-split form. At 10M rows, OFFSET 1M was 171ms while No-Offset was 0.30ms — **about 570x** ([measured — Java/Spring]). Stripe / Notion / Slack all standardize on cursor-based APIs, which is what convinced me to go that way. In production we encode the cursor as a base64 + HMAC token so **internal structure isn't exposed to clients**."
+### Q. "Why does OFFSET pagination break down at 10M rows?"
 
-### Q2. "Why didn't you use the row constructor `(a, b) < (?, ?)`?"
+OFFSET cost scales **exactly with the number of rows read and discarded** — [measured] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. Having an index doesn't help, even a covering one. **InnoDB's B+-tree index doesn't store *ordinal-position* metadata**, so there's no way to jump straight to the Nth row — you have to read rows 1 through N sequentially and throw away the unwanted ones. PostgreSQL, Oracle, SQL Server all share this limitation — it's intrinsic to the standard RDBMS index structure. That's why cursor pagination is *the standard answer across all major databases*.
 
-> "MySQL's optimizer has a known limitation: it **can't push down row constructors to index ranges**. Running EXPLAIN ANALYZE directly, you see it applied at the `Filter:` step, scanning 1M rows. The logically equivalent OR-split form gets pushed down as `Covering index range scan over` — only rows=20 are read. **Same semantics, but 154ms vs 0.30ms — about 500x**. MySQL Bug #16247 has been open for 19 years; PostgreSQL handles this correctly."
+### Q. "Row constructor `(a,b) < (?,?)` and the OR-split form mean the same thing — why a 500x gap?"
 
-### Q3. "Why not the simple cursor `created_at < ?`?"
+Mathematically they're a lexicographic comparison and return the same set of rows. The catch is that **MySQL's optimizer has a structural limit: it can't push a row constructor down to an *index range scan*** — Bug #16247 has been open for 19 years. EXPLAIN ANALYZE shows it on a single line: the row constructor lands as `Filter:` and scans 1,000,000 rows (154ms), while the OR-split runs as `Covering index range scan over` and scans only rows=20 (0.30ms). PostgreSQL pushes the *same SQL* down correctly — the real lesson is that **how each DB's optimizer interprets the ANSI SQL standard is what actually decides the cost**.
 
-> "Performance is essentially the same (0.27 vs 0.30ms). But when **many rows share the same created_at** — like a bulk INSERT batch — a single-column cursor drops rows. For example, if 100 rows are inserted at the same millisecond and you cursor on that ms, the next page skips 80 of them. The OR-split compares (created_at, id) together for **correctness**. We standardized on OR-split for operational safety."
+### Q. "Simple cursor `created_at < ?` vs OR-split — which is the production default?"
 
-### Q4. "Do you ever use OFFSET pagination?"
+Performance is essentially identical — 0.27 vs 0.30ms. The difference is *operational safety*: when many rows share the same `created_at` (bulk INSERT batches, migrations), the simple cursor *drops rows*. If 100 rows are inserted at the same millisecond and you cursor on that ms, the next page skips part of them. **The OR-split compares (created_at, id) together to guarantee a *correct page boundary***. Unless your domain *proves* that same-instant duplicates are rare, the production default is OR-split.
 
-> "Small OFFSETs (≤ 1,000) are fine — [measured] 0.443ms. The SQL is simpler than a cursor, so it's a better fit for **internal admin** or **sample first page**. Never for **deep pages** on user-facing surfaces — 5M OFFSET measured at 765ms, and that's because OFFSET cost is **exactly proportional to the number of rows read and discarded**. That's an intrinsic limitation of InnoDB index structure — **you cannot skip ahead**."
+### Q. "So you never use OFFSET pagination?"
+
+The [measured] take: **small OFFSETs (≤ 1,000) are fine** — 0.443ms is plenty fast. Internal admin tools, sample first pages — places with *bounded usage* — are easier to read with OFFSET than a cursor. But never for deep pages on user-facing surfaces — OFFSET 5M = 765ms. The rule this article lands on: an ADR-level cap of **"OFFSET only when N ≤ 1,000"**, enforced at PR review.
 
 ---
 
-## 10. In the next post
+## 10. In the next post {#next-post}
 
 This measurement only looked at single-query latency from EXPLAIN ANALYZE. In production you also need to look along these axes:
 
@@ -596,7 +598,7 @@ Next post:
 
 ---
 
-## References
+## References {#references}
 
 - [Stripe API — Pagination](https://stripe.com/docs/api/pagination) — the prototype of cursor as standard
 - [Notion API — Pagination](https://developers.notion.com/reference/intro#pagination) — opaque cursor + has_more

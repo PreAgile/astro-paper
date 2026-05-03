@@ -21,7 +21,7 @@ tags:
 
 ## Table of contents
 
-## 들어가며 — 풀 고갈은 애플리케이션 문제일까, JVM 문제일까
+## 들어가며 — 풀 고갈은 애플리케이션 문제일까, JVM 문제일까 {#intro}
 
 새벽 3시. 결제 API 의 P99 가 200ms 에서 6초로 튀었다는 알람을 받습니다. 코드는 어제와 똑같습니다. 외부 PG 도 status page 는 green. 그런데 시스템이 무너지고 있습니다.
 
@@ -53,7 +53,7 @@ dump 한 장에 답이 있습니다. **모든 worker thread** 가 HikariCP 의 `
 
 ---
 
-## 1. 운영 표면 — 풀 고갈 알람이 울렸을 때 보이는 것
+## 1. 운영 표면 — 풀 고갈 알람이 울렸을 때 보이는 것 {#operational-surface}
 
 자매글에서 같은 EXP-09 를 **비즈니스 측면** 으로 다뤘으니, 여기서는 **운영 측면**만 짧게 회수하겠습니다.
 
@@ -87,7 +87,7 @@ public void confirm(PaymentRequest req) {
 
 ---
 
-## 2. Thread Dump 의 입구 — 어디서 어떻게 채취하나
+## 2. Thread Dump 의 입구 — 어디서 어떻게 채취하나 {#thread-dump-entry-points}
 
 ### 2.1 채취 도구 4가지
 
@@ -131,7 +131,7 @@ done
 
 ---
 
-## 3. Thread Dump 한 줄씩 해부 — JVM 풀 고갈 시점 dump
+## 3. Thread Dump 한 줄씩 해부 — JVM 풀 고갈 시점 dump {#thread-dump-anatomy}
 
 이제 본론. EXP-09 Run #2 (timeout 1s, concurrent 60, extDelay 3s) 시점에 채취한 dump 의 **형태**를 보면서 한 줄씩 풀어봅니다.
 
@@ -223,7 +223,7 @@ BLOCKED          0
 
 ---
 
-## 4. HikariCP 내부 동작 — ConcurrentBag / SynchronousQueue 의 JVM 측면
+## 4. HikariCP 내부 동작 — ConcurrentBag / SynchronousQueue 의 JVM 측면 {#hikaricp-internals}
 
 §3 의 stack trace 를 **코드 레벨** 로 풀어봅니다. HikariCP 가 **왜 이렇게 동작하는가**.
 
@@ -394,7 +394,7 @@ EXP-09 Run #2 (timeout 1s) 시점의 50 worker — 모두 `parkNanos(blocker, 1_
 
 ---
 
-## 5. JVM Thread State 머신 — 6 상태 + 전이
+## 5. JVM Thread State 머신 — 6 상태 + 전이 {#jvm-thread-state-machine}
 
 dump 의 `Thread.State: TIMED_WAITING (parked)` 라인을 풀려면 **Thread.State 머신** 이해가 필수.
 
@@ -477,7 +477,7 @@ dump 에서 가장 헷갈리는 부분.
 
 ---
 
-## 6. EXP-09b 9 시나리오 → Thread Dump 변화
+## 6. EXP-09b 9 시나리오 → Thread Dump 변화 {#nine-scenarios-thread-states}
 
 자매글에서 다룬 단순 분리 / Saga / Outbox 의 dump 형태는 **어떻게 다른가** — JVM 측면 차이를 짧게 정리.
 
@@ -543,7 +543,7 @@ TIMED_WAITING    █████████████████████
 
 ---
 
-## 7. 운영 모니터링 — JVM 메트릭 + thread dump 자동 수집
+## 7. 운영 모니터링 — JVM 메트릭 + thread dump 자동 수집 {#monitoring-grafana-jvm}
 
 dump 는 **사후 분석 도구**. 운영의 **실시간** 신호는 메트릭에서 와야 합니다.
 
@@ -627,7 +627,7 @@ public class DumpController {
 
 ---
 
-## 8. 운영 실패 시나리오 (3 AM 시나리오)
+## 8. 운영 실패 시나리오 (3 AM 시나리오) {#failure-scenarios}
 
 ### 8.1 갑작스런 풀 고갈 — 첫 5분 동선
 
@@ -684,7 +684,7 @@ GC log 분석:
 
 ---
 
-## 9. 빅테크 사례 — 운영 dump / GC / Concurrency 실제
+## 9. 빅테크 사례 — 운영 dump / GC / Concurrency 실제 {#bigtech-references}
 
 본 글의 측정과 **같은 패턴**을 어떻게 다뤘는가.
 
@@ -750,7 +750,7 @@ GC log 분석:
 
 ---
 
-## 10. 면접 답변
+## 10. 면접 답변 {#interview-answers}
 
 ### Q1. "풀 고갈 알람을 받으면 무엇부터 채취하나요?"
 
@@ -770,7 +770,7 @@ GC log 분석:
 
 ---
 
-## 11. 무엇을 배웠나
+## 11. 무엇을 배웠나 {#key-takeaways}
 
 ### 11.1 핵심 한 줄
 
@@ -796,7 +796,7 @@ GC log 분석:
 
 ---
 
-## 12. 다음 글에서
+## 12. 다음 글에서 {#next-post}
 
 - W4 EXP-02 락 4종 비교 (낙관 / 비관 / GET_LOCK / Redisson) — `synchronized` / `ReentrantLock` 의 thread state 차이
 - W6 Spring Batch 100만 건 backfill — G1 vs ZGC pause 분포 [측정 예정]
@@ -804,7 +804,7 @@ GC log 분석:
 
 ---
 
-## 참고자료
+## 참고자료 {#references}
 
 ### 공식 / 소스
 - [Oracle — Thread.State javadoc (Java 21)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.State.html) — 6 상태 정의

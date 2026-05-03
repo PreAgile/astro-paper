@@ -21,7 +21,7 @@ tags:
 
 ## Table of contents
 
-## Intro — Is Pool Exhaustion an Application Problem, or a JVM Problem?
+## Intro — Is Pool Exhaustion an Application Problem, or a JVM Problem? {#intro}
 
 3 AM. You get an alert: payment API P99 jumped from 200ms to 6 seconds. The code is identical to yesterday's. The external PG status page is green. Yet the system is melting down.
 
@@ -53,7 +53,7 @@ This post takes that dump apart **line by line**.
 
 ---
 
-## 1. The Operational Surface — What You See When the Pool Exhaustion Alert Fires
+## 1. The Operational Surface — What You See When the Pool Exhaustion Alert Fires {#operational-surface}
 
 The sister post handled the same EXP-09 from the business angle, so I will only briefly reprise the operational surface here.
 
@@ -87,7 +87,7 @@ You can stare at this code all day. Nothing is wrong. The **observation** that t
 
 ---
 
-## 2. The Entry Points to a Thread Dump — Where and How to Capture One
+## 2. The Entry Points to a Thread Dump — Where and How to Capture One {#thread-dump-entry-points}
 
 ### 2.1 Four Capture Tools
 
@@ -131,7 +131,7 @@ If the same thread sits in the same frame across all three dumps, you have **evi
 
 ---
 
-## 3. Dissecting a Thread Dump — JVM at the Moment of Pool Exhaustion
+## 3. Dissecting a Thread Dump — JVM at the Moment of Pool Exhaustion {#thread-dump-anatomy}
 
 The main course. Here is the **shape** of a dump captured during EXP-09 Run #2 (timeout 1s, concurrent 60, extDelay 3s), unpacked line by line.
 
@@ -223,7 +223,7 @@ BLOCKED          0
 
 ---
 
-## 4. HikariCP Internals — JVM-Side View of ConcurrentBag and SynchronousQueue
+## 4. HikariCP Internals — JVM-Side View of ConcurrentBag and SynchronousQueue {#hikaricp-internals}
 
 Now I unpack §3's stack trace at the **code level**. **Why** does HikariCP behave this way?
 
@@ -394,7 +394,7 @@ Operational traps:
 
 ---
 
-## 5. The JVM Thread State Machine — 6 States and Transitions
+## 5. The JVM Thread State Machine — 6 States and Transitions {#jvm-thread-state-machine}
 
 Reading `Thread.State: TIMED_WAITING (parked)` in a dump requires understanding the **Thread.State machine**.
 
@@ -477,7 +477,7 @@ When reading dumps, **don't look at `Thread.State` alone — always read the **t
 
 ---
 
-## 6. EXP-09b's 9 Scenarios → How the Thread Dump Changes
+## 6. EXP-09b's 9 Scenarios → How the Thread Dump Changes {#nine-scenarios-thread-states}
 
 How does the dump **differ** for Simple Split / Saga / Outbox from the sister post? A short JVM-side comparison.
 
@@ -543,7 +543,7 @@ A **momentary spike**. After 50ms the pool drains and the dump returns to normal
 
 ---
 
-## 7. Operational Monitoring — JVM Metrics + Automated Thread Dump Capture
+## 7. Operational Monitoring — JVM Metrics + Automated Thread Dump Capture {#monitoring-grafana-jvm}
 
 Dumps are **post-hoc analysis tools**. The **real-time** signal must come from metrics.
 
@@ -627,7 +627,7 @@ JSON-shaped, friendly to **automated analysis**. You can immediately compute **c
 
 ---
 
-## 8. Production Failure Scenarios (3 AM Edition)
+## 8. Production Failure Scenarios (3 AM Edition) {#failure-scenarios}
 
 ### 8.1 Sudden Pool Exhaustion — First 5 Minutes
 
@@ -684,7 +684,7 @@ If Full GCs occur **back to back**, heap is short → bump `-Xmx` or chase the l
 
 ---
 
-## 9. Big-Tech Cases — Real-World Dumps / GC / Concurrency
+## 9. Big-Tech Cases — Real-World Dumps / GC / Concurrency {#bigtech-references}
 
 How the same patterns measured in this post have been handled in the wild.
 
@@ -750,7 +750,7 @@ A different take on this post's lesson that "the DB Connection becomes a synchro
 
 ---
 
-## 10. Interview Answers
+## 10. Interview Answers {#interview-answers}
 
 ### Q1. "When the pool exhaustion alert fires, what do you capture first?"
 
@@ -770,7 +770,7 @@ A different take on this post's lesson that "the DB Connection becomes a synchro
 
 ---
 
-## 11. What I Learned
+## 11. What I Learned {#key-takeaways}
 
 ### 11.1 The One-Liner
 
@@ -796,7 +796,7 @@ Part 1 (the flagship) of the [JVM/Java Mastery series](/en/posts/jvm-java-master
 
 ---
 
-## 12. In the Next Post
+## 12. In the Next Post {#next-post}
 
 - W4 EXP-02 lock comparison (optimistic / pessimistic / GET_LOCK / Redisson) — thread state differences between `synchronized` and `ReentrantLock`
 - W6 Spring Batch 1M-row backfill — G1 vs ZGC pause distribution [measurement planned]
@@ -804,7 +804,7 @@ Part 1 (the flagship) of the [JVM/Java Mastery series](/en/posts/jvm-java-master
 
 ---
 
-## References
+## References {#references}
 
 ### Specifications and Source
 - [Oracle — Thread.State javadoc (Java 21)](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.State.html) — definitions of the 6 states

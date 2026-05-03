@@ -22,7 +22,7 @@ tags:
 
 ## Table of contents
 
-## Intro — Even without an index, InnoDB already stores rows sorted inside a B-tree
+## Intro — Even without an index, InnoDB already stores rows sorted inside a B-tree {#intro}
 
 Imagine you get this question in an interview: "If a table has no index, how is it stored?" Two common answers:
 
@@ -48,7 +48,7 @@ This post unwinds every one of those lines with **10 diagrams + W2 10M-row [meas
 
 ---
 
-## 1. The basic units of InnoDB — Page (16KB) / Row / Index
+## 1. The basic units of InnoDB — Page (16KB) / Row / Index {#innodb-units-page-row-index}
 
 ### 1.1 page = InnoDB's **physical unit**
 
@@ -106,7 +106,7 @@ This is the **first principle** of index design: **disk seek count = tree height
 
 ---
 
-## 2. Every InnoDB table is a B-tree — the Clustered Index
+## 2. Every InnoDB table is a B-tree — the Clustered Index {#clustered-index-table-as-btree}
 
 ### 2.1 With a PK: PK = clustered index = **the table itself**
 
@@ -162,7 +162,7 @@ A direct consequence: in InnoDB, what people call a "full table scan" actually m
 
 ---
 
-## 3. Secondary Index — a separate B-tree that **points to PK**
+## 3. Secondary Index — a separate B-tree that **points to PK** {#secondary-index-pk-pointer}
 
 ### 3.1 Secondary-index leaves contain **PK values**
 
@@ -232,7 +232,7 @@ That's why "a composite index can feel almost as fast as a covering index". Sinc
 
 ---
 
-## 4. Covering Index — an index where **the answer lives in the leaf**
+## 4. Covering Index — an index where **the answer lives in the leaf** {#covering-index}
 
 ### 4.1 Definition
 
@@ -303,7 +303,7 @@ The companion post's §3.2 (single-key cursor at 0.27ms) and §3.3 (OR-split cur
 
 ---
 
-## 5. Physical walk on a B-tree — leaf doubly-linked list
+## 5. Physical walk on a B-tree — leaf doubly-linked list {#btree-walk-leaf-linked-list}
 
 ### 5.1 Leaf nodes connected via **prev / next** pointers
 
@@ -348,7 +348,7 @@ The companion §3.2's `WHERE created_at < ? ORDER BY created_at DESC LIMIT 20` p
 
 ---
 
-## 6. The four walk patterns side by side
+## 6. The four walk patterns side by side {#four-walk-patterns}
 
 Four kinds of walks can happen on a B-tree.
 
@@ -398,7 +398,7 @@ W2 Phase 3's 5 queries:
 
 ---
 
-## 7. The OFFSET ceiling — **why everything is read and discarded**
+## 7. The OFFSET ceiling — **why everything is read and discarded** {#offset-limit}
 
 ### 7.1 B-trees do **not maintain a row counter**
 
@@ -448,7 +448,7 @@ OFFSET-position vs latency, **on top of a covering index**:
 
 ---
 
-## 8. Why cursor is fast — **the binary-search primitive**
+## 8. Why cursor is fast — **the binary-search primitive** {#cursor-binary-search}
 
 ### 8.1 `WHERE created_at < ?` = the B-tree's **true primitive**
 
@@ -497,7 +497,7 @@ The companion's three-shape comparison ((a) row constructor 154ms / (b) single-k
 
 ---
 
-## 9. Multi-index — **N B-trees on the same table**
+## 9. Multi-index — **N B-trees on the same table** {#multiple-indexes}
 
 ### 9.1 5 indexes = 6 B-trees (clustered + 5)
 
@@ -587,7 +587,7 @@ A 10GB table picks up 1.3GB of indexes. Indexes occupy buffer-pool slots → red
 
 ---
 
-## 10. Logical vs physical
+## 10. Logical vs physical {#logical-vs-physical}
 
 ### 10.1 Two views of the same table
 
@@ -633,7 +633,7 @@ When this mapping breaks, EXPLAIN, the optimizer, and indexes all turn fuzzy.
 
 ---
 
-## 11. Re-defining "Full Table Scan"
+## 11. Re-defining "Full Table Scan" {#full-table-scan-redefined}
 
 ### 11.1 In InnoDB, **full table scan = clustered-index full scan**
 
@@ -665,7 +665,7 @@ Restating the implication from §2. EXPLAIN's `type=ALL` is colloquially "full t
 
 ---
 
-## 12. Big Tech cases + interview answers
+## 12. Big Tech cases + interview answers {#bigtech-references}
 
 ### 12.1 Big Tech sources (URL verified ≥ 6)
 
@@ -708,7 +708,7 @@ Restating the implication from §2. EXPLAIN's `type=ALL` is colloquially "full t
 
 ---
 
-## 13. What we learned
+## 13. What we learned {#key-takeaways}
 
 ### 13.1 Assumptions broken by measurement
 
@@ -725,7 +725,7 @@ Restating the implication from §2. EXPLAIN's `type=ALL` is colloquially "full t
 
 ---
 
-## 14. Up next — a series
+## 14. Up next — a series {#next-post}
 
 This is **post #1 of the RDB Mastery series** — the **internal index structure** angle. Next:
 
@@ -742,7 +742,7 @@ Companion posts:
 
 ---
 
-## References
+## References {#references}
 
 ### Official docs
 

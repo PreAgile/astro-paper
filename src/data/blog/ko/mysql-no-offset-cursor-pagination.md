@@ -1,6 +1,6 @@
 ---
-title: "MySQL No-Offset Cursor 페이지네이션 — 1,000만 row에서 OFFSET 1M이 171ms / Cursor 0.30ms, 그 사이의 **500배 함정** 한 줄까지 측정으로 풀어봤습니다"
-description: "1,000만 row 환경에서 OFFSET 1M이 171ms / No-Offset Cursor가 0.30ms — 약 570배 차이를 측정으로 재현했습니다. 그런데 **No-Offset 코드를 어떻게 쓰느냐**에 따라 또 한 번 500배가 갈라집니다. ANSI SQL 표준의 row constructor `(a,b)<(?,?)` 는 의미상 OR 분리 형태와 같지만 MySQL 옵티마이저가 **index range로 push down 못 합니다** (154ms — OFFSET과 거의 동일). EXPLAIN ANALYZE 의 **Filter:** vs **Covering index range scan over** 한 줄 차이가 본질입니다 — 프로덕션 회고와 학습 환경 재현을 같이 풀어봤습니다."
+title: "MySQL No-Offset Cursor 페이지네이션 — 1,000만 row에서 OFFSET 1M이 171ms / Cursor 0.30ms, 그 사이의 500배 함정 한 줄까지 측정으로 풀어봤습니다"
+description: "1,000만 row 환경에서 OFFSET 1M이 171ms / No-Offset Cursor가 0.30ms — 약 570배 차이를 측정으로 재현했습니다. 그런데 No-Offset 코드를 어떻게 쓰느냐에 따라 또 한 번 500배가 갈라집니다. ANSI SQL 표준의 row constructor `(a,b)<(?,?)` 는 의미상 OR 분리 형태와 같지만 MySQL 옵티마이저가 index range로 push down 못 합니다 (154ms — OFFSET과 거의 동일). EXPLAIN ANALYZE 의 Filter: vs Covering index range scan over 한 줄 차이가 본질입니다 — 프로덕션 회고와 학습 환경 재현을 같이 풀어봤습니다."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00Z
 featured: true
@@ -19,7 +19,7 @@ tags:
 
 ## Table of contents
 
-## 들어가며
+## 들어가며 {#intro}
 
 사장님 대시보드에 **주문 목록** 화면이 있었습니다. `LIMIT 20 OFFSET ?` — 가장 흔한 모양. 1페이지, 10페이지, 100페이지까진 빨랐습니다.
 
@@ -49,7 +49,7 @@ ANSI SQL 표준은 **row constructor** `WHERE (created_at, id) < (?, ?)` 를 가
 
 ---
 
-## 1. Context — 왜 깊은 페이지가 운영에서 진짜 문제가 되나
+## 1. Context — 왜 깊은 페이지가 운영에서 진짜 문제가 되나 {#context}
 
 ### 1.1 도메인
 
@@ -101,7 +101,7 @@ InnoDB buffer pool은 워밍업 후 측정 — 콜드 캐시 효과는 별도 �
 
 ---
 
-## 2. OFFSET의 본질적 비용 — **읽고 버리는 row 수** 가 비용
+## 2. OFFSET의 본질적 비용 — **읽고 버리는 row 수** 가 비용 {#offset-cost}
 
 먼저 OFFSET이 **얼마나** 무너지는지부터 측정으로 확인합니다.
 
@@ -162,7 +162,7 @@ PostgreSQL도 마찬가지입니다 (B+-tree 인덱스). Oracle도, SQL Server�
 
 ---
 
-## 3. No-Offset Cursor 복합키 — 같은 1M번째 위치를 **3가지 SQL 형태**로 풀어봤습니다
+## 3. No-Offset Cursor 복합키 — 같은 1M번째 위치를 **3가지 SQL 형태**로 풀어봤습니다 {#cursor-three-forms}
 
 OFFSET이 무너졌으니 cursor 페이지네이션이 답입니다 — 까진 흔한 답. 그런데 **cursor 페이지네이션을 어떻게 쓰는가** 가 진짜 본질입니다.
 
@@ -276,7 +276,7 @@ EXPLAIN ANALYZE 핵심:
 
 ---
 
-## 4. 왜 row constructor가 push down 못 하는가 — MySQL 옵티마이저의 구조적 한계
+## 4. 왜 row constructor가 push down 못 하는가 — MySQL 옵티마이저의 구조적 한계 {#row-constructor-pushdown-failure}
 
 ### 4.1 EXPLAIN ANALYZE의 **Filter:** vs **range scan over** — 한 줄 차이가 본질
 
@@ -338,7 +338,7 @@ PostgreSQL은 이 변환을 **명시적으로** 구현 — composite index 가 �
 
 ---
 
-## 5. 운영 적용 — Cursor 토큰화 + 강제 룰 6가지
+## 5. 운영 적용 — Cursor 토큰화 + 강제 룰 6가지 {#production-cursor-tokenization}
 
 ### 5.1 표준 SQL 형태
 
@@ -431,7 +431,7 @@ fi
 
 ---
 
-## 6. 빅테크 사례 — Cursor 페이지네이션이 표준인 이유
+## 6. 빅테크 사례 — Cursor 페이지네이션이 표준인 이유 {#bigtech-references}
 
 ### 6.1 Stripe — Cursor 표준의 원형
 
@@ -491,7 +491,7 @@ Hibernate / JPA 컨텍스트에서 keyset pagination 구현법까지 자세히. 
 
 ---
 
-## 7. 운영 실패 시나리오 (3 AM 시나리오)
+## 7. 운영 실패 시나리오 (3 AM 시나리오) {#failure-scenarios}
 
 ### 7.1 시나리오 1 — 운영자가 **깊은 페이지 OFFSET**으로 진입
 
@@ -535,7 +535,7 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 
 ---
 
-## 8. 무엇을 배웠나
+## 8. 무엇을 배웠나 {#key-takeaways}
 
 ### 8.1 측정으로 깨진 가정들
 
@@ -560,27 +560,29 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 
 ---
 
-## 9. 면접 답변
+## 9. 정리 — 이 글을 한 번 더, 자기 말로 {#recap}
 
-### Q1. "페이지네이션 어떻게 구현하셨나요?"
+이 글을 다 읽은 누군가가 "그래서 이게 뭐였지?" 묻는다면 — 측정으로 풀었던 답을 자기 말로 정리해보면 다음과 같습니다.
 
-> "Cursor 복합키 (created_at, id) OR 분리 형태로 구현했습니다. 1,000만 row에서 OFFSET 1M이 171ms / No-Offset이 0.30ms — **약 570배 차이** ([실측 — Java/Spring]). Stripe / Notion / Slack 같은 글로벌 API가 모두 cursor 표준이라 그쪽으로. 운영에선 cursor를 base64 + HMAC 토큰으로 인코딩해서 **내부 구조를 클라이언트에 노출 안 함**."
+### Q. "OFFSET 페이지네이션이 1,000만 row 환경에서 무너지는 진짜 이유는?"
 
-### Q2. "왜 row constructor `(a, b) < (?, ?)` 안 쓰셨나요?"
+OFFSET 의 비용은 **읽고 버리는 row 수** 와 정확히 비례합니다 — [실측] OFFSET 1M = 171ms (rows scanned 1,000,020), OFFSET 5M = 765ms. 인덱스가 있어도, covering 이어도 마찬가지. **InnoDB 의 B+-tree 인덱스가 *서수 위치 메타데이터를 가지지 않기* 때문**에 N번째 row 로 직접 점프할 수 없고, 1번째부터 N번째까지 *순차로 읽고 버리는* 방법밖에 없습니다. PostgreSQL · Oracle · SQL Server 도 같은 한계 — RDBMS 표준 인덱스 구조의 본질입니다. 그래서 cursor 페이지네이션이 *모든 주요 DB 의 표준 답*.
 
-> "MySQL 옵티마이저가 row constructor를 **index range로 push down 못 하는** 알려진 한계가 있습니다. EXPLAIN ANALYZE를 직접 찍어보면 `Filter:` 단계로 적용되어서 1M row를 다 scan합니다. 같은 의미의 OR 분리 형태는 `Covering index range scan over` 로 정확히 push down — rows=20만 읽음. **의미는 같은데 latency가 154ms / 0.30ms — 약 500배 차이**. MySQL Bug #16247이 19년째 열려 있고, PostgreSQL은 정상 동작합니다."
+### Q. "row constructor `(a,b) < (?,?)` 와 OR 분리 형태가 같은 의미인데 왜 500배 차이가 나나요?"
 
-### Q3. "단순 cursor `created_at < ?` 안 쓰는 이유는?"
+수학적으로는 lexicographic 비교 — 동일한 row 집합을 반환합니다. 그런데 **MySQL 옵티마이저가 row constructor 를 *index range scan 으로 push down 못 하는* 한계** 가 있습니다 — Bug #16247 이 19년째 open. EXPLAIN ANALYZE 한 줄로 검증되는 차이: row constructor 는 `Filter:` 단계로 1,000,000 row 전수 스캔 (154ms), OR 분리는 `Covering index range scan over` 로 rows=20 만 스캔 (0.30ms). PostgreSQL 은 *같은 SQL* 을 정상 push down — **DB 별 옵티마이저 구현이 ANSI SQL 표준 의미를 *어떻게 해석하느냐* 가 본질**.
 
-> "성능은 거의 같습니다 (0.27 vs 0.30ms). 하지만 **같은 created_at 의 row가 다수** 인 경우 — 대량 INSERT batch 같은 — single column cursor는 row를 빠뜨립니다. 예: 같은 ms에 100건 INSERT 됐는데 그 ms를 cursor로 잡으면 다음 페이지에서 80건 누락. OR 분리는 (created_at, id) 둘 다 비교해서 **정확**. 운영 안전성 위해 OR 분리가 표준."
+### Q. "단순 cursor `created_at < ?` 와 OR 분리 형태 — 운영 표준은 어느 쪽?"
 
-### Q4. "OFFSET 페이지네이션 절대 안 쓰나요?"
+성능은 거의 동일합니다 — 0.27 vs 0.30ms. 차이는 *운영 안전성*: 같은 `created_at` 의 row 가 *동시각에 다수* 존재할 때 (대량 INSERT batch / 마이그레이션 등) 단순 cursor 는 *row 누락* 발생. 같은 ms 에 100건 INSERT 됐는데 그 ms 를 cursor 로 잡으면 다음 페이지에서 일부가 빠집니다. **OR 분리는 (created_at, id) 둘 다 비교해서 *정확한 페이지 경계*** 를 보장. 동시각 row 가 *희소하다고 증명된* 도메인이 아닌 한, 운영 표준은 OR 분리.
 
-> "작은 OFFSET (≤ 1,000)은 OK입니다 — [실측] 0.443ms. **내부 admin**이나 **sample 1페이지** 정도엔 SQL이 단순해서 cursor보다 낫습니다. 사용자 노출 **깊은 페이지**엔 절대 X — 5M OFFSET이 765ms 나오는 게 측정으로 확인됐고, OFFSET 비용이 **읽고 버리는 row 수에 정확히 비례** 하는 건 InnoDB 인덱스 구조상 **건너뛸 수가 없는** 본질적 한계입니다."
+### Q. "OFFSET 페이지네이션을 *완전히* 안 쓰는 게 정답인가요?"
+
+[실측] 으로 본 결론: **작은 OFFSET (≤ 1,000) 은 OK** — 0.443ms 로 충분히 빠름. 내부 admin / sample 1페이지 처럼 *제한된 사용처* 엔 SQL 단순함이 cursor 보다 가독성 좋음. 단 사용자 노출 *깊은 페이지* 엔 절대 X — 5M OFFSET = 765ms. 본 글의 결론: ADR 룰로 **"OFFSET 사용 시 N ≤ 1,000 만 허용"** 명시 + PR 차단.
 
 ---
 
-## 10. 다음 글에서
+## 10. 다음 글에서 {#next-post}
 
 본 측정은 EXPLAIN ANALYZE 의 단일 쿼리 latency만 봤습니다. 운영에서는 다음 축들도 같이 봐야 합니다.
 
@@ -596,7 +598,7 @@ PR 작성자가 ANSI SQL 표준이라 **맞다고 생각하고** 작성. 의미�
 
 ---
 
-## 참고자료
+## 참고자료 {#references}
 
 - [Stripe API — Pagination](https://stripe.com/docs/api/pagination) — cursor 표준의 원형
 - [Notion API — Pagination](https://developers.notion.com/reference/intro#pagination) — opaque cursor + has_more
