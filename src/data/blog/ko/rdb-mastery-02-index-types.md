@@ -48,7 +48,7 @@ tags:
 
 이 모든 **축** 을 1,000만 row 환경에서 직접 만들고 측정해서 — **언제 무엇을 고를지** 를 결정으로 정리한 것이 본 글입니다.
 
-- 본 글의 입력 자산: 5종 인덱스 cardinality 측정 + Q1~Q5 Before/After + Q2 역설 + 인덱스 storage 1.3GB + 쓰기 latency 5~6배.
+- 본 글의 입력 자산: 5종 인덱스 cardinality 측정 + Q1~Q5 Before/After + Q2 역설 + 인덱스 storage 1.3GB + 쓰기 증폭 (구조상 N+1 B-tree 갱신 — 실제 latency 는 buffer pool/redo/change buffer 영향으로 선형 비례 아님).
 - 자매글 [MySQL No-Offset Cursor 페이지네이션](/posts/mysql-no-offset-cursor-pagination/) 의 cursor 가 본 글의 3장 composite + leftmost prefix 위에서 동작하는 한 가지 패턴.
 - 본 글의 깊이: **L2-L3** (RDB Mastery 시리즈 2편 — **종류별 trade-off + 측정 + 빅테크 운영 + 정리 질문**).
 
@@ -766,7 +766,7 @@ graph TB
 
 #### Q. "테이블에 인덱스 N개 추가 = 쓰기 비용 N배인가요?"
 
-이 글이 측정으로 보여준 것은 정확히 **N+1배**. clustered index 1개 (테이블 자체) + secondary index N개 = **B-tree N+1개** 가 동시에 존재. INSERT 1건 = 모든 B-tree 의 leaf 갱신. 본 시리즈 측정에서 인덱스 5종 추가 후 INSERT 비용은 이론상 6배. 그래서 운영의 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** (Bulk Data Loading 권장). storage 도 영향 — 1,000만 row 에 5종 인덱스 = 약 1.3GB 추가 (10GB 테이블 대비 +13%) → buffer pool 점유 → clustered hit 율까지 영향. 그래서 **읽기 빠르게 한 인덱스가 쓰기 / storage / 메모리 모두 비용**. **읽기 / 쓰기 비율 + 쓰기 빈도 + storage 예산** 모두 따져서 결정. 인덱스 다이어트 (sys.schema_unused_indexes / invisible index) 가 운영 표준 ([실측 — Java/Spring]).
+[구조적 사실] clustered index 1개 (테이블 자체) + secondary index N개 = **B-tree N+1개** 가 동시에 존재. INSERT 1건 = 모든 B-tree 의 leaf 갱신 — 갱신 *대상* 이 N+1개. [가설/추정] 다만 *실제 쓰기 latency* 는 buffer pool / redo log / batch size / change buffer 영향으로 *선형 배수와 다를 수 있음* — 본 시리즈는 인덱스 5종 환경에서의 *구조적 갱신 대상* 만 확인. [운영 권장] 그래서 표준 패턴이 **적재 시 인덱스 비활성 → 적재 후 활성** (Bulk Data Loading 권장). [실측] storage 영향 — 1,000만 row 에 5종 인덱스 = 약 1.3GB 추가 (10GB 테이블 대비 +13%) → buffer pool 점유 → clustered hit 율까지 영향. **읽기 빠르게 한 인덱스가 쓰기 / storage / 메모리 모두 비용**. *읽기 / 쓰기 비율 + 쓰기 빈도 + storage 예산* 모두 따져서 결정. 인덱스 다이어트 (sys.schema_unused_indexes / invisible index) 가 운영 표준.
 
 ---
 
@@ -832,4 +832,4 @@ graph TB
 - [Vlad Mihalcea — MySQL 8 Functional Indexes](https://vladmihalcea.com/mysql-8-functional-indexes/)
 - [Percona — InnoDB / Index 운영](https://www.percona.com/blog/category/innodb/)
 
-본 측정의 raw 데이터는 별도 학습 노트에 보관 (포트폴리오 repo 내부). 1,000만 row 환경 / 인덱스 5종 cardinality / Q1~Q5 Before/After / Q2 역설 / 쓰기 latency 5~6배 / storage 1.3GB.
+본 측정의 raw 데이터는 별도 학습 노트에 보관 (포트폴리오 repo 내부). 1,000만 row 환경 / 인덱스 5종 cardinality / Q1~Q5 Before/After / Q2 역설 / 쓰기 증폭 (구조상 N+1 B-tree 갱신 — 실제 latency 는 buffer pool/redo/change buffer 영향으로 선형 비례 아님) / storage 1.3GB.

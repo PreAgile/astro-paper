@@ -48,7 +48,7 @@ Two common answers.
 
 This post walks every one of those decision axes by building real indexes on a 10M-row table and measuring — concluding **when to pick what**.
 
-- Inputs: cardinality across 5 indexes + Q1~Q5 Before/After + Q2 paradox + index storage 1.3GB + write latency 5~6x.
+- Inputs: cardinality across 5 indexes + Q1~Q5 Before/After + Q2 paradox + index storage 1.3GB + write amplification (structurally N+1 B-tree updates — actual latency is not strictly linear due to buffer pool/redo/change buffer).
 - Companion post [MySQL No-Offset Cursor Pagination](/en/posts/mysql-no-offset-cursor-pagination/) — its cursor is one application of the Section 3 composite + leftmost-prefix rule from this post.
 - Depth: **L2-L3** (RDB Mastery series, post #2 — **trade-offs by index type + measurements + Big Tech operations + recap questions**).
 
@@ -564,7 +564,7 @@ The bill that landed alongside the read-side speedups after adding the five inde
 | Cost item | Measured | Notes |
 |---|---|---|
 | **Storage added** | **1.3GB** | All five indexes combined (+13% on a 10GB table) |
-| **Write latency** | **5~6x slower** | Each INSERT updates 6 B-trees (1 clustered + 5 secondary) |
+| **Write latency** | **structurally 6 B-tree updates per INSERT (actual latency varies)** | Each INSERT updates 6 B-trees (1 clustered + 5 secondary) |
 | **Buffer pool occupancy** | 1.3GB / pool size | Index leaves take a share of the pool → impacts clustered hit ratio |
 
 Breakdown:
@@ -592,7 +592,7 @@ Cost vs index count (this series' measurement reference):
        all B-trees                      buffer pool pressure + clustered hit ratio
 
   W2 [Measured]: load at 187K rows/s with zero indexes (Phase 2)
-   → reloading with five indexes is theoretically 5~6x slower (6 B-tree updates per INSERT).
+   → reloading with five indexes is theoretically structurally 6 B-tree updates per INSERT (actual latency varies) (6 B-tree updates per INSERT).
    That is why the bulk-load pattern is **disable indexes during load → enable after load**.
 ```
 
@@ -761,7 +761,7 @@ What this article catalogued as use cases: **Multi-valued** (8.0+) sits on a JSO
 
 #### Q. "Adding N indexes to a table — is the write cost N× higher?"
 
-What this article showed by measurement is that the cost is exactly **N+1×**. One clustered index (the table itself) + N secondary = **N+1 B-trees** coexisting. Each INSERT updates every B-tree's leaf. In this article's measurements, INSERT cost with five indexes is theoretically 6×. That's why the standard pattern for bulk loads is **disable indexes during load → enable after** (Bulk Data Loading recommendation). Storage matters too — five indexes on 10M rows ≈ 1.3GB extra (+13% on a 10GB table) → buffer-pool occupancy → clustered-index hit ratio degrades. So **the index that speeds up reads costs writes, storage, and memory** — read/write ratio + write frequency + storage budget all factor in. **Index dieting** (sys.schema_unused_indexes / invisible indexes) is the operational standard ([Measured — Java/Spring]).
+[Structural fact] One clustered index (the table itself) + N secondary = **N+1 B-trees** coexisting. Each INSERT updates every B-tree's leaf — the *number of update targets* is N+1. [Hypothesis] However, the *actual write latency* depends on buffer pool / redo log / batch size / change buffer effects, so it does *not* scale linearly — this article confirms the *structural update target count* in a five-index environment, not a linear latency multiplier. [Operational recommendation] That's why the standard pattern for bulk loads is **disable indexes during load → enable after** (Bulk Data Loading recommendation). [Measured] Storage impact — five indexes on 10M rows ≈ 1.3GB extra (+13% on a 10GB table) → buffer-pool occupancy → clustered-index hit ratio degrades. So **the index that speeds up reads costs writes, storage, and memory** — read/write ratio + write frequency + storage budget all factor in. **Index dieting** (sys.schema_unused_indexes / invisible indexes) is the operational standard.
 
 ---
 
@@ -772,13 +772,13 @@ What this article showed by measurement is that the cost is exactly **N+1×**. O
 - "Every MySQL index is a B-tree" → **Six types — Hash / Spatial / Full-text / Multi-valued / Functional all exist**
 - "Adding an index always helps" → **The Q2 paradox (0.66ms → 13.5ms) — the optimizer can pick wrong**
 - "Indexes are also useful for boolean / state columns" → **A standalone index on cardinality 4 is nearly worthless. Trailing-column-in-composite only**
-- "An index is one-time work" → **Storage 1.3GB + write cost 5~6× + buffer pool pressure — ongoing cost**
+- "An index is one-time work" → **Storage 1.3GB + structural write amplification (N+1 B-trees) + buffer pool pressure — ongoing cost**
 - "JSON columns can't be indexed" → **Multi-valued (8.0+) and Functional (8.0.13+) make it possible**
 - "The optimizer is always right" → **Statistics-driven cost-based — drift from reality means the wrong plan**
 
 ### 13.2 The single line
 
-> **MySQL indexing has six types + four shapes inside the B-tree (clustered/secondary/covering/composite) + cardinality as the decision axes. On a 10M-row environment, [measured] Q3 covering 2,476× / Q5 composite 577× / Q2 paradox (0.66ms → 13.5ms) / write cost 5~6× / storage 1.3GB. Indexes are not free — the index that speeds up reads slows down writes. Every new index must clear three gates: measured Before/After EXPLAIN ANALYZE + measured write-latency impact + ADR record — all three, before merge.**
+> **MySQL indexing has six types + four shapes inside the B-tree (clustered/secondary/covering/composite) + cardinality as the decision axes. On a 10M-row environment, [measured] Q3 covering 2,476× / Q5 composite 577× / Q2 paradox (0.66ms → 13.5ms) / structural write amplification (N+1 B-trees) / storage 1.3GB. Indexes are not free — the index that speeds up reads slows down writes. Every new index must clear three gates: measured Before/After EXPLAIN ANALYZE + measured write-latency impact + ADR record — all three, before merge.**
 
 ---
 
