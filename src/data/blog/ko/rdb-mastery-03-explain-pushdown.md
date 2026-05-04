@@ -425,7 +425,7 @@ EXPLAIN ANALYZE 출력 [실측 — Java/Spring]:
 graph TB
     subgraph "(a) Row Constructor — Push Down 실패"
         A1["Limit: 20"]
-        A2["Filter: ((created_at, id) < (?, ?))<br/>← 1M 번 평가"]
+        A2["Filter: ((created_at, id) &lt; (?, ?))<br/>← 1M 번 평가"]
         A3["Covering Index Scan reverse<br/>← rows=1,000,020 (전체 leaf walk)"]
         A1 --> A2
         A2 --> A3
@@ -908,8 +908,8 @@ No-Offset 페이지네이션 결정 사항의 4.3장 룰을 일반화:
 | 출처 | 핵심 | 본 글의 어느 장과 연결 |
 |---|---|---|
 | [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | type / rows / Filter 시각화로 인덱스 동작 검증 | 2장 연산자 트리, 10장 한 줄씩 읽기 |
-| [토스 SLASH22 — Broker issue / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) | JPA OptimisticLock + MVCC 동작 측정 | 11장 운영 진단 |
-| [토스 SLASH24 — Next 코어뱅킹](https://haon.blog/article/toss-slash/next-core-banking/) | Oracle→MySQL 전환 + 옵티마이저 차이 | 7장 PostgreSQL 비교 (DB 별 옵티마이저) |
+| [토스 SLASH22 — 애플 한 주가 고객에게 전달되기까지](https://toss.im/slash-22/sessions/2-7) | JPA OptimisticLock + MVCC 동작 측정 | 11장 운영 진단 |
+| [토스 SLASH24 — Next 코어뱅킹, MSA 와 MySQL 로 여는 평생 무료 환전 시대](https://toss.im/slash-24/sessions/9) | Oracle→MySQL 전환 + 옵티마이저 차이 | 7장 PostgreSQL 비교 (DB 별 옵티마이저) |
 | [Vlad Mihalcea — Database query optimization](https://vladmihalcea.com/) | Hibernate + EXPLAIN 운영 패턴 | 전반 |
 | [Vlad Mihalcea — Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | cardinality / histogram | 9.3장 통계 |
 | [Use The Index, Luke! — Operations](https://use-the-index-luke.com/sql/explain-plan) | EXPLAIN type 컬럼 의미 | 2장 연산자 |
@@ -1001,8 +1001,8 @@ No-Offset 페이지네이션 결정 사항의 4.3장 룰을 일반화:
 ### 빅테크 / 운영
 
 - [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) — type / rows / Filter 시각화
-- [토스 SLASH22 — Broker issue / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) — 동시성 + MVCC 측정
-- [토스 SLASH24 — Next 코어뱅킹](https://haon.blog/article/toss-slash/next-core-banking/) — Oracle→MySQL 옵티마이저 차이
+- [토스 SLASH22 — 애플 한 주가 고객에게 전달되기까지](https://toss.im/slash-22/sessions/2-7) — 동시성 + MVCC 측정
+- [토스 SLASH24 — Next 코어뱅킹, MSA 와 MySQL 로 여는 평생 무료 환전 시대](https://toss.im/slash-24/sessions/9) — Oracle→MySQL 옵티마이저 차이
 - [카카오페이 — JPA Transactional readOnly](https://tech.kakaopay.com/post/jpa-transactional-bri/) — read 최적화
 
 ### 교과서급

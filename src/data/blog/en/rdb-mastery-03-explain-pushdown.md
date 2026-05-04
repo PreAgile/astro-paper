@@ -424,7 +424,7 @@ Reading line by line:
 graph TB
     subgraph "(a) Row Constructor — Push Down Fails"
         A1["Limit: 20"]
-        A2["Filter: ((created_at, id) < (?, ?))<br/>← evaluated 1M times"]
+        A2["Filter: ((created_at, id) &lt; (?, ?))<br/>← evaluated 1M times"]
         A3["Covering Index Scan reverse<br/>← rows=1,000,020 (full leaf walk)"]
         A1 --> A2
         A2 --> A3
@@ -907,8 +907,8 @@ Generalizing the No-Offset pagination decision's Section 4.3:
 | Source | Highlight | Linked section |
 |---|---|---|
 | [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | Visualize type / rows / Filter | Section 2 operator tree, Section 10 line-by-line |
-| [Toss SLASH22 — Broker / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) | JPA OptimisticLock + MVCC measurements | Section 11 operational diagnosis |
-| [Toss SLASH24 — Next core banking](https://haon.blog/article/toss-slash/next-core-banking/) | Oracle→MySQL transition + optimizer differences | Section 7 PostgreSQL comparison (DB-specific optimizers) |
+| [Toss SLASH22 — Delivering one Apple share to the customer](https://toss.im/slash-22/sessions/2-7) | JPA OptimisticLock + MVCC measurements | Section 11 operational diagnosis |
+| [Toss SLASH24 — Next core banking with MSA and MySQL](https://toss.im/slash-24/sessions/9) | Oracle→MySQL transition + optimizer differences | Section 7 PostgreSQL comparison (DB-specific optimizers) |
 | [Vlad Mihalcea — Database query optimization](https://vladmihalcea.com/) | Hibernate + EXPLAIN operational patterns | Throughout |
 | [Vlad Mihalcea — Index Selectivity](https://vladmihalcea.com/index-selectivity-cardinality-postgresql-mysql/) | cardinality / histograms | Section 9.3 statistics |
 | [Use The Index, Luke! — Operations](https://use-the-index-luke.com/sql/explain-plan) | EXPLAIN type column meaning | Section 2 operators |
@@ -1000,8 +1000,8 @@ Companion single posts:
 ### Big-tech / Operations
 
 - [LINE Engineering — VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) — visualize type / rows / Filter
-- [Toss SLASH22 — Broker / concurrency / network latency](https://haon.blog/article/toss-slash/broker-issue-concurrency-and-network-latency/) — concurrency + MVCC measurements
-- [Toss SLASH24 — Next core banking](https://haon.blog/article/toss-slash/next-core-banking/) — Oracle→MySQL optimizer differences
+- [Toss SLASH22 — Delivering one Apple share to the customer](https://toss.im/slash-22/sessions/2-7) — concurrency + MVCC measurements
+- [Toss SLASH24 — Next core banking with MSA and MySQL](https://toss.im/slash-24/sessions/9) — Oracle→MySQL optimizer differences
 - [Kakao Pay — JPA Transactional readOnly](https://tech.kakaopay.com/post/jpa-transactional-bri/) — read-side optimization
 
 ### Textbook-grade
