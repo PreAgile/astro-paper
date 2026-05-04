@@ -379,7 +379,7 @@ const nextPost =
         const mermaidId = diagram.getAttribute('data-mermaid-id');
         const code = mermaidCodes.get(mermaidId);
         if (code) {
-          const newId = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+          const newId = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
           try {
             // Remove %%{init...}%% directives to use our theme
             const cleanCode = code.replace(/%%\{init:.*?\}%%/g, '').trim();
@@ -401,7 +401,7 @@ const nextPost =
     for (const element of mermaidElements) {
       const codeEl = element.querySelector("code");
       const code = codeEl ? codeEl.textContent || "" : element.textContent || "";
-      const id = `mermaid-${Math.random().toString(36).substr(2, 9)}`;
+      const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
 
       try {
         // Remove %%{init...}%% directives to use our theme
