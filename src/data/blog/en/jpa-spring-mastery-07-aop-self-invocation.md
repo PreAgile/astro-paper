@@ -2,7 +2,6 @@
 author: Myeonsoo Kim
 pubDatetime: 2026-05-03T22:00:00.000Z
 title: "[JPA + Spring Mastery 07] Spring AOP self-invocation — the real reason @Transactional doesn't work, decomposed down to TransactionInterceptor.invoke 6 stages"
-slug: jpa-spring-mastery-07-aop-self-invocation
 featured: true
 draft: false
 tags:

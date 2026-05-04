@@ -2,7 +2,6 @@
 author: 김면수
 pubDatetime: 2026-05-03T23:00:00.000Z
 title: "[JPA + Spring Mastery 01] 1차 캐시 · flush · 트랜잭션 라이프사이클 — readOnly 가 줄이는 set_option, dirty checking 의 진짜 비용"
-slug: jpa-spring-mastery-01-persistence-context-flush
 featured: true
 draft: false
 tags:

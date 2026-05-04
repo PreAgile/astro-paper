@@ -2,7 +2,6 @@
 author: 김면수
 pubDatetime: 2026-05-03T22:30:00.000Z
 title: "[JPA + Spring Mastery 08] 트랜잭션 분리 패턴 — Saga / Outbox / REQUIRES_NEW, 학술 기원부터 EXP-09b 9 시나리오 실측까지"
-slug: jpa-spring-mastery-08-tx-split-saga-outbox
 featured: true
 draft: false
 tags:

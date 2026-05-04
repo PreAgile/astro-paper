@@ -2,7 +2,6 @@
 author: Myeonsoo Kim
 pubDatetime: 2026-05-03T22:30:00.000Z
 title: "[JPA + Spring Mastery 08] Transaction Split Patterns — Saga / Outbox / REQUIRES_NEW, from academic origins to a 9-scenario EXP-09b measurement"
-slug: jpa-spring-mastery-08-tx-split-saga-outbox
 featured: true
 draft: false
 tags:

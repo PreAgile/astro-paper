@@ -2,7 +2,6 @@
 author: Myeonsoo Kim
 pubDatetime: 2026-05-03T23:00:00.000Z
 title: "[JPA + Spring Mastery 01] L1 Cache · flush · Transaction Lifecycle — what readOnly really shaves off, dirty checking's true cost"
-slug: jpa-spring-mastery-01-persistence-context-flush
 featured: true
 draft: false
 tags:

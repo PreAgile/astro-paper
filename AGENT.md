@@ -504,7 +504,6 @@ src/data/blog/
 author: 김면수
 pubDatetime: 2024-01-15T10:00:00Z
 title: "제목"
-slug: my-post-slug
 featured: true
 draft: false
 tags:
@@ -514,6 +513,12 @@ description: |
   한두 문장으로 핵심 내용 요약
 ---
 ```
+
+> **중요: `slug:` 필드는 절대 frontmatter 에 넣지 않습니다.**
+>
+> Astro 5 의 `glob()` 로더는 frontmatter 에 `slug:` 가 있으면 그 값을 파일 ID 로 강제합니다 (`node_modules/astro/dist/content/loaders/glob.js` 의 `generateIdDefault` 참조). 이 블로그는 `ko/`/`en/` 두 폴더에 같은 글을 두는 다국어 구조라서, 양쪽에 같은 `slug:` 가 박히면 두 파일이 동일한 ID 로 충돌합니다 (`Duplicate id "..."` 워닝, 그리고 `id.startsWith("ko/")` 같은 라우팅 필터가 글을 누락시키는 부작용).
+>
+> ID 는 파일 경로(`ko/my-post`, `en/my-post`)에서 자동으로 도출되므로 frontmatter 에 따로 적을 필요가 없습니다. URL 슬러그를 바꾸고 싶으면 **파일명** 자체를 바꾸세요.
 
 ---
 

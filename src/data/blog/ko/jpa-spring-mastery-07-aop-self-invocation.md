@@ -2,7 +2,6 @@
 author: 김면수
 pubDatetime: 2026-05-03T22:00:00.000Z
 title: "[JPA + Spring Mastery 07] Spring AOP self-invocation — @Transactional 이 작동하지 않는 진짜 이유, TransactionInterceptor.invoke 6단계까지 분해"
-slug: jpa-spring-mastery-07-aop-self-invocation
 featured: true
 draft: false
 tags:
