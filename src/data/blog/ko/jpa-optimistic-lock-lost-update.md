@@ -77,11 +77,11 @@ public void incrementWithoutVersion(Long ruleId) {
 
 100 worker 가 동시 호출. 결과는 `priority < 100` — Lost Update. 두 worker 가 *같은 priority 값을 SELECT* 한 후 *같은 next* 로 UPDATE 하면 한 worker 의 increment 가 사라집니다.
 
-**[측정 후 갱신 — `[실측]` 라벨로 결과 표 채움]**
+**[실측 — Java/Spring Stage 2 / 2026-05-04 23:00 KST]**
 
 | Scenario | totalMs | success | finalPriority | loss |
 |---|---:|---:|---:|---:|
-| S1 baseline | TBD | 100 | TBD (예상 < 100) | TBD |
+| S1 baseline | **137** | 100 | **26** | **74 (조용한 Lost!)** |
 
 → 핵심: *모든 worker 가 success* 인데 *priority 가 100 미만*. 사용자 입장에선 "코드 정상 동작" 처럼 보이지만 데이터가 어긋남. 운영에서 *재현 불가능한* 부류의 버그.
 
@@ -125,7 +125,7 @@ UPDATE auto_reply_rule
 
 | Scenario | success | optLockFail | finalPriority |
 |---|---:|---:|---:|
-| S2 detect | TBD | TBD | TBD (예상 < 100) |
+| S2 detect | **14** | **86** | **14** (감지 OK, 86개 작업 손실) |
 
 → 핵심: 정합성은 OK 인데 *처리량* 이 낮음. 100 worker 중 일부만 성공.
 
@@ -159,7 +159,7 @@ public void incrementWithRetryNoBackoff(Long ruleId) {
 
 | Scenario | success | optLockFail | finalPriority | totalMs |
 |---|---:|---:|---:|---:|
-| S3 stampede | TBD | TBD | TBD (예상 < 100) | TBD |
+| S3 stampede | **29** | **71** | **29** (재충돌로 progress 부족) | **200** |
 
 <details>
 <summary><b>(심도) AWS Architecture Blog — Exponential Backoff and Jitter</b> (펼치기)</summary>
@@ -202,7 +202,9 @@ public void incrementWithRetryJitter(Long ruleId) {
 
 | Scenario | success | optLockFail | finalPriority | totalMs |
 |---|---:|---:|---:|---:|
-| S4 jitter | TBD | TBD | 100 (기대) | TBD |
+| S4 jitter | **50** | **50** | **50** ⚠️ | **321** |
+
+> **가설 부분 충족**: jitter 가 retry 분산해 50 도달 (S3 의 29 → 1.7x). 단 가설 H4 (priority=100) 는 ❌ — workers=100 high contention + retry 5 한도 환경에서는 여전히 부족. workers=20 또는 retry=10 환경에서 100 도달 가능성 추정.
 
 → 핵심: **단순 retry ≠ 안전**. *jitter 가 있는 retry 만* 안전. 이게 시니어 면접에서 갈리는 지점.
 

@@ -79,16 +79,25 @@ DB:       MySQL 8.0.44 (Docker, 3307)
 
 ## 3. 6 시나리오 결과 {#results}
 
-| Scenario | elapsedMs | UPDATE SQL | snapshot? |
-|---|---:|---|---|
-| **S1 dirty checking (readOnly=false)** | TBD | 모든 컬럼 SET | ✅ |
-| **S2 readOnly=true** | TBD | (UPDATE 없음) | ❌ |
-| **S3 no @DynamicUpdate** | TBD | 모든 컬럼 SET | ✅ |
-| **S4 @DynamicUpdate** | TBD | 변경 컬럼만 SET | ✅ + Plan Cache 증가 |
-| **S5 @Modifying bulk JPQL** | TBD | 1 SQL | ❌ |
-| **S6 raw JDBC** | TBD (baseline) | 1 SQL | ❌ |
+**[실측 — Java/Spring Stage 2 / 2026-05-04 23:00 KST]** 10000 row update:
 
-**[측정 후 갱신 — 실측 표]**
+| Scenario | elapsedMs | vs S6 baseline | UPDATE SQL | snapshot? |
+|---|---:|---:|---|---|
+| **S1 dirty checking (readOnly=false)** | **3450** | **111x** | 모든 컬럼 SET | ✅ |
+| **S2 readOnly=true** | **26** | 0.84x | (UPDATE 없음) | ❌ |
+| **S3 no @DynamicUpdate** | **3117** | **101x** | 모든 컬럼 SET | ✅ |
+| **S4 @DynamicUpdate** | **2123** | **68x** | 변경 컬럼만 SET | ✅ + Plan Cache 증가 |
+| **S5 @Modifying bulk JPQL** | **41** | 1.32x | 1 SQL | ❌ |
+| **S6 raw JDBC (baseline)** | **31** | 1.0x | 1 SQL | ❌ |
+
+**S7 메모리 (1만 entity insert)**:
+
+| 패턴 | heap 증가 | 절감 |
+|---|---:|---:|
+| clear 없음 | **+21,530 KB** | — |
+| clear() 50마다 | **+15,454 KB** | **-28%** |
+
+> **핵심 발견**: dirty checking 자체가 dominant 비용. S1 vs S2 = **132x** (3450→26ms) — readOnly 면 snapshot 안 만들고 flush 도 안 함. `@DynamicUpdate` 1.5x 향상 (S3 → S4) 이지만 raw JDBC 대비 여전히 68x 느림. bulk update 면 `@Modifying` JPQL 이 raw JDBC 와 동급 (41 vs 31ms) — 단 영속성 컨텍스트 비일관 위험으로 `clearAutomatically=true` 필수.
 
 ---
 

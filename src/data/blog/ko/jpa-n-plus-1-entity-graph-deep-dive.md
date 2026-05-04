@@ -66,11 +66,18 @@ public void s1NPlusOne() {
 
 → 운영에선 사장님 100 명, 매장 1000 개, 룰 5000 개면 *수천 SQL* 한 번 호출에 발사.
 
-[측정 후 갱신 — Hibernate Statistics 의 prepareStatementCount]:
+**[실측 — Java/Spring Stage 2 / 2026-05-04 23:01 KST]** 20 owner × 5 merchant × 3 rule × 4 history 도메인:
 
-| Scenario | prep | queries |
-|---|---:|---:|
-| S1 N+1 baseline | TBD (예상 ~121) | TBD |
+| Scenario | prepStmts | queries | rows | aux | elapsedMs |
+|---|---:|---:|---:|---:|---:|
+| **S1 N+1 baseline** | **121** | 1 | 20 | 300 | **73** |
+| S2 JOIN FETCH 1-level | **1** | 1 | 20 | 100 | **10** (7x 빠름) |
+| S3 MultipleBagFetchException | (예외) | — | — | — | — |
+| **S4 `@OneToOne` non-owning LAZY** | **1201** | 1 | 1200 | 0 | **384** |
+| S5 JOIN FETCH + Pagination (HHH000104) | 1 | 1 | 5 | 0 | 5 |
+| S6 BatchSize=10 | **21** | 1 | 20 | 100 | 10 |
+
+> S1 의 121 prep 분해: 1 main + 20 merchant + 60 rule + 40 history aux ≈ 121 — *깊이마다 multiplicative 증가*. S4 `@OneToOne` non-owning LAZY 는 metadata 변수를 안 써도 1200x 추가 SELECT (null 확인용). `@BatchSize=10` 이 121→21 로 5.7x 감소 — 정석은 *한 collection 만 JOIN FETCH + 나머지 BatchSize*.
 
 ---
 

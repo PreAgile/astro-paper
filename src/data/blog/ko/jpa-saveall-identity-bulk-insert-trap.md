@@ -74,11 +74,14 @@ spring:
 기대: 50 row 가 한 INSERT 에 묶여서 200 SQL.
 실제: **1만 SQL** (Hibernate Statistics 의 prepareStatementCount=10000).
 
-[측정 후 갱신 — 본 EXP 의 prepStmts]:
+**[실측 — Java/Spring Stage 2 / 2026-05-04 23:01 KST]** 1만 row insert 4 전략:
 
-| Strategy | elapsedMs | prepStmts | 비고 |
-|---|---:|---:|---|
-| S1 IDENTITY + saveAll | TBD | 10000 | batch 비활성화 |
+| Strategy | elapsedMs | prepStmts | vs S4 | 비고 |
+|---|---:|---:|---:|---|
+| **S1 IDENTITY + saveAll** | **2684** | **10000** | 1.07x | batch 비활성화 (가설 ✅) |
+| S2 IDENTITY + clear() 50마다 | 2652 | 10000 | 1.06x | 메모리만 절약 |
+| **S3 TABLE 전략 (애플리케이션 ID)** | **4720** | 10001 | **1.89x** | 가설 ❌ — ID 발급 round-trip 비용 |
+| **S4 raw JDBC batchUpdate** | **2500** | 0 | **1.0x baseline** | 1위 |
 
 ---
 
@@ -184,11 +187,13 @@ public void s3() {
 
 INSERT 시점에 ID 가 *이미 set* 되어 있으니 — Hibernate 가 *generated keys 매핑이 필요 없음*. `batch_size=50` 적용 → 200 SQL.
 
-[측정 후 갱신]:
+**[실측]**:
 
-| Strategy | elapsedMs | prepStmts |
-|---|---:|---:|
-| S3 TABLE 전략 시뮬레이션 | TBD | ~200 (50 batch) |
+| Strategy | elapsedMs | prepStmts | 분석 |
+|---|---:|---:|---|
+| **S3 TABLE 전략 시뮬레이션** | **4720** | 10001 | ⚠️ 본 환경에선 IDENTITY 보다 1.76x 느림 — ID 발급 1번에 1 ID 사전 round-trip 비용 |
+
+> **가설 반박**: 본 시뮬은 `allocationSize=1` (한 번에 1 ID 발급)이라 round-trip 10000회. PostgreSQL SEQUENCE pooled-lo (allocationSize=50) 였다면 200회로 IDENTITY 보다 빨랐을 것. **MySQL 의 TABLE 에뮬레이션 자체가 PostgreSQL SEQUENCE 의 진짜 효과를 못 본다**는 게 본 측정의 핵심 발견.
 
 ### 4.1 TABLE 전략의 함정 — 시퀀스 테이블의 row lock
 
@@ -249,11 +254,13 @@ INSERT INTO bulk_target_identity (owner_id, payload, created_at) VALUES
 
 ### 5.2 측정 결과
 
-[측정 후 갱신]:
+**[실측]**:
 
-| Strategy | elapsedMs | SQL 수 |
-|---|---:|---:|
-| S4 raw JDBC + rewrite | TBD (예상 가장 빠름) | ~10 |
+| Strategy | elapsedMs | prepStmts | SQL 수 (실제 DB) |
+|---|---:|---:|---:|
+| **S4 raw JDBC batchUpdate** | **2500** | 0 (raw JDBC) | rewriteBatchedStatements 미설정 — 향후 추가 시 multi-value 효과 측정 |
+
+> 본 측정에서 S4 가 **1위 (2500ms)**. application.yml 의 JDBC URL 에 `rewriteBatchedStatements=true` 미설정 상태에서도 IDENTITY+saveAll 보다 7% 빠름. URL 추가하면 multi-value INSERT 로 추가 향상 가능 (W5 후속 측정 예정).
 
 ---
 
