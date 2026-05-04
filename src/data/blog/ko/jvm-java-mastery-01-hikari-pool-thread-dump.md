@@ -1,6 +1,6 @@
 ---
 title: "JVM Thread Dump로 분해한 HikariCP 풀 고갈 — TIMED_WAITING (parked) 의 진짜 의미"
-description: "풀 고갈 알람이 울렸을 때 애플리케이션 코드만 들여다보면 답이 안 나옵니다. jstack으로 받아본 thread dump가 진짜 증거 — 모든 worker thread가 HikariCP 안에서 TIMED_WAITING (parked) 상태로 멈춰 있습니다. JVM Thread State 머신, LockSupport.parkNanos, ConcurrentBag·SynchronousQueue 의 동작, 그리고 트랜잭션-안-외부-호출 풀 고갈 [실측] (timeout 5s 100% / 1s 16.7%)이 thread dump 한 줄과 정확히 어떻게 매핑되는지 — 운영 중 풀 고갈을 dump 한 장으로 진단하는 방법을 라인 단위로 풀어봤습니다."
+description: "풀 고갈 알람이 울렸을 때 애플리케이션 코드만 들여다보면 답이 안 나옵니다. jstack으로 받아본 thread dump가 진짜 증거 — 모든 worker thread가 HikariCP 안에서 TIMED_WAITING (parked) 상태로 멈춰 있습니다. JVM Thread State 머신, LockSupport.parkNanos, ConcurrentBag·SynchronousQueue 의 동작, 그리고 트랜잭션-안-외부-호출 풀 고갈 [실측] (timeout 5s 100% / 1s 16.7%)이 thread dump 한 줄과 정확히 어떻게 매핑되는지 — 운영 중 풀 고갈을 dump 한 장으로 진단하는 방법을 라인 단위로 풀어봤습니다. 추가로 시니어 관점 보강: Incident Commander 의 비기술 4 책임, 침묵의 함정, 5 Whys 로 본 사고 RCA, Blameless postmortem, DBA 와 max_connections 협상 대화 패턴 — 기술적 fix 옆의 *조직* 동선까지 자체 체크리스트 11 카드로."
 author: 김면수
 pubDatetime: 2026-05-03T13:00:00.000Z
 featured: true
@@ -16,6 +16,9 @@ tags:
   - JVM Java Mastery
   - Observability
   - Troubleshooting
+  - Incident Response
+  - Postmortem
+  - SRE
 ---
 
 ## Table of contents
@@ -48,7 +51,7 @@ dump 한 장에 답이 있습니다. **모든 worker thread** 가 HikariCP 의 `
 
 - **자매글** [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) 이 **비즈니스 패턴 (Saga / Outbox)** 측면에서 같은 사건을 다뤘다면, 본 글은 **같은 트랜잭션-안-외부-호출 풀 고갈 [실측] 을 JVM 측면 — Thread Dump / Thread State / HikariCP 내부 / LockSupport / GC** 로 다시 봅니다. 두 글이 짝.
 - 본 글의 입력 자산: 트랜잭션-안-외부-호출 풀 고갈 측정 [실측 — Java/Spring] (timeout 5s 100% 통과 / P99 6.3s, timeout 1s 16.7% 통과 / 50건 timeout) + 처방 비교 측정의 9 시나리오 매트릭스.
-- 본 글의 깊이: **L3-L4** ([JVM/Java Mastery 시리즈](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) 1편 — **측정 + JVM 메커니즘 + 빅테크 운영 회고 + 정리 질문**).
+- 본 글의 깊이: **L3-L4** ([JVM/Java Mastery 시리즈](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) 1편 — **측정 + JVM 메커니즘 + 빅테크 운영 회고 + 시니어 관점 (Incident Command / Postmortem / 비기술 제약) + 정리 질문 + 자체 체크리스트 11 카드**).
 
 ---
 
@@ -681,6 +684,167 @@ GC log 분석:
 
 → Full GC 가 **여러 번 연속**이면 heap 부족 → `-Xmx` 증설 또는 leak 추적 (8.2장).
 
+### 8.4 Incident Command — 기술 5분 동선 옆의 *비기술* 5분 동선 {#incident-command}
+
+8.1 의 5분 동선이 *기술* 만 다뤘는데, 실제 운영에서는 *조직 동선* 이 같이 굴러갑니다. 시니어가 후배와 갈리는 지점.
+
+| 분 | 기술 동선 (8.1 그대로) | **비기술 동선 (조직)** |
+|---|---|---|
+| 0:00 | 알람 수신 | **incident channel 개설** (예: `#incident-2026-05-03-01`) — 모든 대화 / 결정이 한 곳에 기록 |
+| 0:01 | dump 자동 수집 확인 | **IC (Incident Commander) 지정** — 보통 oncall 본인. *"내가 IC"* 명시 선언 |
+| 0:02 | dump 분석 — 풀 고갈 확정 | **사용자 영향 범위 1차 추정** — "결제 API 만? 전체?" — *고객 응대 시계* 가 동시에 시작 |
+| 0:03 | parkNanos stack 확인 | **CS / 사용자 공지 결정** — P1 면 5분 안 status page 업데이트 (*"결제 일부 지연"*). 침묵이 가장 큰 사고 |
+| 0:04 | 외부 PG 메트릭 조회 | **CTO / 리더 보고** — Slack DM 이 아니라 incident channel 에 *@here* mention. 정보 비대칭 차단 |
+| 0:05 | 원인 확정 | **mitigation 의사결정** — *"PG 우회 / 트래픽 차단 / 기다리기"* 3 옵션 중 IC 가 결단. 합의 회의 X — IC 1인 결정 |
+
+### 8.4.1 침묵의 함정 — *"5분 안에 fix 가능하니 공지는 미루자"* 가 사고 키움
+
+**가장 흔한 시니어 함정**: 기술적 fix 시간을 *낙관* 적으로 추정해서 사용자 공지를 미룸. 결과:
+
+- 5분 fix 시도 → 실패 → 10분 재시도 → 실패 → 20분 후에야 공지
+- 그 사이 사용자가 *재시도 폭증* → 풀 고갈 악화 → fix 더 어려워짐
+- 사후 *"왜 20분이나 침묵?"* 비난 받음. 기술 못해서가 아니라 *판단 실패*
+
+**룰**: P1/P2 알람은 **2분 안 status page 업데이트** 의무. 정보가 부족해도 *"결제에 일부 지연 발생, 조사 중"* 한 줄. 그 다음 5분 단위로 update.
+
+### 8.4.2 IC (Incident Commander) 의 *비기술* 책임 4가지
+
+[Google SRE Book — Managing Incidents](https://sre.google/sre-book/managing-incidents/) 패턴:
+
+1. **Communication** — channel 의 모든 결정 / 행동 기록
+2. **Coordination** — 누가 무엇을 하는지 명시 (*"Alice 가 dump 분석, Bob 이 PG 팀 연락"*)
+3. **Customer-facing** — status page / CS 팀에 정보 전달 timing
+4. **Closeout** — incident 종료 선언 + postmortem 일정 잡기
+
+**시니어가 IC 일 때의 핵심**: *기술적 fix 자체는 후배에게 위임*. IC 는 *"누가 무엇을 하나"* 의 traffic control 만. 후배가 dump 분석하는 동안 IC 는 PG 팀 / CS 팀 / 임원 보고에 시간 쓰는 게 정석.
+
+---
+
+### 8.5 Postmortem / RCA — dump 분석을 *조직 학습* 으로 {#postmortem-rca}
+
+장애 끝 후 한 번의 회고가 *조직 자산* 으로 남는가 — 이게 시니어의 가장 큰 책임.
+
+### 8.5.1 *"5 Whys"* 패턴 — 본 글 사고에 적용
+
+표면 원인 → 근본 원인까지의 5 단계:
+
+| 단계 | 질문 | 답 |
+|---|---|---|
+| Why 1 | 왜 P99 가 6초로 튀었나? | HikariCP 풀 고갈 (`pending_threads = 50`) |
+| Why 2 | 왜 풀이 고갈됐나? | 외부 PG 응답 latency 200ms → 5,000ms 증가, **트랜잭션 안에서** 호출 중 |
+| Why 3 | 왜 트랜잭션 안에서 외부 호출이 가능했나? | 코드 리뷰가 패턴을 못 잡음 (린터 / ArchUnit 룰 부재) |
+| Why 4 | 왜 alarm 이 30분 늦게 울렸나? | `pending_threads > 0` 알람만 있고 *지속 시간* 임계 (30s) 없음 → spike 마다 무시 |
+| Why 5 | 왜 외부 PG latency 모니터링이 없었나? | 외부 의존성 SLO 정의 없음. 자기 시스템만 모니터링 |
+
+→ **5 Why 의 핵심**: 1차 원인 (`풀 고갈`) 에서 멈추면 같은 사고가 6개월 후 재발. 5 Why 까지 가야 *시스템 / 프로세스 / 정책* 단으로 actionable.
+
+### 8.5.2 Postmortem 문서 템플릿 (회사 standard)
+
+```markdown
+# Incident #2026-05-03-01 — 결제 P99 6초 spike (45분)
+
+## TL;DR
+2026-05-03 03:14 ~ 03:59 KST, 결제 API P99 200ms → 6,350ms.
+원인: 외부 PG latency × HikariCP 풀 사이즈 함수.
+조치: PG 우회 toggle, 5분 후 안정화. 사용자 영향: 결제 시도 12,400건 중 2,100건 지연 (P99 기준).
+
+## Timeline (KST)
+03:14:23  외부 PG latency 200ms → 5,000ms 증가 (PG status page 미업데이트)
+03:14:53  alert: `hikaricp_pending_threads > 0 for 30s` 발사
+03:15:01  oncall 수신, IC 자처
+03:15:30  status page "결제 일부 지연 발생, 조사 중" 업데이트
+03:16:14  thread dump 자동 수집 확인 — 50 worker parkNanos
+03:18:42  PG 팀에 latency 문의 (응답 30분 후)
+03:19:55  IC 결단: PG 우회 toggle ON (Saga 패턴 fallback)
+03:24:19  awaiting=0, P99 정상화
+03:35:00  PG 정상 복구
+03:59:00  incident 종료 선언
+
+## Root Causes
+1. 직접 원인 — 외부 PG latency spike (외부)
+2. 시스템 원인 — `@Transactional` 안 외부 호출 (코드)
+3. 프로세스 원인 — alarm threshold 너무 민감 / 외부 SLO 부재 (정책)
+
+## Action Items
+| # | 책임자 | 마감 | 항목 |
+|---|---|---|---|
+| 1 | @backend | 1주 | ArchUnit 룰: `@Transactional` 안 RestTemplate / WebClient 호출 차단 |
+| 2 | @sre | 2주 | 외부 의존성 SLO 정의 + 메트릭 export |
+| 3 | @sre | 2주 | alarm threshold 정비: spike vs sustained 분리 |
+| 4 | @backend | 4주 | Saga / Outbox 마이그레이션 우선순위 confirm 도메인 |
+| 5 | @leadership | 4주 | PG 계약상 SLA 협상 — latency P99 < 500ms 보장 |
+
+## What Went Well
+- dump 자동 수집이 작동 — 5분 안 원인 식별
+- IC 가 mitigation 결단 빠름 — 5분 안 toggle
+- status page 업데이트 30초 안 — 사용자 신뢰 보존
+
+## What Went Poorly
+- 외부 PG latency 모니터링 부재 — 30분 일찍 감지 가능했음
+- alarm threshold 가 spike 마다 발사 → alert fatigue
+- ArchUnit 룰 부재 — 같은 패턴 코드 다른 도메인에도 잠재
+```
+
+### 8.5.3 *Blameless* 가 시니어의 책임
+
+가장 망치는 RCA: *"Alice 가 잘못된 코드 PR 머지함"* 같은 개인 책임 추궁. 결과:
+
+- 다음 incident 때 *dump 안 받고 숨김* (혼나기 싫어서)
+- *기술적 사실* 을 *정치적* 으로 왜곡
+- 같은 사고 재발
+
+**시니어 역할**: RCA 회의에서 *"누가 잘못했나"* 질문 차단. *"시스템이 어떻게 이런 코드를 통과시켰나"* 로 frame 전환. Alice 의 PR 이 머지된 게 아니라 *린터 / 리뷰 / 테스트 3중망이 모두 통과시킨* 시스템 결함으로 봄.
+
+[Google SRE — Blameless Postmortems](https://sre.google/sre-book/postmortem-culture/) 의 표준.
+
+---
+
+### 8.6 풀 사이즈 결정의 *비기술* 제약 — 운영 정치 {#non-tech-constraints}
+
+§4.5 가 기술 관점만 다뤘는데, 실무에서는 *비기술 제약* 이 의사결정 dominant.
+
+### 8.6.1 6 가지 비기술 압박
+
+| 압박 | 누가 | 핵심 |
+|------|------|------|
+| **DB max_connections 한도** | DBA / 인프라팀 | "max=200 인데 너희 풀 100 쓰면 다른 서비스 못 씀" — *공유 DB* 면 정치 협상 |
+| **DB 비용** | 재무 / 클라우드팀 | RDS instance class 올리면 월 X 만원 — 비용 사인 누가 |
+| **외부 API SLA / rate limit** | 외부 벤더 | "rate limit 1k/min 이라 풀 늘려도 효과 없음" — 계약 협상 필요 |
+| **legacy 호환** | 다른 팀 | "이 풀 사이즈 키우면 legacy batch 가 starve" — 기존 시스템 영향 |
+| **컴플라이언스 / 감사** | 보안 / 컴플 | connection encryption / IP whitelist — 풀 늘리는데 추가 인증 |
+| **외부 계약상 latency / availability** | 영업 / 법무 | "결제는 P99 < 500ms 보장 계약" — 풀 사이즈가 SLA 직결 |
+
+### 8.6.2 *기술적 정답* vs *정치적 가능* 의 frame
+
+**기술적 정답** (HikariCP wiki): pool_size = ((core_count × 2) + effective_spindle_count). 결제 API 면 8 core × 2 + 1 = 17.
+
+**정치적 가능** (현실):
+- DBA: "max=200, 너희 4 instance 면 instance 당 25 가 한계"
+- 재무: "RDS m5.2xlarge → m5.4xlarge 는 분기 RFP 필요"
+- 외부: "PG rate limit 1k/min, 풀 25 도 못 채워"
+
+→ 시니어 엔지니어의 결정: **pool_size = 25 + connectionTimeout 30s + Saga fallback**. 기술 정답 17 보다 25 라 *최적은 아님*. 그러나 *25 + Saga 가 17 + 풀 고갈 보다 SLA 충족 가능성 높음* — 이 판단력.
+
+### 8.6.3 *대화 스크립트* — DBA 와 max_connections 협상
+
+후배가 가장 어려워하는 부분. 시니어의 대화 패턴:
+
+```
+❌ Bad: "max_connections 늘려주세요. 우리 풀 100 으로 키워야 해서요."
+   → DBA "왜? 다른 서비스 영향은? 비용은?" → 막힘
+
+✅ Good: "결제 API P99 500ms SLA 가 외부 계약입니다.
+        현재 풀 25 / max 200 / 다른 서비스 50 사용 중.
+        외부 PG latency 가 한 달에 3회 spike (각 30분).
+        측정으로는 spike 시 풀 고갈 → P99 6s.
+        옵션 A: 풀 50 + max 250 (DBA 부담 +25%)
+        옵션 B: Saga 마이그레이션 (배포 4주, max 변경 불필요)
+        DBA 팀 의견은?"
+   → DBA 가 *option B 선호* + "정 급하면 A 도 1개월 합의" 답
+```
+
+**핵심 차이**: 후배는 *해결책* 을 요청 (`max 늘려줘`), 시니어는 *문제 + 옵션* 을 제시 (`SLA 위험, A/B 옵션, 의견 부탁`). 상대 팀이 *공동 의사결정자* 로 들어옴.
+
 ---
 
 ## 9. 빅테크 사례 — 운영 dump / GC / Concurrency 실제 {#bigtech-references}
@@ -784,7 +948,65 @@ GC log 분석:
 - "thread dump 1회로 충분" → **NO** — 3회 5초 간격이 **순간/지속** 판별의 최소 단위
 - "Hikari 가 SynchronousQueue 쓰는 거 그냥 단순 큐 아님?" → **NO** — capacity 0 hand-off / FIFO / 0-copy 가 의도
 
-### 11.3 JVM Mastery 시리즈 안에서 본 글의 위치
+### 11.3 자체 체크리스트 — 글 다 읽고 *self-check*
+
+이 글의 학습 가치 흡수를 *직접* 검증하는 6 카드. 5개 이상 ✅ 면 합격, 4개 이하면 §3·§5·§8 다시 정독.
+
+```
+[ ] 1. 풀 고갈 stack signature 3 frame 을 외우고 있다
+       → ConcurrentBag.borrow → SynchronousQueue.poll → LockSupport.parkNanos
+       → §3.2 stack 트레이스 라인별 의미
+
+[ ] 2. RUNNABLE 인데 socketRead0 인 thread 가 *실제로 실행 중이 아니라는* 걸 안다
+       → §5.4 RUNNABLE 함정 — JVM 의 논리 분류 vs OS 의 실제 상태
+       → stack 최상단 frame 휴리스틱 표
+
+[ ] 3. dump 1회 vs 3회 차이를 30초 안에 설명할 수 있다
+       → §2.3 — 1회는 순간 상태, 3회 5초 간격이 순간/지속 판별 최소 단위
+       → §6.4 의 50ms spike 같은 false positive 거름
+
+[ ] 4. connectionTimeout 너무 길게 / 너무 짧게 의 trade-off 를 둘 다 안다
+       → §4.5 — 60s+ 면 silent latency, 1s 이하 면 fail-fast cascade
+       → 실무 권장 30s + `awaiting > 0` 알람 병행
+
+[ ] 5. dump 가 *못 잡는* 3가지 (GC pause / memory leak / 시간 축) 를 안다
+       → §10 Q4 — STW 시 dump 도 못 받음, heap 보유는 안 보임, 빈도는 안 보임
+       → GC log + JFR + APM 4종 운영 필요
+
+[ ] 6. 알람 임계값 (pending > 0 for 30s) 의 *30초* 가 왜 거기 붙었는지 안다
+       → §6.4 + §7.1 — 50ms spike 같은 instant 무시 위한 hysteresis
+       → spike vs sustained 분리 정책
+```
+
+### 11.4 시니어 관점 자체 체크리스트 — *기술 너머* 카드 5
+
+§8.4~8.6 을 정독한 후 self-check. 3개 이상 ✅ 면 시니어 신호.
+
+```
+[ ] 1. Incident 시 IC (Incident Commander) 의 *비기술* 4 책임을 말할 수 있다
+       → §8.4.2 — Communication / Coordination / Customer-facing / Closeout
+       → "후배에게 fix 위임, IC 는 traffic control" 가 정석
+
+[ ] 2. *침묵의 함정* 이 무엇인지 안다 + 회피 룰을 안다
+       → §8.4.1 — fix 시간 낙관 추정 → 공지 미룸 → 사용자 재시도 폭증
+       → P1/P2 는 2분 안 status page 의무
+
+[ ] 3. 5 Whys 를 본 글 사고에 적용해 5단계까지 갈 수 있다
+       → §8.5.1 — 풀 고갈 → 외부 latency → 코드 패턴 → alarm threshold → SLO 부재
+       → 1차 원인에서 멈추면 6개월 후 재발
+
+[ ] 4. *Blameless* 가 왜 시니어 책임인지 설명할 수 있다
+       → §8.5.3 — "Alice 가 잘못" 추궁 = 다음 incident 때 dump 숨김
+       → "시스템이 어떻게 통과시켰나" frame 전환
+
+[ ] 5. DBA 와 max_connections 협상 시 *후배 vs 시니어* 대화 차이를 안다
+       → §8.6.3 — 후배는 "해결책 요청", 시니어는 "문제 + 옵션 제시"
+       → 상대 팀이 공동 의사결정자로 들어옴
+```
+
+---
+
+### 11.5 JVM Mastery 시리즈 안에서 본 글의 위치
 
 [JVM/Java Mastery 시리즈](/posts/jvm-java-mastery-01-hikari-pool-thread-dump/) 의 1편 (플래그십) — 운영 그래프 ↔ JVM 메커니즘을 한 사건으로 묶어 본 deep-dive. 다음 글들에서 이어집니다:
 
@@ -830,6 +1052,13 @@ GC log 분석:
 - [Aleksey Shipilëv — Synchronization revisited](https://shipilev.net/blog/2014/all-fields-are-final/) — `synchronized` 의 lock states
 - [Doug Lea — A Java Fork/Join Framework](http://gee.cs.oswego.edu/dl/papers/fj.pdf) — work-stealing
 - [Ron Pressler — Project Loom slide](https://cr.openjdk.org/~rpressler/loom/loom/sol1_part1.html) — virtual thread 의 park 메커니즘
+
+### Incident Response / Postmortem (§8.4~8.6 시니어 관점 보강)
+- [Google SRE Book — Managing Incidents](https://sre.google/sre-book/managing-incidents/) — IC / Communication / Coordination
+- [Google SRE — Blameless Postmortems](https://sre.google/sre-book/postmortem-culture/) — *시스템 결함* frame
+- [Atlassian — Incident Communication Best Practices](https://www.atlassian.com/incident-management/incident-communication) — status page / customer-facing
+- [PagerDuty — Incident Response Documentation](https://response.pagerduty.com/) — IC 역할 / runbook 표준
+- [Etsy — Debriefing Facilitation Guide](https://extfiles.etsy.com/DebriefingFacilitationGuide.pdf) — RCA 회의 진행 가이드
 
 ### 자매글
 - [트랜잭션 안 외부 API 호출 — 풀 고갈을 직접 재현하고, 단순 분리·Saga·Outbox 세 처방을 측정으로 비교했습니다](/posts/spring-transaction-external-api-pool-exhaustion/) — 같은 트랜잭션-안-외부-호출 풀 고갈 측정을 **비즈니스 패턴 측면** 으로 다룬 짝글
