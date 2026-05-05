@@ -17,13 +17,7 @@ const locale = "ko";
 const posts = await getCollection("blog", ({ id }) => id.startsWith("ko/"));
 
 const sortedPosts = getSortedPosts(posts);
-const featuredPosts = sortedPosts
-  .filter(({ data }) => data.featured)
-  .sort(
-    (a, b) =>
-      new Date(b.data.pubDatetime).getTime() -
-      new Date(a.data.pubDatetime).getTime()
-  );
+const featuredPosts = sortedPosts.filter(({ data }) => data.featured);
 const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
 ---
 
