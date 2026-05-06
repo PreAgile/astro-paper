@@ -114,7 +114,99 @@ ps.setLong(2, id);
 ps.executeUpdate();
 ```
 
-JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` *한 줄로 끝나려면* 누군가가 *변경을 알아채고* *commit 시점에 자동으로 UPDATE 를 발사* 해야 한다 — 그 "누군가" 가 dirty check loop 이고, *변경 전 상태* 를 비교 기준으로 들고 있어야 하니 snapshot 이 필요하다. transparent persistence 라는 약속을 지키면서 변경을 알아내는 *가장 보편적인 방식* 이 — entity 본체를 직접 수정하지 않고 *별도 메모리에 비교 기준을 두는* 것이다 (다른 방식으로 bytecode enhancement / 이벤트 기반 추적도 가능하며, Hibernate 도 옵션으로 제공한다 — 1.5 절).
+JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` 한 줄로 끝나려면 누군가가 변경을 알아채고 commit 시점에 자동으로 UPDATE 를 발사해야 한다 — 그 "누군가" 가 dirty check loop 이고, **변경 전 상태**를 비교 기준으로 들고 있어야 하니 snapshot 이 필요하다. transparent persistence 라는 약속을 지키면서 변경을 알아내는 가장 보편적인 방식이 — entity 본체를 직접 수정하지 않고 **별도 메모리에 비교 기준을 두는 것**이다 (다른 방식으로 bytecode enhancement / 이벤트 기반 추적도 가능하며, Hibernate 도 옵션으로 제공한다 — 1.5 절).
+
+<details>
+<summary><b>(심도) 왜 entity 자체에 변경 추적을 박지 않고 굳이 외부 snapshot 인가 — POJO 약속의 정체</b> (펼치기)</summary>
+
+먼저 흔한 오해 하나를 분리해 두자. Hibernate 안에서 **프록시** 와 **dirty checking 의 snapshot** 은 완전히 다른 메커니즘이다.
+
+| 메커니즘 | 목적 | 어떻게 만들어지나 | 누가 보유 |
+|---|---|---|---|
+| **프록시** (`LazyInitializer`) | **lazy loading** — 연관관계의 가짜 객체 | 부팅 시 ByteBuddy / cglib 가 entity 의 subclass 생성 | `@ManyToOne(fetch=LAZY)` / `@OneToOne(fetch=LAZY)` 의 주인이 아닌 쪽 |
+| **snapshot** (`EntityEntry#loadedState`) | **dirty checking** — 변경 비교 기준 | hydrate 시점에 `Object[]` 로 컬럼 값 복사 | `StatefulPersistenceContext` 가 entity 마다 1 개 보유 |
+
+dirty checking 은 프록시와 무관하다. managed 상태의 진짜 entity 본체 + 옆에 따로 둔 snapshot 두 덩어리만 가지고 비교한다. 프록시는 전혀 다른 문제 (연관관계의 N+1 회피) 를 풀기 위한 별개 도구.
+
+진짜 질문은 — **"왜 dirty checking 정보를 entity 본체 안에 넣지 않고 굳이 외부 snapshot 으로 두는가? 어차피 entity 옆에 메모리를 잡을 거면 entity 자체에 박는 게 효율적이지 않나?"** 그 답이 바로 **transparent persistence** 라는 JPA 의 핵심 약속이다.
+
+##### 역사적 동기 — EJB 2.x 와의 단절
+
+JPA spec (JSR 220, 2006) 의 가장 큰 동기 자체가 **EJB 2.x 의 invasive 한 모델로부터 벗어나기** 위함이었다. EJB 2.x 시절 entity 는 다음을 강제로 implement 해야 했다.
+
+```java
+public class CustomerBean implements EntityBean {
+    public void ejbActivate() { ... }
+    public void ejbPassivate() { ... }
+    public void ejbLoad() { ... }
+    public void ejbStore() { ... }
+    public void ejbRemove() { ... }
+    public void setEntityContext(EntityContext ctx) { ... }
+    public void unsetEntityContext() { ... }
+    // 도메인 로직은 이 모든 인프라 메서드 사이에 끼어 있음
+}
+```
+
+테스트하려면 컨테이너가 있어야 하고, 다른 framework 와 섞기 어려우며, `EntityBean` 을 extend 한다는 Java 단일 상속 슬롯이 사라진다. JPA 는 이걸 완전히 뒤집기 위해 만들어졌다 — entity 가 어떤 인터페이스도 implement 하지 않고, 어떤 abstract 클래스도 extend 하지 않으며, 컨테이너 없이 그냥 `new` 로 만들 수 있는 **순수 POJO** 여야 한다. 이 약속의 이름이 **transparent persistence** — 영속성 메커니즘이 도메인 객체에 보이지 않게 한다.
+
+##### POJO 로 두는 5 가지 실질적 이점
+
+**(1) 도메인 객체의 기술 독립성**
+
+entity 가 JPA 환경 밖에서도 그대로 동작한다.
+
+```java
+@Test
+void retryCount_increment() {
+    ReplyRequest r = new ReplyRequest();
+    r.setRetryCount(5);
+    r.incrementRetry();
+    assertThat(r.getRetryCount()).isEqualTo(6);
+}
+```
+
+DB / Hibernate / Spring 컨테이너 전혀 없이 ms 단위로 돌아간다. entity 가 변경 추적 필드 (`$$_hibernate_tracker` 같은) 를 박고 있다면 단위 테스트에서 그 필드 초기화 부담이 시작된다.
+
+**(2) 직렬화 / 외부 전송 가능성**
+
+POJO 는 Jackson / Gson / protobuf / Avro 가 그냥 직렬화한다. entity 본체에 dirty tracker 필드가 박혀 있으면 그게 그대로 JSON 에 노출되거나 직렬화 시 빼야 하는 추가 작업이 생긴다.
+
+**(3) 도메인 모델 상속의 자유**
+
+Java 는 단일 상속이다. entity 가 `AbstractHibernateEntity` 같은 클래스를 extend 해야 한다면, 도메인 상속을 만들고 싶을 때 (예: `Order extends AbstractTransaction`) 슬롯이 부족해진다. POJO 는 이 슬롯을 도메인에게 돌려준다.
+
+**(4) detach / merge 의 자연스러움**
+
+영속성 컨텍스트에서 detach 된 entity 를 컨트롤러 / 메시지 큐 / 캐시 / 다른 트랜잭션으로 보낼 때 그냥 객체로 동작해야 한다. tracker 가 박혀 있으면 detach 후의 변경 추적이 어딘가 stale 한 참조가 된다.
+
+**(5) `final` field / immutability / value object 호환**
+
+POJO 는 `final` 필드, value object, `@RequiredArgsConstructor` 같은 현대 Java 도메인 모델링 도구와 자연스럽게 섞인다. entity 자체에 mutable tracker 가 박혀 있으면 entity 가 immutable 하지 않게 된다.
+
+##### 그럼 왜 snapshot 은 *외부* 에 두나 — POJO 를 지키는 유일한 길
+
+JPA / Hibernate 가 변경 사실을 알아내야 하는 건 맞다. 그 답으로 가능한 설계 선택지는 4 가지.
+
+| 선택지 | POJO 약속 | 비고 |
+|---|---|---|
+| (a) flush 시 DB 에서 원본 row 를 다시 SELECT 후 비교 | 지킴 | round-trip 비용 폭증 — 사실상 불가능 |
+| (b) entity 자체에 tracker 필드를 박음 (bytecode enhancement) | **약화** | CPU 비용은 줄지만 POJO 가 아님 |
+| (c) setter 호출마다 즉시 UPDATE 발사 | 지킴 | write-behind / batch / `@Version` 검사 모두 깨짐 |
+| (d) **별도 메모리에 snapshot 보관 후 commit 시 비교** | 지킴 | 메모리 약 2 배. **JPA spec 의 default 선택** |
+
+(d) 가 entity 본체를 건드리지 않으면서 변경을 알아내는 유일한 방법이라서 default 가 됐다. 메모리 2 배는 spec 결정 시점 (2006) 의 trade-off 에서 **DB round-trip 1 회 = 메모리 접근 수만 회** 였기 때문에 훨씬 싼 비용이었다.
+
+bytecode enhancement (b) 는 **POJO 약속을 일부 포기하는 대신 CPU 효율을 얻는 opt-in 옵션** 으로 따로 제공된다 — JPA spec 이 강제하지 않고 Hibernate 가 원하는 사람만 켜라고 둔 것. 그 트레이드오프가 1.5 절에 정리되어 있다.
+
+##### 한 줄 정리
+
+> entity 자체에 변경 추적을 박지 않는 이유는 — **entity 가 POJO 라야 영속성 메커니즘 밖의 모든 영역 (테스트·직렬화·도메인 상속·detach 후 사용·immutability) 에서 자연스럽게 동작** 하기 때문이다. snapshot 을 밖에 두는 비용은 메모리 2 배 — POJO 를 지키는 비용으로는 값싼 거래.
+
+JPA 의 핵심 약속이 "도메인 객체는 순수한 채로 둔다" 인 한, snapshot 이 entity 본체 안이 아니라 `StatefulPersistenceContext` 의 외부 메모리에 사는 것은 기술적 선택이 아니라 **철학의 결과** 다.
+
+근거: JSR 220 (EJB 3.0) Spec, 2006; Bauer / King / Gregory, *Java Persistence with Hibernate, 2nd ed* (Manning, 2015), ch.1 "Understanding object/relational persistence"; Vlad Mihalcea, *High-Performance Java Persistence* (2nd ed, Apress, 2018), ch.2.
+
+</details>
 
 #### (2) Write-behind — Unit of Work 패턴의 직접 구현
 
