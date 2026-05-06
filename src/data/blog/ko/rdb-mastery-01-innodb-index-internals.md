@@ -126,7 +126,7 @@ page 1장에 100개 row 가 들어가면 1,000만 row = page **10만 장**. 이 
 - "AUTO_INCREMENT = page split 적음" — 항상 마지막 leaf 에만 INSERT
 - "Secondary index lookup = 2번 walk" — PK 거쳐서 clustered 까지
 
-다음 §2.1 부터 이 세 가지를 차례로.
+다음 2.1 절부터 이 세 가지를 차례로.
 
 ### 2.1 PK 가 있을 때: PK = clustered index = **테이블 자체**
 
@@ -216,7 +216,7 @@ EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 11장 에서 다시 �
 
 ### 2.5 정리 — **Clustered Index = 1개, Secondary Index = N개**
 
-지금까지 §2 가 다룬 게 **clustered index**. 외부 독자가 자주 혼동하는 부분:
+지금까지 2 절이 다룬 게 **clustered index**. 외부 독자가 자주 혼동하는 부분:
 
 - **Clustered Index** = 테이블당 **정확히 1개**. PK / UNIQUE NOT NULL / hidden ROWID 중 하나가 **반드시** 키. leaf 가 **전체 row**. **테이블 = clustered index** 가 동의어.
 - **Secondary Index** = 0~N개 (선택적). `CREATE INDEX ...` 로 추가하는 **별도** B-tree. leaf 가 **PK 만** 가짐.
@@ -226,7 +226,7 @@ EXPLAIN 의 `type=ALL` = clustered index full scan. 이걸 11장 에서 다시 �
 - clustered 1개 (반드시) + secondary 5개 = **B-tree 6개 동시 존재**
 - "테이블에 인덱스 N개" = secondary index N개를 의미. clustered 는 **기본값** 이라 셈에서 빠짐.
 
-다음 §3 에서 secondary 의 **2번 lookup** 메커니즘.
+다음 3 절에서 secondary 의 **2번 lookup** 메커니즘.
 
 ---
 
@@ -357,7 +357,7 @@ InnoDB 는 이 비용 **0** — secondary 가 PK 만 가리키니 row 이동 무
 
 ### 3.5 쿼리 → 어느 path → 무엇을 읽는가
 
-지금까지 §3 가 다룬 **secondary index lookup 메커니즘** 을 쿼리 예시로 매핑:
+지금까지 3 절이 다룬 **secondary index lookup 메커니즘** 을 쿼리 예시로 매핑:
 
 | 쿼리 | 어느 인덱스 / path | 무엇을 읽나 | lookup 횟수 |
 |---|---|---|---|
@@ -369,7 +369,7 @@ InnoDB 는 이 비용 **0** — secondary 가 PK 만 가리키니 row 이동 무
 
 → EXPLAIN ANALYZE 의 `Using index` 는 **이 표 첫째 / 셋째 / 다섯째 케이스** 의 신호. `Using where` 만 있으면 둘째 / 넷째.
 
-이 매핑을 머릿속에 두고 §4 covering index 의 **정확한 정의** 로.
+이 매핑을 머릿속에 두고 4 절의 covering index **정확한 정의** 로 넘어간다.
 
 ---
 
@@ -894,7 +894,7 @@ graph LR
 
 ### 12.1 빅테크 사례 (URL 검증 ≥ 6개)
 
-| 출처 | 글 | 본 글의 어느 §와 연결 |
+| 출처 | 글 | 본 글의 어느 절와 연결 |
 |---|---|---|
 | 토스 SLASH24 | [Next 코어뱅킹 — Oracle→MySQL 전환 + InnoDB MVCC](https://haon.blog/article/toss-slash/next-core-banking/) | 2장 clustered index, 3장 secondary lookup |
 | LINE Engineering | [MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | 11장 type=ALL 검출 |

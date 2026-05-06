@@ -199,7 +199,7 @@ HikariPoolMXBean.getThreadsAwaitingConnection()
 1. **외부 호출이 멱등이고 부분 실패 시 재시도로 자연 복구** — 외부 OAuth 토큰 캐시 갱신, 통계 캐시 등. 외부 OK / DB 실패 시 클라이언트가 재시도하면 같은 결과.
 2. **부분 실패가 도메인적으로 허용** — 알림 한 번 빠져도 사업적 손실 X.
 
-결제·주문·환불 같이 *부분 실패가 사고로 직결되는* 도메인에는 부적합. 본 글의 §3.1.4 측정으로 그 부적합성을 60건 어긋남으로 직접 확인합니다.
+결제·주문·환불 같이 *부분 실패가 사고로 직결되는* 도메인에는 부적합. 본 글의 3.1.4 절 측정으로 그 부적합성을 60건 어긋남으로 직접 확인합니다.
 
 [Microsoft Compensating Transaction Pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/compensating-transaction) 의 첫 단락도 같은 말을 합니다: "분산 트랜잭션이 없는 환경에서 *각 단계의 실패에 보상*하는 패턴이 필요" — 단순 분리는 *보상 단계가 없다는* 점에서 구조적으로 약합니다.
 

@@ -156,7 +156,7 @@ public class NotificationService {
 }
 ```
 
-`REQUIRED`'s inner throwing creates the Woowahan *why is this rolling back?* incident pattern. `REQUIRES_NEW` keeps the failure isolated. (See series article 7, §8 for the self-invocation combination.)
+`REQUIRED`'s inner throwing creates the Woowahan *why is this rolling back?* incident pattern. `REQUIRES_NEW` keeps the failure isolated. (See series article 7, Section 8 for the self-invocation combination.)
 
 ### 2.3 NESTED's *real* meaning — Savepoints
 
@@ -184,7 +184,7 @@ The point: **NESTED commits as a whole at the outer commit point.** Inner does n
 | `NESTED` misunderstanding | mistaken for separate Tx → expect external-system commit | switch to `REQUIRES_NEW` |
 | `SUPPORTS` ⇄ `NOT_SUPPORTED` | reverse behavior — `SUPPORTS` joins existing, `NOT_SUPPORTED` suspends | one-line guide: *use existing Tx if present? → SUPPORTS / don't? → NOT_SUPPORTED* |
 
-These seven are *Spring's abstraction*. In the database it boils down to connection / transaction / savepoint combinations. §3 shows how that abstraction breaks in distributed environments.
+These seven are *Spring's abstraction*. In the database it boils down to connection / transaction / savepoint combinations. Section 3 shows how that abstraction breaks in distributed environments.
 
 ---
 
@@ -451,7 +451,7 @@ Design choices:
 
 ### 5.5 *Three* latencies — the finding from this measurement
 
-(Mirrors the [original measurement note](file:///Users/meyonsoo/Desktop/lemong/project/cj/commerce-comment-platform-be/docs/learning-notes/W1-exp09b.md), §5.4.)
+(Mirrors the [original measurement note](file:///Users/meyonsoo/Desktop/lemong/project/cj/commerce-comment-platform-be/docs/learning-notes/W1-exp09b.md), Section 5.4.)
 
 C/OFF (the "happy path") decomposes into *three different metrics*:
 

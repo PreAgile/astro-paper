@@ -129,7 +129,7 @@ Status=running ExitCode=0 OOMKilled=false
 ```
 
 - **`OOMKilled=false`** — 메모리 부족 아님. 호스트 OOM killer 가 죽인 게 아닙니다.
-- **`ExitCode=0`** — abort라면 보통 134(SIGABRT)나 음수 시그널이 찍혀야 할 텐데, 컨테이너 단위로는 0. 이건 우리가 수동으로 새 인스턴스를 띄우면서 컨테이너 ID 자체가 바뀐 결과였습니다 (자세한 건 §2.3).
+- **`ExitCode=0`** — abort라면 보통 134(SIGABRT)나 음수 시그널이 찍혀야 할 텐데, 컨테이너 단위로는 0. 이건 우리가 수동으로 새 인스턴스를 띄우면서 컨테이너 ID 자체가 바뀐 결과였습니다 (자세한 건 2.3 절).
 
 ### 2.2 abort 직후의 npm 출력
 

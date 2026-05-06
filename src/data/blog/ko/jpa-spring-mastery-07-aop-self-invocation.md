@@ -227,7 +227,7 @@ Spring ApplicationContext 부팅:
   5. 컨테이너가 *프록시* 를 의존성 주입에 사용
 ```
 
-대안은 *컴파일 타임 위빙* (AspectJ Compile-Time Weaving) 이나 *로드 타임 위빙* (Load-Time Weaving). 그 차이는 §6 에서 다룹니다.
+대안은 *컴파일 타임 위빙* (AspectJ Compile-Time Weaving) 이나 *로드 타임 위빙* (Load-Time Weaving). 그 차이는 6 절에서 다룹니다.
 
 </details>
 
@@ -295,7 +295,7 @@ sequenceDiagram
 
 이 chain 의 어느 단계도 *raw target 안에서 같은 객체의 다른 메서드 호출* 을 가로채지 않습니다. 프록시는 *외부* 에 있고, raw target 의 `this` 는 *내부* 라서 — `this.method()` 는 프록시 chain 을 우회합니다.
 
-이게 self-invocation 의 본질입니다. 다음 §3 에서 `TransactionInterceptor#invoke` 안을 라인 단위로 들어갑니다.
+이게 self-invocation 의 본질입니다. 다음 3 절에서 `TransactionInterceptor#invoke` 안을 라인 단위로 들어갑니다.
 
 ---
 
@@ -455,7 +455,7 @@ TransactionInterceptor.commitTransactionAfterReturning(txInfo)
 
 `Session.flush()` 가 dirty checking 을 트리거하는 위치. self-invocation 으로 commit 자체가 호출되지 않았으니 — flush 도 안 일어나고, `acc.deduct(amount)` 의 변경이 DB 에 반영되지 않습니다. `successes=100 / finalBalance=100` 의 측정값이 *정확히 이 메커니즘의 결과* 입니다.
 
-다음 §4 에서 *왜* self-invocation 이 이 6 단계를 우회하는지 — 바이트코드 수준에서 봅니다.
+다음 4 절에서 *왜* self-invocation 이 이 6 단계를 우회하는지 — 바이트코드 수준에서 봅니다.
 
 ---
 
@@ -516,7 +516,7 @@ public void deductOptimistic(long, long);
 
 ### 4.4 정확히 어디서 우회되는가
 
-§2.4 의 시퀀스 다이어그램을 다시 보면, **외부 호출자 → 프록시 → `TransactionInterceptor` → raw target** 의 chain 이 있습니다. self-invocation 은 *raw target 안에서 발생* 하므로 이미 chain 의 끝 (raw target 단계) 에 와 있는 상태입니다.
+2.4 절의 시퀀스 다이어그램을 다시 보면, **외부 호출자 → 프록시 → `TransactionInterceptor` → raw target** 의 chain 이 있습니다. self-invocation 은 *raw target 안에서 발생* 하므로 이미 chain 의 끝 (raw target 단계) 에 와 있는 상태입니다.
 
 ```
 [외부 호출자]
@@ -530,7 +530,7 @@ public void deductOptimistic(long, long);
 
 이 구조는 *수정 불가능* — Spring 의 AOP 가 *런타임 위빙* 이라 raw target 의 `this` 는 *영원히* raw 객체를 가리킵니다. 같은 클래스 내부에서 *어떻게 해도* 프록시를 거치게 만들 수 없습니다.
 
-§6 에서 이 한계를 *우회하는* 4 가지 방법을 봅니다. 그 전에 §5 에서 *같은 함정이 어디까지 퍼져 있는지* 봅니다.
+6 절에서 이 한계를 *우회하는* 4 가지 방법을 봅니다. 그 전에 5 절에서 *같은 함정이 어디까지 퍼져 있는지* 봅니다.
 
 ---
 
@@ -623,7 +623,7 @@ public class AdminService {
 @PreAuthorize         → MethodSecurityInterceptor → AOP 프록시
 ```
 
-**모두 Spring AOP 위에 빌드** → 모두 self-invocation 시 우회. 따라서 *워크어라운드도 같음*. §6 에서 4 가지 우회 방법.
+**모두 Spring AOP 위에 빌드** → 모두 self-invocation 시 우회. 따라서 *워크어라운드도 같음*. 6 절에서 4 가지 우회 방법.
 
 ---
 

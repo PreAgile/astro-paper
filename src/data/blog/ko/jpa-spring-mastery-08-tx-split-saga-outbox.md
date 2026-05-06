@@ -158,7 +158,7 @@ public class NotificationService {
 }
 ```
 
-`REQUIRED` 의 inner 가 예외 던지면 — 우아한 *이게 왜 롤백돼?* 사고 패턴. `REQUIRES_NEW` 면 격리됨. (시리즈 글 7 §8 self-invocation 결합 함정 참조)
+`REQUIRED` 의 inner 가 예외 던지면 — 우아한 *이게 왜 롤백돼?* 사고 패턴. `REQUIRES_NEW` 면 격리됨. (시리즈 글 7 의 8 절 self-invocation 결합 함정 참조)
 
 ### 2.3 NESTED 의 *진짜* 의미 — Savepoint
 
@@ -186,7 +186,7 @@ COMMIT;                          -- outer 정상 commit (orders 살아있음)
 | `NESTED` 이해 오류 | 별개 Tx 로 오해 → 외부 시스템 commit 기대 | `REQUIRES_NEW` 로 변경 |
 | `SUPPORTS` ⇄ `NOT_SUPPORTED` | 동작이 *반대* — `SUPPORTS` 는 기존 참여, `NOT_SUPPORTED` 는 보류 | 한 줄 가이드: *기존 Tx 가 있으면 사용? → SUPPORTS / 사용 안 함? → NOT_SUPPORTED* |
 
-이 7 종 모두 *Spring 의 추상화* — DB 차원에선 connection / transaction / savepoint 의 조합. 다음 §3 에서 *분산 환경* 에선 이 추상화가 어떻게 깨지는지 봅니다.
+이 7 종 모두 *Spring 의 추상화* — DB 차원에선 connection / transaction / savepoint 의 조합. 다음 3 절에서 *분산 환경* 에선 이 추상화가 어떻게 깨지는지 봅니다.
 
 ---
 
@@ -456,7 +456,7 @@ public void pollOutbox() {
 
 ### 5.5 *3 가지 latency* — 본 측정의 발견
 
-(이 부분은 [원 측정 기록](file:///Users/meyonsoo/Desktop/lemong/project/cj/commerce-comment-platform-be/docs/learning-notes/W1-exp09b.md) 의 §5.4 와 동일)
+(이 부분은 [원 측정 기록](file:///Users/meyonsoo/Desktop/lemong/project/cj/commerce-comment-platform-be/docs/learning-notes/W1-exp09b.md) 의 5.4 절과 동일)
 
 C/OFF (정상 시나리오) 의 latency 를 분해하면 *3가지가 다른 metric*:
 

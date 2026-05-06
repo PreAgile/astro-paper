@@ -928,7 +928,7 @@ No-Offset 페이지네이션 결정 사항의 4.3장 룰을 일반화:
 
 #### Q. "EXPLAIN ANALYZE 의 `Filter:` 와 `Index Range Scan over` 차이는?"
 
-이 글이 측정으로 보여준 것은 — **Filter** 자체가 *항상 나쁜 건 아니지만* (LIMIT 가 작고 매칭률 높으면 OK), **Filter 아래 자식 연산자가 *대량 row 를 올려 보내는지* 가 핵심 신호**. 자식이 `rows=1e+6` 같은 큰 숫자면 push down 실패 (예: row constructor 케이스). 자식이 `rows=25` 같이 작으면 Filter 도 OK (예: LIMIT 5 + state='CONFIRMED' 매칭률 높은 케이스 — 본 글 §8.2). **Index Range Scan over (cond)** 는 cond 가 *인덱스 안의 range 로 변환* 되어 binary search + leaf walk 로 처리 — O(log N + matching). 본 시리즈 측정에서 row constructor `(a,b)<(?,?)` 는 Filter 단계 + 자식 1M scan = 154ms, OR 분리 형태는 Range Scan over 로 rows=20 = 0.30ms — **약 500배 차이**. 같은 의미의 SQL 두 개가 *연산자 트리 한 줄 차이* + *자식 row 수 차이* 로 500배 갈라집니다 ([실측 — Java/Spring]).
+이 글이 측정으로 보여준 것은 — **Filter** 자체가 *항상 나쁜 건 아니지만* (LIMIT 가 작고 매칭률 높으면 OK), **Filter 아래 자식 연산자가 *대량 row 를 올려 보내는지* 가 핵심 신호**. 자식이 `rows=1e+6` 같은 큰 숫자면 push down 실패 (예: row constructor 케이스). 자식이 `rows=25` 같이 작으면 Filter 도 OK (예: LIMIT 5 + state='CONFIRMED' 매칭률 높은 케이스 — 본 글 8.2 절). **Index Range Scan over (cond)** 는 cond 가 *인덱스 안의 range 로 변환* 되어 binary search + leaf walk 로 처리 — O(log N + matching). 본 시리즈 측정에서 row constructor `(a,b)<(?,?)` 는 Filter 단계 + 자식 1M scan = 154ms, OR 분리 형태는 Range Scan over 로 rows=20 = 0.30ms — **약 500배 차이**. 같은 의미의 SQL 두 개가 *연산자 트리 한 줄 차이* + *자식 row 수 차이* 로 500배 갈라집니다 ([실측 — Java/Spring]).
 
 #### Q. "Push Down 이란 무엇이고 왜 중요한가?"
 

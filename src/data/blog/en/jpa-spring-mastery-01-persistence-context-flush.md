@@ -320,7 +320,7 @@ Trade-off: in-flight changes are *not visible* to subsequent queries within the 
 
 ### 4.5 What Spring's `readOnly = true` actually does
 
-When Spring sees `readOnly = true`, it switches Hibernate to `FlushMode.MANUAL`. AutoFlush is off. Details in §7.
+When Spring sees `readOnly = true`, it switches Hibernate to `FlushMode.MANUAL`. AutoFlush is off. Details in Section 7.
 
 ---
 

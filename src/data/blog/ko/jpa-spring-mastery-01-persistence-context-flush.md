@@ -319,7 +319,7 @@ public void nativeQueryFlush() {
 
 ### 4.5 Spring `@Transactional(readOnly=true)` 의 효과
 
-Spring 이 `readOnly=true` 면 *Hibernate 의 FlushMode 를 MANUAL 로 변경*. 이 효과는 다음 §7 에서 자세히.
+Spring 이 `readOnly=true` 면 *Hibernate 의 FlushMode 를 MANUAL 로 변경*. 이 효과는 다음 7 절에서 자세히.
 
 ---
 

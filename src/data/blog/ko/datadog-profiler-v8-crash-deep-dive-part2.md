@@ -132,7 +132,7 @@ GC race 외에 가능한 가설은 V8 자체의 `WeakCodeRegistry` 정리 로직
 
 이 가설을 검증하려면 (a) Node 22 의 마이너 버전별로 같은 부하를 재현해 차이를 보거나, (b) V8 ChangeLog 에서 `WeakCodeRegistry`, `CpuProfiler`, `GlobalHandles` 관련 커밋을 시간순으로 비교해야 합니다.
 
-본 사고에서는 우리가 (a) 를 시도하기엔 운영 부담이 너무 컸기에 출혈 차단(§5.1) 으로 충분하다고 판단했습니다. 다만 이 가능성은 열어두고 있습니다 — 다음에 같은 abort 가 다른 스택 모양으로 또 나면, 그땐 V8 회귀 가설을 좀 더 진지하게 봐야 할 겁니다.
+본 사고에서는 우리가 (a) 를 시도하기엔 운영 부담이 너무 컸기에 출혈 차단(5.1 절) 으로 충분하다고 판단했습니다. 다만 이 가능성은 열어두고 있습니다 — 다음에 같은 abort 가 다른 스택 모양으로 또 나면, 그땐 V8 회귀 가설을 좀 더 진지하게 봐야 할 겁니다.
 
 </details>
 
@@ -172,7 +172,7 @@ GC race 외에 가능한 가설은 V8 자체의 `WeakCodeRegistry` 정리 로직
 3) 직렬화된 .pprof 를 dd-agent 로 전송
 ```
 
-이 1분 타이머의 콜백이 abort 시점의 호출 체인 시작점입니다. 1편 §5의 흐름도를 다시 보면, 9~10번 프레임의 이름 없는 JIT 코드가 바로 이 setInterval 콜백의 마지막 자리입니다.
+이 1분 타이머의 콜백이 abort 시점의 호출 체인 시작점입니다. 1편 5 절의 흐름도를 다시 보면, 9~10번 프레임의 이름 없는 JIT 코드가 바로 이 setInterval 콜백의 마지막 자리입니다.
 
 ### 3.3 `WallProfiler::StopAndCollect` 의 두 변종
 
@@ -225,7 +225,7 @@ $ cat node_modules/@datadog/pprof/package.json | grep version
 
 ### 4.3 lazy 가 race window 를 넓히는 메커니즘 (가설)
 
-이제 §2.5 의 가설을 한 번 더 정밀하게 그립니다.
+이제 2.5 절의 가설을 한 번 더 정밀하게 그립니다.
 
 **옛 경로 (`stop`)**:
 ```text
@@ -251,7 +251,7 @@ stopAndCollect() 호출
 
 신 경로는 의도적으로 V8 객체의 수명을 직렬화가 끝날 때까지 늘립니다. 그 늘어난 구간에 GC 가 한 번이라도 끼면 weak callback 이 발동하면서 슬롯이 먼저 FREE 로 토글될 수 있고, 나중에 `StopProfiling` 의 일제 반납이 그 슬롯을 또 비우려 듭니다 → CHECK fail.
 
-다시 말씀드리면 이건 **가설** 입니다. 우리 측에서 V8 디버그 빌드로 race 를 결정적으로 재현하지 못했고, Datadog 측 공시된 동일 시그니처 이슈도 아직 없습니다(§4.5). 다만 다음 두 가지 사실은 강한 정황 증거입니다.
+다시 말씀드리면 이건 **가설** 입니다. 우리 측에서 V8 디버그 빌드로 race 를 결정적으로 재현하지 못했고, Datadog 측 공시된 동일 시그니처 이슈도 아직 없습니다(4.5 절). 다만 다음 두 가지 사실은 강한 정황 증거입니다.
 
 1. abort 한 함수 이름이 정확히 `StopAndCollectImpl` 이라는 신 경로의 함수.
 2. 그 신 경로가 운영 라이브러리 입장에서는 **6주 전에 처음 기본이 된 코드** 입니다.
@@ -344,12 +344,12 @@ services:
 
 이번 사고에서 명백히 일을 잘 한 한 사람이 있습니다. **도커의 재시작 정책** 입니다.
 
-1편 §2.3 에서 `RestartCount=0` 이 우리를 잠깐 헷갈리게 했지만, 정책 자체(`unless-stopped`) 는 살아있는 상태였습니다. 사람(우리 팀) 이 더 빨라서 정책이 일을 시작하기 전에 새 컨테이너를 띄워버렸을 뿐, V8 fatal 같은 SIGABRT 에 대해서도 정책은 자동으로 컨테이너를 재기동하게 되어 있습니다.
+1편 2.3 절에서 `RestartCount=0` 이 우리를 잠깐 헷갈리게 했지만, 정책 자체(`unless-stopped`) 는 살아있는 상태였습니다. 사람(우리 팀) 이 더 빨라서 정책이 일을 시작하기 전에 새 컨테이너를 띄워버렸을 뿐, V8 fatal 같은 SIGABRT 에 대해서도 정책은 자동으로 컨테이너를 재기동하게 되어 있습니다.
 
 운영적 시사점:
 
 - **자동 재시작 정책은 V8 fatal 같은 "JS 가 잡을 수 없는 죽음" 에서 가장 큰 가치를 발휘합니다.** `process.on('uncaughtException')` 같은 후크가 잡지 못하는 abort 를 컨테이너 단위에서 받아내 줍니다.
-- 정책 검증은 `RestartCount` 가 아니라 `HostConfig.RestartPolicy` + `docker events` 로 해야 합니다 (1편 §2.3).
+- 정책 검증은 `RestartCount` 가 아니라 `HostConfig.RestartPolicy` + `docker events` 로 해야 합니다 (1편 2.3 절).
 - 컨테이너가 아닌 환경 (베어메탈 + PM2, systemd 등) 이라면 동일 효과를 PM2 의 `restart_delay` / systemd 의 `Restart=on-failure` 로 보장해야 합니다.
 
 ### 5.5 마지막 한 가지 — 코어덤프와 stack 보관

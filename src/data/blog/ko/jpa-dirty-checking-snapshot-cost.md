@@ -5,6 +5,7 @@ modDatetime: 2026-05-05T01:00:00.000Z
 title: "@Transactional(readOnly = true) 한 줄이 응답시간을 132배 줄인 이야기 — JPA Dirty Checking 의 정체 해부"
 featured: true
 draft: false
+depth: deep-dive
 tags:
   - JPA
   - Hibernate
@@ -87,18 +88,18 @@ public void incrementRetry(Long id) {
 | 영속성 컨텍스트 size | 비교 횟수 (대략) | 측정값 (참고) |
 |---|---:|---|
 | 1 entity × 10 컬럼 | 10 | 비교 자체는 µs 단위 — *체감 0ms*, 트랜잭션 전체로도 ms 한 자릿수 |
-| 1만 entity × 10 컬럼 | 10만 | **flush + 1만 UPDATE 발사 합쳐 3,450ms** (§2 의 S1) |
-| 같은 1만 entity, readOnly = 비교 생략 | 0 | **26ms** (§2 의 S2) |
+| 1만 entity × 10 컬럼 | 10만 | **flush + 1만 UPDATE 발사 합쳐 3,450ms** (2 절의 S1) |
+| 같은 1만 entity, readOnly = 비교 생략 | 0 | **26ms** (2 절의 S2) |
 
 차이 = 약 **3,400ms**. 그런데 *이 3,400ms 의 대부분은 컬럼 비교 loop 자체가 아니라*, 비교 결과 dirty 로 마킹된 엔티티마다 발사된 **1만 UPDATE round-trip** 이다 (PropertyAccess 호출 1 회는 sub-µs ~ µs 단위라, 10만 회 비교의 순수 CPU 는 보통 수십 ms 수준).
 
-즉 "dirty checking 이 비싸다" 의 진짜 의미는 *비교 loop CPU* 가 아니라 ***그 결과로 발사되는 UPDATE 폭주*** — 그래서 entity 수가 늘어나면 비용은 *비교 횟수에 비례* 가 아니라 *UPDATE 횟수 × round-trip latency* 에 비례해서 폭증한다. 이 점이 §2 의 6 시나리오에서 그대로 드러난다.
+즉 "dirty checking 이 비싸다" 의 진짜 의미는 *비교 loop CPU* 가 아니라 ***그 결과로 발사되는 UPDATE 폭주*** — 그래서 entity 수가 늘어나면 비용은 *비교 횟수에 비례* 가 아니라 *UPDATE 횟수 × round-trip latency* 에 비례해서 폭증한다. 이 점이 2 절의 6 시나리오에서 그대로 드러난다.
 
 ---
 
 ### 1.2 왜 이렇게 설계됐나 — JPA 가 dirty checking 을 택한 3 가지 의도
 
-§1.1 끝의 "1만 entity = 3,450ms" 를 보고 자연스럽게 떠오르는 질문 — *"이렇게 비싼 줄 알면서 왜 이런 모델인가?"*. JPA / Hibernate 가 snapshot + dirty checking 을 채택한 데는 분명한 설계 의도가 있다. 뿌리는 ORM 의 두 핵심 설계 패턴 — *Identity Map* 과 *Unit of Work* — 이고, 그 위에 JPA spec 이 ***managed entity*** 라는 개념을 올렸다. managed 상태의 entity 가 트랜잭션 안에서 변경되면 commit / flush 시점에 DB 에 반영되도록 — *그 자동 반영을 어떻게 구현할 것인가* 의 답으로 JPA / Hibernate 가 택한 방식이 dirty checking 이다.
+1.1 절 끝의 "1만 entity = 3,450ms" 를 보고 자연스럽게 떠오르는 질문 — *"이렇게 비싼 줄 알면서 왜 이런 모델인가?"*. JPA / Hibernate 가 snapshot + dirty checking 을 채택한 데는 분명한 설계 의도가 있다. 뿌리는 ORM 의 두 핵심 설계 패턴 — *Identity Map* 과 *Unit of Work* — 이고, 그 위에 JPA spec 이 ***managed entity*** 라는 개념을 올렸다. managed 상태의 entity 가 트랜잭션 안에서 변경되면 commit / flush 시점에 DB 에 반영되도록 — *그 자동 반영을 어떻게 구현할 것인가* 의 답으로 JPA / Hibernate 가 택한 방식이 dirty checking 이다.
 
 #### (1) Transparent persistence — JDBC 의 "수동 update" 를 없애기 위해
 
@@ -113,7 +114,7 @@ ps.setLong(2, id);
 ps.executeUpdate();
 ```
 
-JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` *한 줄로 끝나려면* 누군가가 *변경을 알아채고* *commit 시점에 자동으로 UPDATE 를 발사* 해야 한다 — 그 "누군가" 가 dirty check loop 이고, *변경 전 상태* 를 비교 기준으로 들고 있어야 하니 snapshot 이 필요하다. transparent persistence 라는 약속을 지키면서 변경을 알아내는 *가장 보편적인 방식* 이 — entity 본체를 직접 수정하지 않고 *별도 메모리에 비교 기준을 두는* 것이다 (다른 방식으로 bytecode enhancement / 이벤트 기반 추적도 가능하며, Hibernate 도 옵션으로 제공한다 — §1.5).
+JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` *한 줄로 끝나려면* 누군가가 *변경을 알아채고* *commit 시점에 자동으로 UPDATE 를 발사* 해야 한다 — 그 "누군가" 가 dirty check loop 이고, *변경 전 상태* 를 비교 기준으로 들고 있어야 하니 snapshot 이 필요하다. transparent persistence 라는 약속을 지키면서 변경을 알아내는 *가장 보편적인 방식* 이 — entity 본체를 직접 수정하지 않고 *별도 메모리에 비교 기준을 두는* 것이다 (다른 방식으로 bytecode enhancement / 이벤트 기반 추적도 가능하며, Hibernate 도 옵션으로 제공한다 — 1.5 절).
 
 #### (2) Write-behind — Unit of Work 패턴의 직접 구현
 
@@ -149,14 +150,14 @@ write-behind 가 없으면 batch_size / @DynamicUpdate / 2nd-level cache write-t
 |---|---|
 | flush 시 DB 에서 원본 row 를 *재 SELECT* 후 비교 | 매 flush 마다 round-trip 1 회 추가 — DB 부하 폭증, JPA 의 추상화 이득이 사라짐 |
 | setter 호출마다 *즉시 UPDATE* 발사 | 위 (2) 의 write-behind 이점 전부 상실 — N 번 변경 시 N round-trip + 트랜잭션 rollback 시 보상 SQL 필요 |
-| **Bytecode enhancement** 로 setter 안 변경 추적 (§1.5 참조) | CPU 비교 비용은 줄지만 *모든 entity 가 빌드 시 변환* 필요 + JPA spec default 가 아님 + snapshot 도 매핑에 따라 여전히 일부 보관 |
+| **Bytecode enhancement** 로 setter 안 변경 추적 (1.5 절 참조) | CPU 비교 비용은 줄지만 *모든 entity 가 빌드 시 변환* 필요 + JPA spec default 가 아님 + snapshot 도 매핑에 따라 여전히 일부 보관 |
 | **메모리에 snapshot 보관 (Hibernate 의 default 선택)** | 메모리 약 2 배 — 그러나 *DB round-trip 0 + 빌드 단순 + 위 (3) 의 기능들이 모두 같은 기준점 위에서 동작* |
 
-JPA spec 이 정해진 시점 (EJB 3.0 / JSR 220, 2006) 의 trade-off 는 명확했다 — *DB round-trip 은 ms 단위, 메모리 접근은 ns 단위*. 메모리 2 배 비용은 round-trip 1 회보다 *수만 배 쌌다*. 지금은 RAM 가격 / GC 비용 / heap fragmentation 등 환경이 달라졌지만, *spec 이 결정된 시점* 의 합리적 결정이었고, 이후 고비용 워크로드를 위한 보완책으로 *bytecode enhancement* (§1.5) 와 *bulk JPQL / raw JDBC 우회* (§5) 가 따로 마련됐다.
+JPA spec 이 정해진 시점 (EJB 3.0 / JSR 220, 2006) 의 trade-off 는 명확했다 — *DB round-trip 은 ms 단위, 메모리 접근은 ns 단위*. 메모리 2 배 비용은 round-trip 1 회보다 *수만 배 쌌다*. 지금은 RAM 가격 / GC 비용 / heap fragmentation 등 환경이 달라졌지만, *spec 이 결정된 시점* 의 합리적 결정이었고, 이후 고비용 워크로드를 위한 보완책으로 *bytecode enhancement* (1.5 절) 와 *bulk JPQL / raw JDBC 우회* (5 절) 가 따로 마련됐다.
 
 #### 정리 — 왜 비용을 내고 사는가
 
-> snapshot 은 dirty checking 뿐 아니라 *버전 검증 / SQL 생성 최적화 / 2차 캐시 연동 / 변경 이벤트 추적* 등 여러 ORM 기능의 **기준점** 역할을 한다. 즉 단일 기능이 아니라 ORM 전체 동작의 공통 기반이라서 그 비용이 생긴다. 그래서 본 글의 결론은 "버려라" 가 아니라 — **"지금 이 작업이 그 기능들을 다 필요로 하는가"** 를 묻고, 아니면 §3~5 의 우회법으로 *국지적으로* 빠진다.
+> snapshot 은 dirty checking 뿐 아니라 *버전 검증 / SQL 생성 최적화 / 2차 캐시 연동 / 변경 이벤트 추적* 등 여러 ORM 기능의 **기준점** 역할을 한다. 즉 단일 기능이 아니라 ORM 전체 동작의 공통 기반이라서 그 비용이 생긴다. 그래서 본 글의 결론은 "버려라" 가 아니라 — **"지금 이 작업이 그 기능들을 다 필요로 하는가"** 를 묻고, 아니면 3 절부터 5 절까지의 우회법으로 *국지적으로* 빠진다.
 
 ---
 
@@ -296,7 +297,7 @@ Spring 이 `readOnly = true` 를 만나면 다음을 *동시에* 수행한다:
 **(3) `FlushMode` 가 `MANUAL` 로 바뀐다**
 - 일반 모드는 `AUTO` — 쿼리 발사 직전마다 dirty check + flush
 - MANUAL 모드는 *명시적 flush 호출 없으면 자동 flush 가 일어나지 않음*
-- Commit 시점의 자동 flush 도 꺼짐 → §1.1 의 (b) 단계가 통째로 생략됨
+- Commit 시점의 자동 flush 도 꺼짐 → 1.1 절의 (b) 단계가 통째로 생략됨
 
 **(4) JDBC `Connection.setReadOnly(true)`**
 - 일부 드라이버는 read replica 라우팅 힌트로 해석 (예: MySQL Connector/J 의 replication URL)
@@ -587,7 +588,7 @@ A. `flushAutomatically = true` 는 bulk JPQL *발사 전* 영속성 컨텍스트
 
 ## 참고 자료
 
-### 설계 의도 / 패턴의 근거 (§1.2 의 설계 배경 설명을 뒷받침)
+### 설계 의도 / 패턴의 근거 (1.2 절의 설계 배경 설명을 뒷받침)
 - **Martin Fowler — *Patterns of Enterprise Application Architecture*** (Addison-Wesley, 2002): **Identity Map** 패턴 (영속성 컨텍스트의 개념적 기반) + **Unit of Work** 패턴 (write-behind flush 의 개념적 기반) — Hibernate 가 ORM 구현으로 그대로 가져옴
 - **Christian Bauer / Gavin King / Gary Gregory — *Java Persistence with Hibernate, 2nd ed*** (Manning, 2015): ch.1 "Understanding object/relational persistence" (transparent persistence 철학), ch.10 "Managing data" (자동 dirty 감지 / Unit of Work / write-behind)
 - **JPA Specification (JSR 338)** §3.2 "Entity Instance's Life Cycle Management" — managed entity 의 변경이 commit / flush 시점에 DB 에 반영되어야 한다는 spec 요구사항 정의

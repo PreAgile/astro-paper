@@ -894,7 +894,7 @@ Restating the implication from Section 2. EXPLAIN's `type=ALL` is colloquially "
 
 ### 12.1 Big Tech sources (URL verified ≥ 6)
 
-| source | post | which § does it support |
+| source | post | which section does it support |
 |---|---|---|
 | Toss SLASH24 | [Next core banking — Oracle→MySQL + InnoDB MVCC](https://haon.blog/article/toss-slash/next-core-banking/) | Section 2 clustered index, Section 3 secondary lookup |
 | LINE Engineering | [MySQL Workbench VISUAL EXPLAIN](https://engineering.linecorp.com/ko/blog/mysql-workbench-visual-explain-index) | Section 11 type=ALL detection |

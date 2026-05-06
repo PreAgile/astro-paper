@@ -801,7 +801,7 @@ GC log 분석:
 
 ### 8.6 풀 사이즈 결정의 *비기술* 제약 — 운영 정치 {#non-tech-constraints}
 
-§4.5 가 기술 관점만 다뤘는데, 실무에서는 *비기술 제약* 이 의사결정 dominant.
+4.5 절이 기술 관점만 다뤘는데, 실무에서는 *비기술 제약* 이 의사결정 dominant.
 
 ### 8.6.1 6 가지 비기술 압박
 
@@ -950,57 +950,57 @@ GC log 분석:
 
 ### 11.3 자체 체크리스트 — 글 다 읽고 *self-check*
 
-이 글의 학습 가치 흡수를 *직접* 검증하는 6 카드. 5개 이상 ✅ 면 합격, 4개 이하면 §3·§5·§8 다시 정독.
+이 글의 학습 가치 흡수를 *직접* 검증하는 6 카드. 5개 이상 ✅ 면 합격, 4개 이하면 3 절·5 절·8 절 다시 정독.
 
 ```
 [ ] 1. 풀 고갈 stack signature 3 frame 을 외우고 있다
        → ConcurrentBag.borrow → SynchronousQueue.poll → LockSupport.parkNanos
-       → §3.2 stack 트레이스 라인별 의미
+       → 3.2 절 stack 트레이스 라인별 의미
 
 [ ] 2. RUNNABLE 인데 socketRead0 인 thread 가 *실제로 실행 중이 아니라는* 걸 안다
-       → §5.4 RUNNABLE 함정 — JVM 의 논리 분류 vs OS 의 실제 상태
+       → 5.4 절 RUNNABLE 함정 — JVM 의 논리 분류 vs OS 의 실제 상태
        → stack 최상단 frame 휴리스틱 표
 
 [ ] 3. dump 1회 vs 3회 차이를 30초 안에 설명할 수 있다
-       → §2.3 — 1회는 순간 상태, 3회 5초 간격이 순간/지속 판별 최소 단위
-       → §6.4 의 50ms spike 같은 false positive 거름
+       → 2.3 절 — 1회는 순간 상태, 3회 5초 간격이 순간/지속 판별 최소 단위
+       → 6.4 절의 50ms spike 같은 false positive 거름
 
 [ ] 4. connectionTimeout 너무 길게 / 너무 짧게 의 trade-off 를 둘 다 안다
-       → §4.5 — 60s+ 면 silent latency, 1s 이하 면 fail-fast cascade
+       → 4.5 절 — 60s+ 면 silent latency, 1s 이하 면 fail-fast cascade
        → 실무 권장 30s + `awaiting > 0` 알람 병행
 
 [ ] 5. dump 가 *못 잡는* 3가지 (GC pause / memory leak / 시간 축) 를 안다
-       → §10 Q4 — STW 시 dump 도 못 받음, heap 보유는 안 보임, 빈도는 안 보임
+       → 10 절 Q4 — STW 시 dump 도 못 받음, heap 보유는 안 보임, 빈도는 안 보임
        → GC log + JFR + APM 4종 운영 필요
 
 [ ] 6. 알람 임계값 (pending > 0 for 30s) 의 *30초* 가 왜 거기 붙었는지 안다
-       → §6.4 + §7.1 — 50ms spike 같은 instant 무시 위한 hysteresis
+       → 6.4 절 + 7.1 절 — 50ms spike 같은 instant 무시 위한 hysteresis
        → spike vs sustained 분리 정책
 ```
 
 ### 11.4 시니어 관점 자체 체크리스트 — *기술 너머* 카드 5
 
-§8.4~8.6 을 정독한 후 self-check. 3개 이상 ✅ 면 시니어 신호.
+8.4 절부터 8.6 절까지를 정독한 후 self-check. 3개 이상 ✅ 면 시니어 신호.
 
 ```
 [ ] 1. Incident 시 IC (Incident Commander) 의 *비기술* 4 책임을 말할 수 있다
-       → §8.4.2 — Communication / Coordination / Customer-facing / Closeout
+       → 8.4.2 절 — Communication / Coordination / Customer-facing / Closeout
        → "후배에게 fix 위임, IC 는 traffic control" 가 정석
 
 [ ] 2. *침묵의 함정* 이 무엇인지 안다 + 회피 룰을 안다
-       → §8.4.1 — fix 시간 낙관 추정 → 공지 미룸 → 사용자 재시도 폭증
+       → 8.4.1 절 — fix 시간 낙관 추정 → 공지 미룸 → 사용자 재시도 폭증
        → P1/P2 는 2분 안 status page 의무
 
 [ ] 3. 5 Whys 를 본 글 사고에 적용해 5단계까지 갈 수 있다
-       → §8.5.1 — 풀 고갈 → 외부 latency → 코드 패턴 → alarm threshold → SLO 부재
+       → 8.5.1 절 — 풀 고갈 → 외부 latency → 코드 패턴 → alarm threshold → SLO 부재
        → 1차 원인에서 멈추면 6개월 후 재발
 
 [ ] 4. *Blameless* 가 왜 시니어 책임인지 설명할 수 있다
-       → §8.5.3 — "Alice 가 잘못" 추궁 = 다음 incident 때 dump 숨김
+       → 8.5.3 절 — "Alice 가 잘못" 추궁 = 다음 incident 때 dump 숨김
        → "시스템이 어떻게 통과시켰나" frame 전환
 
 [ ] 5. DBA 와 max_connections 협상 시 *후배 vs 시니어* 대화 차이를 안다
-       → §8.6.3 — 후배는 "해결책 요청", 시니어는 "문제 + 옵션 제시"
+       → 8.6.3 절 — 후배는 "해결책 요청", 시니어는 "문제 + 옵션 제시"
        → 상대 팀이 공동 의사결정자로 들어옴
 ```
 
@@ -1053,7 +1053,7 @@ GC log 분석:
 - [Doug Lea — A Java Fork/Join Framework](http://gee.cs.oswego.edu/dl/papers/fj.pdf) — work-stealing
 - [Ron Pressler — Project Loom slide](https://cr.openjdk.org/~rpressler/loom/loom/sol1_part1.html) — virtual thread 의 park 메커니즘
 
-### Incident Response / Postmortem (§8.4~8.6 시니어 관점 보강)
+### Incident Response / Postmortem (8.4 절부터 8.6 절까지 시니어 관점 보강)
 - [Google SRE Book — Managing Incidents](https://sre.google/sre-book/managing-incidents/) — IC / Communication / Coordination
 - [Google SRE — Blameless Postmortems](https://sre.google/sre-book/postmortem-culture/) — *시스템 결함* frame
 - [Atlassian — Incident Communication Best Practices](https://www.atlassian.com/incident-management/incident-communication) — status page / customer-facing

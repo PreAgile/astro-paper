@@ -225,7 +225,7 @@ Spring ApplicationContext bootstrap:
   5. The container injects the *proxy*
 ```
 
-Alternatives are *compile-time weaving* (AspectJ CTW) and *load-time weaving* (LTW) — covered in §6.
+Alternatives are *compile-time weaving* (AspectJ CTW) and *load-time weaving* (LTW) — covered in Section 6.
 
 </details>
 
@@ -291,7 +291,7 @@ sequenceDiagram
 
 The shape: **external caller → proxy → `TransactionInterceptor` → raw target**. No step in this chain intercepts *another method call inside the raw target on the same object*. The proxy lives on the *outside*, the raw target's `this` is on the *inside* — `this.method()` bypasses the chain.
 
-That is self-invocation, in one sentence. §3 walks down inside `TransactionInterceptor#invoke` line by line.
+That is self-invocation, in one sentence. Section 3 walks down inside `TransactionInterceptor#invoke` line by line.
 
 ---
 
@@ -449,7 +449,7 @@ TransactionInterceptor.commitTransactionAfterReturning(txInfo)
 
 `Session.flush()` is the line that fires dirty-checking. Self-invocation skipped commit entirely, so flush never ran, so `acc.deduct(amount)` never reached the DB. The measurement (`successes=100 / finalBalance=100`) is exactly what that mechanism produces.
 
-§4 explains why self-invocation skips these six stages, at the bytecode level.
+Section 4 explains why self-invocation skips these six stages, at the bytecode level.
 
 ---
 
@@ -508,7 +508,7 @@ public void deductOptimistic(long, long);
 
 ### 4.4 Where exactly the bypass happens
 
-Recall the §2.4 chain — **caller → proxy → `TransactionInterceptor` → raw target**. Self-invocation happens *inside the raw target*, so we are already at the chain's tail.
+Recall the Section 2.4 chain — **caller → proxy → `TransactionInterceptor` → raw target**. Self-invocation happens *inside the raw target*, so we are already at the chain's tail.
 
 ```
 [caller]
@@ -522,7 +522,7 @@ Recall the §2.4 chain — **caller → proxy → `TransactionInterceptor` → r
 
 This shape can't be patched away. Spring's runtime weaving means the raw target's `this` will *always* be the raw object. From inside the same class, *no* mechanism can route the call back through the proxy without explicit help.
 
-§6 covers four ways to provide that help. First, §5 shows just how broad this trap is.
+Section 6 covers four ways to provide that help. First, Section 5 shows just how broad this trap is.
 
 ---
 
@@ -613,7 +613,7 @@ This case is the dangerous one. The contradiction does not show in functional be
 @PreAuthorize         → MethodSecurityInterceptor    → AOP proxy
 ```
 
-**All six rest on Spring AOP** → all bypass on self-invocation. The workarounds are therefore the same. §6.
+**All six rest on Spring AOP** → all bypass on self-invocation. The workarounds are therefore the same. Section 6.
 
 ---
 
