@@ -232,6 +232,203 @@ Akamai Bot Manager가 적용되면서...
 
 ---
 
+## Deep-Dive Post Anatomy | "왜" 키워드 글의 해부도
+
+> **기준 사례**: `src/data/blog/ko/jpa-dirty-checking-snapshot-cost.md`
+>
+> 단순 튜토리얼이 아니라 **"왜 이렇게 설계되었는가"** 를 풀어내는 글에는 아래 8 개 장치를 *체크리스트* 로 강제한다. frontmatter 에 `depth: deep-dive` 라벨을 두고, 그 라벨이 붙은 글은 발행 전 이 8 개 항목을 직접 점검한다.
+
+### 8 개 필수 장치 (최소 6 개 충족)
+
+#### 1. Sceneful TL;DR — 비교 기준 분리
+
+수치 하나당 *어떤 시나리오 vs 어떤 시나리오* 인지 명시한다. 같은 숫자라도 비교축이 다르면 의미가 다르다.
+
+**좋은 예** — 비교 기준이 분리됨
+> S1 vs S2 ≈ 132× — *readOnly 가 빠진 메서드가 부담하는 비용*
+> S4 vs S6 ≈ 68× — *@DynamicUpdate 만으로는 dirty checking dominant 비용을 못 줄인다*
+> S5 vs S6 ≈ 1.32× — *JPA 추상화 오버헤드는 30% 수준*
+
+**나쁜 예** — 단일 배수로 뭉뚱그림
+> "readOnly 를 붙이면 132 배 빨라진다"
+
+비교축이 흐려질 수 있는 케이스는 "단, ~ 이므로 의미상 다른 비교다" 같은 보강 문장으로 본문에 들어가기 *전에* 차단한다.
+
+#### 2. 0번 절 — Cold Open (사건 중심 도입)
+
+가상/실제 운영 사고, 이슈 보고서, 인터뷰 답변, 코드 리뷰 코멘트 같은 **장면** 으로 시작한다. 독자가 1 분 안에 "이거 내 일이다" 라고 끌려와야 한다.
+
+```markdown
+## 0. 시작 — 흔한 운영 사고 시나리오
+
+> **[가상의 이슈 보고서]** "어제 저녁부터 /orders/recent 응답시간 p99 가
+> 평소 80ms 에서 3,400ms 로 튀었다. 트래픽은 그대로. 직전 배포의 새 메서드에
+> @Transactional 만 붙어 있고 readOnly = true 가 빠져 있었다 — 그 한 줄을
+> 추가하니 26ms 로 떨어졌다."
+```
+
+#### 3. "왜 이렇게 설계됐나" 챕터
+
+표면 동작 설명에서 멈추지 않고 — spec / 패턴 / 역사적 배경까지 거슬러 올라간다.
+
+- **spec 인용**: JSR 220 (JPA 1.0, 2006), JLS, RFC, Hibernate User Guide 절번호
+- **패턴 인용**: Identity Map / Unit of Work / CQRS / Saga 의 *원전* (Fowler PoEAA, DDIA)
+- **이슈 인용**: Spring SPR-XXXXX, JDK-XXXXX, Hibernate HHH-XXXXX
+
+결론은 "버려라" 가 아니라 **"지금 이 작업이 그 비용을 낼 가치가 있는가"** 로 향한다.
+
+#### 4. 한 줄 → 여러 단계 In-place Expansion
+
+`repo.findById(id)` 같은 *마법처럼 보이는 한 줄* 안에서 실제 무엇이 일어나는지 들여쓰기 트리로 펼친다. 독자가 마법으로 여기던 부분을 알고리즘으로 보게 만든다.
+
+```
+repo.findById(id)
+  └─ Spring Data JPA → Hibernate Session
+       └─ SELECT … FROM ... WHERE id = ?  (JDBC PreparedStatement)
+            └─ JDBC 가 ResultSet 으로 응답
+                 └─ Hibernate 가 ResultSet → Entity 변환 (= "hydrate")
+                      └─ 같은 값을 한 번 더 복사 → loadedState (= snapshot)
+```
+
+#### 5. 추상 → 클래스 풀패스 매핑 표
+
+추상 개념(snapshot, dirty checking, write-behind)을 *실제 라이브러리 클래스 FQN* 에 1:1 매핑한다. 독자가 IDE Go-to-Definition 으로 바로 따라갈 수 있어야 한다.
+
+| 역할 | 클래스 (FQN) | 무엇을 보관/수행하나 |
+|---|---|---|
+| 영속성 컨텍스트 | `org.hibernate.engine.internal.StatefulPersistenceContext` | 1차 캐시 + EntityEntry 매핑 |
+| Snapshot 보관 | `org.hibernate.engine.spi.EntityEntry#loadedState` | Object[] 형태로 변경 전 값 |
+| Flush 시 비교 | `org.hibernate.event.internal.DefaultFlushEntityEventListener` | dirty check loop 실행 |
+
+#### 6. 측정 N-시나리오 비교 (최소 4 개 + baseline)
+
+- **baseline 1 개** (raw JDBC, native call 등) 를 `1.0×` 로 두고 정규화
+- 최소 4 개 시나리오로 *비교축이 다른* 케이스를 분리
+- bar chart 는 ASCII 로도 충분 (`████████ 3,450ms`)
+- 각 비교축마다 "이 차이의 *의미*" 를 한 줄로 (위 §1 의 비교 기준 분리표가 곧 이 부분)
+
+#### 7. 자가진단 체크리스트 + 의사결정 매트릭스
+
+독자가 글을 닫고 자기 코드에 *바로 적용할 수 있는* 절차를 제공한다.
+
+- **자가진단**: 5–7 단계 (로그 켜는 법 → 측정 명령 → 판정 기준)
+- **의사결정 매트릭스**: 상황별 권장을 표로 (단 row / hot path / bulk / wide table…)
+
+#### 8. 한계와 FAQ
+
+본 측정/주장의 *한계* 를 글 *안에서* 명시한다.
+
+- 측정 환경 제약 (single-thread, batch_size 미지정, dialect, 버전)
+- 일반화 못 하는 경계 (concurrency, network, 프로덕션 vs 로컬)
+- 자주 받을 질문 3–5 개 선제 답변
+
+---
+
+### 단정 톤 회피 룰
+
+검증되지 않은 일반화는 본문에 단정형으로 박지 않는다. *직접 측정한 케이스* 와 *문서/원전이 단정한 케이스* 만 단정형으로 쓴다.
+
+| 단정 (피한다) | 톤다운 (권장) |
+|---|---|
+| "X 는 항상 Y 이다" | "X 는 보통 Y 이지만, 매핑/버전/설정에 따라 달라진다" |
+| "이 옵션을 쓰면 메모리도 줄어든다" | "CPU 비용은 확실히 줄지만, 메모리는 매핑/옵션에 따라 다르다" |
+| "절대 UPDATE 가 안 나간다" | "기본 흐름에선 silent 하게 무시되며, 그래서 더 위험하다" |
+| "벤치마크 10 배 빠르다" | "이 환경(버전/스레드/dataset)에서 10 배 — 운영에선 직접 측정 권장" |
+
+---
+
+### 표기 규칙 — 본문 안의 절 참조 (절대 룰)
+
+> **`§` (section sign) 기호는 본문에서 절대 사용하지 않는다.**
+> 한국어 본문 흐름에 부자연스럽고, 마크다운의 자연스러운 anchor 링크와도 분리되어 있으며, 자동 점검 스크립트가 이 기호를 발견하면 **CI 를 깨뜨린다** (`scripts/check-post-anatomy.mjs`).
+
+#### 한국어 글 — 변환 규칙
+
+| 피한다 | 권장 |
+|---|---|
+| `§1.1 끝의 "3,450ms"` | `1.1 절 끝의 "3,450ms"` 또는 `앞서 1.1 에서 본 "3,450ms"` |
+| `§5 참조` | `5 절 참조` 또는 `아래 "진짜 답은 그 위 단계" 절 참조` |
+| `§3~5 의 우회법` | `3 절부터 5 절까지의 우회법` 또는 `뒤이어 다룰 우회법` |
+| `(§1.5 참조)` | `(1.5 절 참조)` 또는 `(1.5 의 bytecode enhancement 절 참조)` |
+| `§3·§5·§8 다시 정독` | `3 절·5 절·8 절 다시 정독` |
+
+조사 결합 시 띄어쓰기 — `5 절에서`, `5 절을`, `5 절의` 처럼 *조사는 붙여 쓴다*. `절` 의 받침이 ㄹ 이므로 `이/은/을/과` 가 표준 (`5 절이`, `5 절은`, `5 절을`, `5 절과`).
+
+#### 영문 글 — 변환 규칙
+
+| 피한다 | 권장 |
+|---|---|
+| `§3 walks down…` | `Section 3 walks down…` |
+| `Recall the §2.4 chain` | `Recall the chain in Section 2.4` 또는 `Recall the Section 2.4 chain` |
+| `covered in §6.` | `covered in Section 6.` |
+| `§3~5 cover…` | `Sections 3 to 5 cover…` |
+
+#### 외부 spec 인용 — 예외 (유지)
+
+다음 패턴은 *공식 spec 의 표기법 자체* 라서 그대로 유지한다.
+
+- `JLS §15.21` (Java Language Specification — Oracle 의 공식 표기)
+- `(JSR 338) §3.2` (JPA Spec 의 공식 절 표기)
+- `RFC 7230 §3.1` (IETF RFC 의 공식 절 표기)
+
+이런 인용은 본문 *서술* 이 아니라 *외부 문서의 절 자체를 가리키는 좌표* 다. 변환하면 출처 추적성이 깨진다. `scripts/check-post-anatomy.mjs` 도 이 패턴은 화이트리스트로 통과시킨다.
+
+#### 마크다운 anchor 링크 권장
+
+내부 절 참조가 필요하면 마크다운 anchor 를 쓰는 게 *항상 더 좋다*:
+
+```markdown
+[bytecode enhancement 절](#15-diff-based-dirty-checking-vs-bytecode-enhancement)
+```
+
+#### 서사적 참조 우선
+
+본문에 절 번호가 너무 자주 등장한다는 것은 *글의 흐름이 절 번호에 의존하고 있다* 는 신호다. 가능하면 다음과 같은 *서사적 참조* 로 바꾸고, 절 번호는 정말 필요한 곳에만 남긴다.
+
+- `앞서 ~ 에서 본 ~` / `위에서 다룬 ~`
+- `뒤이어 다룰 ~` / `다음 절에서 보겠지만 ~`
+- `이 글의 마지막 부분에서 ~`
+
+#### 자동 일괄 변환 (기존 글)
+
+기존 글의 `§` 를 일괄 변환할 때는 다음 perl 룰을 사용한다 (한국어 글 기준, spec 인용 보호 포함). 영문 글은 `절` → `Section` 로 치환만 다르다.
+
+```perl
+# 1. spec 보호
+s/\bJLS §([0-9.]+)/JLS_KEEPSEC_$1/g;
+s/\(JSR (\d+)\)([*\s]*)§([0-9.]+)/(JSR $1)$2JSRKEEPSEC_$3/g;
+
+# 2. 변환 (긴 패턴 우선)
+s/§([0-9]+(?:\.[0-9]+)*)·§([0-9]+(?:\.[0-9]+)*)·§([0-9]+(?:\.[0-9]+)*)/$1 절·$2 절·$3 절/g;
+s/§([0-9]+(?:\.[0-9]+)*)·§([0-9]+(?:\.[0-9]+)*)/$1 절·$2 절/g;
+s/§([0-9]+(?:\.[0-9]+)*)~(?:§)?([0-9]+(?:\.[0-9]+)*)/$1 절부터 $2 절까지/g;
+s/§([0-9]+(?:\.[0-9]+)*)/$1 절/g;
+s/§/절/g;
+
+# 3. 조사 띄어쓰기 정리 (받침 ㄹ 정정 포함)
+s/(\d+(?:\.\d+)* 절) 가 /$1이 /g;
+s/(\d+(?:\.\d+)* 절) (의|이|을|를|에서|에|부터|까지|만|도|은|로|으로|과)\s/$1$2 /g;
+
+# 4. 보호 해제
+s/JLS_KEEPSEC_([0-9.]+)/JLS §$1/g;
+s/JSRKEEPSEC_([0-9.]+)/§$1/g;
+```
+
+> **주의**: perl byte 모드에서 `§?` 는 `§` (UTF-8 2-byte) 의 마지막 바이트만 옵션으로 만든다. 범위 패턴은 반드시 `(?:§)?` 로 그룹화 한다.
+
+---
+
+### 작성 워크플로우 (권장 순서)
+
+1. 측정 데이터를 먼저 모은다 (코드 + 결과 파일을 commit 으로 남김)
+2. **비교 기준 분리표** 를 *제일 먼저* 짠다 — 이게 TL;DR 의 골격
+3. "왜 이렇게 설계됐나" 챕터를 측정 *해석* 보다 앞에 끼운다
+4. In-place Expansion / 클래스 매핑 표 / 메모리 레이아웃 다이어그램을 채운다
+5. 자가진단 / 의사결정 매트릭스 / 한계 / FAQ 를 *발행 전* 강제 점검
+6. 모든 인용에 **References & Source Verification** (아래 섹션) 워크플로우를 적용한다
+
+---
+
 ## Architecture Diagrams
 
 ### 다이어그램 선택 기준
@@ -522,14 +719,126 @@ description: |
 
 ---
 
-## References | 참고자료 원칙
+## References & Source Verification | 참고자료와 출처 검증 원칙
 
-1. 모든 핵심 주장에는 출처를 남긴다
-2. 공식 문서를 1순위로 사용한다
-3. 기술 블로그는 보조 근거로 활용한다
+> **글을 쓸 때마다, 인용하는 모든 사실을 *원전에서 직접* 확인한다.** 블로그/AI 답변에 등장한 사실은 출발점이지 결론이 아니다. 단정형으로 본문에 박기 전에 반드시 아래 검증 절차를 거친다.
 
-**자주 참고하는 소스:**
-- 공식 문서 (Kotlin, JVM, Framework docs)
-- GitHub 소스코드 직접 확인
-- Netflix/Uber/배민/네이버 기술 블로그
-- 서적 (Effective Java, DDIA 등)
+### 기본 원칙
+
+1. **모든 핵심 주장에는 출처를 남긴다** — 단정형 문장 옆에는 항상 인용 가능한 근거가 있어야 한다
+2. **공식 spec / 문서 / 원전 소스코드를 1 순위로 쓴다**
+3. **기술 블로그·아티클은 보조 근거로만 활용한다** — 그것조차 *그 글이 인용한 원전* 까지 한 단계 더 따라간다
+4. **AI 가 생성한 내용을 그대로 인용하지 않는다** — AI 답변에 등장한 사실/수치/링크/이슈번호는 *반드시* 원전에서 재확인 (환각 가능성)
+
+---
+
+### 출처 우선순위
+
+| 등급 | 소스 | 사용법 |
+|---|---|---|
+| **S** | 공식 spec / RFC (JSR, JEP, RFC, ECMA) | 단정형으로 인용 가능 |
+| **A** | 라이브러리 공식 문서 (Hibernate User Guide, Spring docs, Kotlin docs) | 단정형, *버전 명시 필수* |
+| **A** | 원전 소스코드 (GitHub 릴리즈 태그) | 클래스/메서드 풀패스 + 라인 번호로 인용 |
+| **B** | 표준 서적 (*Effective Java*, *DDIA*, *PoEAA*, *High-Performance Java Persistence*) | 챕터/페이지까지 명시 |
+| **B** | canonical 작가 블로그 (Vlad Mihalcea, Brian Goetz, Martin Fowler) | 보조 근거 |
+| **C** | 빅테크 기술블로그 (Netflix, Uber, 배민, 네이버, 카카오, 토스) | *맥락 차이 명시 후* 인용 |
+| **C** | 일반 기술 블로그 (Baeldung, dev.to, Medium) | 출발점으로만, *단정형 인용 금지* |
+| **D** | StackOverflow / 커뮤니티 답변 | 그 답변이 인용한 원전을 따로 확인. 답변 자체는 인용하지 않음 |
+
+---
+
+### "이게 진짜인가" — 인용 전 검증 체크리스트
+
+블로그/아티클/AI 답변에서 본 사실을 글에 옮기기 전에 *반드시* 다음을 거친다.
+
+#### 1. 원전 추적 (Trace to Source)
+
+- 그 블로그가 인용한 *공식 문서 / spec / 소스코드* 를 직접 연다
+- 원전에 그 내용이 *문자 그대로* 적혀 있는지 확인
+- 원전이 없거나 추적이 안 되면 그 주장은 글에 못 들어간다 — *제거하거나 톤다운*
+
+#### 2. 버전 일치 (Version Match)
+
+- 인용 대상의 버전과 본 글의 환경이 같은가
+- Hibernate 5.x 동작을 6.x 글에 옮겨 쓰지 않는다
+- Spring 5.0 의 readOnly 동작 vs 5.1+ (SPR-16956 이후) 동작 같은 *경계점* 을 명시
+- 다른 버전을 인용할 때는 "버전 X 에선 ~, Y 에선 ~" 으로 분기해서 쓴다
+
+#### 3. 맥락 일치 (Context Match)
+
+- 빅테크 사례를 인용할 때 우리(블로그 독자) 와의 *차이* 를 함께 명시
+  - 트래픽 규모 / 팀 규모 / 운영 역량 / 인프라 / 도메인 특성
+- "Netflix 가 X 를 쓴다 → 우리도 써야 한다" 식 추론은 금지
+- 외부 사례는 *왜 그 선택을 했는지* 까지 설명되어야 인용 가능
+
+#### 4. 측정값 재현성 (Reproducibility)
+
+- 인용된 벤치마크는 *환경 (JVM, OS, CPU, dataset, 동시성)* 이 명시되어 있는가
+- 명시 안 된 수치는 글에 들고 오지 않는다 ("10 배 빠르다" 류)
+- 가능하면 *직접 재현한 결과만* 단정으로 인용한다 — 직접 측정값과 외부 인용을 명확히 구분
+
+#### 5. 출처의 출처 (Source-of-Source)
+
+- 한국어 블로그를 인용할 때, 그 블로그가 *영문 원전* 을 어떻게 옮겼는지 확인
+- 번역 과정에서 의미가 변형됐다면 영문 원전을 *직접* 인용
+- 한국어 자료는 별도 섹션 (`### 한국어 자료`) 으로 분리 — 일종의 *2 차 자료* 라는 표시
+
+#### 6. 시간 일치 (Freshness)
+
+- 5 년 이상 된 블로그 글을 *현재 버전 글* 에 그대로 인용하지 않는다 — API/동작이 바뀌었을 가능성
+- 인용 시점을 명시하거나, 현재 버전에서도 같은지 직접 확인
+
+---
+
+### 인용의 안티패턴
+
+| 안티패턴 | 왜 안 되는가 |
+|---|---|
+| "Vlad Mihalcea 가 그렇게 말했다" 만 적고 링크 없음 | 검증 불가능 |
+| AI 답변에 등장한 GitHub 이슈 번호 / 커밋 해시 / 라인 번호를 그대로 박기 | 환각 가능성 — 직접 열어 확인 필수 |
+| Baeldung 글의 결론을 단정형으로 옮김 | Baeldung 은 입문 레벨 — 원전 확인 후에만 |
+| "벤치마크 10 배 차이" 만 적고 환경 누락 | 재현 불가 — 일반화 위험 |
+| 5 년 전 블로그 글을 현재 버전 글에 그대로 인용 | API/동작 변경 가능 |
+| StackOverflow 답변을 그대로 인용 | 답변 자체가 검증 안 됨 — 그 답변의 원전을 찾아간다 |
+| 한국어 번역 블로그만 인용하고 영문 원전 누락 | 번역 변형 가능 — 원전 직접 인용 |
+
+---
+
+### 참고자료 섹션 작성 규칙
+
+글 끝의 `## 참고 자료` 는 단순 링크 나열이 아니라 *주제별로 분리* 한다. 가능하면 각 항목 옆에 *어떤 주장을 뒷받침하는지* 한 줄을 붙인다.
+
+```markdown
+## 참고 자료
+
+### 설계 의도 / 패턴의 근거
+- Martin Fowler, *Patterns of Enterprise Application Architecture* (Addison-Wesley, 2002)
+  — Identity Map / Unit of Work 패턴 (영속성 컨텍스트의 개념적 기반)
+- JPA Specification (JSR 338) §3.2 "Entity Instance's Life Cycle Management"
+  — managed entity 의 변경이 commit/flush 시점에 반영되어야 한다는 spec 요구사항
+
+### 공식 문서 (라이브러리 / spec)
+- [Hibernate ORM 6.6 User Guide — Flushing](...) — transactional write-behind 메커니즘
+- [Spring Framework SPR-16956](...) — readOnly 가 Hibernate Session 까지 전파된 변경점
+
+### Canonical 작가
+- [Vlad Mihalcea — anatomy of Hibernate dirty checking](...) — loadedState / flush listener 설명의 원전
+
+### 보조 자료 (입문 / 요약)
+- [Baeldung — Hibernate Dirty Checking](...) — 입문 레벨 요약 (원전 확인 후 인용)
+
+### 한국어 자료
+- [우아한형제들 기술블로그 — JPA 적용 사례](...) — 도입 동기 / 코드 라인 감소 사례
+
+### 외부 사례 / 측정
+- [Spring Boot JPA Bulk Insert 100x](...) — IDENTITY 대신 SEQUENCE generator 사용 시 batch 활성화
+```
+
+---
+
+### 자주 참고하는 소스 (출발점)
+
+- **공식 문서**: Kotlin docs, JVM specs, Spring docs, Hibernate User Guide, JPA spec (JSR 338)
+- **원전 코드**: GitHub *릴리즈 태그* 기준 (예: `hibernate-orm/tree/6.6` — `main` 이 아니라 *고정된 버전 태그*)
+- **빅테크 기술블로그**: Netflix, Uber, 배민, 네이버, 카카오, 토스 (맥락 차이 명시 후 인용)
+- **서적**: *Effective Java*, *Designing Data-Intensive Applications*, *High-Performance Java Persistence*, *Patterns of Enterprise Application Architecture*

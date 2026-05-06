@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "lint": "eslint .",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "check:posts": "node scripts/check-post-anatomy.mjs"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.14",
