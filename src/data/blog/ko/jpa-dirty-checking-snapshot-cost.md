@@ -763,7 +763,7 @@ A. `flushAutomatically = true` 는 bulk JPQL *발사 전* 영속성 컨텍스트
 ### 설계 의도 / 패턴의 근거 (1.2 절의 설계 배경 설명을 뒷받침)
 - **Martin Fowler — *Patterns of Enterprise Application Architecture*** (Addison-Wesley, 2002): **Identity Map** 패턴 (영속성 컨텍스트의 개념적 기반) + **Unit of Work** 패턴 (write-behind flush 의 개념적 기반) — Hibernate 가 ORM 구현으로 그대로 가져옴
 - **Christian Bauer / Gavin King / Gary Gregory — *Java Persistence with Hibernate, 2nd ed*** (Manning, 2015): ch.1 "Understanding object/relational persistence" (transparent persistence 철학), ch.10 "Managing data" (자동 dirty 감지 / Unit of Work / write-behind)
-- **JPA Specification (JSR 338)** §3.2 "Entity Instance's Life Cycle Management" — managed entity 의 변경이 commit / flush 시점에 DB 에 반영되어야 한다는 spec 요구사항 정의
+- **JPA Specification (JSR 338)** 3.2 절 "Entity Instance's Life Cycle Management" — managed entity 의 변경이 commit / flush 시점에 DB 에 반영되어야 한다는 spec 요구사항 정의
 - [Hibernate ORM User Guide — Flushing](https://docs.jboss.org/hibernate/orm/6.6/userguide/html_single/Hibernate_User_Guide.html#flushing) — *transactional write-behind* 와 ActionQueue 가 flush 단위로 묶이는 메커니즘
 - **Vlad Mihalcea — *High-Performance Java Persistence*** (Apress, 2nd ed, 2018), ch.4 "Persistence Context" — Identity Map 위에 dirty checking + write-behind + optimistic lock + cache 가 layered 되는 구조
 

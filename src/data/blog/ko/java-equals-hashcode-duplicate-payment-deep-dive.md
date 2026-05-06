@@ -1054,7 +1054,7 @@ equals/hashCode가 정상 동작해도, 가변 객체를 여러 스레드가 공
 - [Object.hashCode() JavaDoc](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/Object.html#hashCode())
 - [Effective Java Item 10: Obey the general contract when overriding equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/) — Joshua Bloch
 - [Effective Java Item 11: Always override hashCode when you override equals](https://www.oreilly.com/library/view/effective-java-3rd/9780134686097/) — Joshua Bloch
-- [JLS §15.21 Equality Operators](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21)
+- [JLS 15.21 Equality Operators](https://docs.oracle.com/javase/specs/jls/se21/html/jls-15.html#jls-15.21)
 
 ### 오픈소스 코드
 - [Kafka TopicPartition.java](https://github.com/apache/kafka/blob/trunk/clients/src/main/java/org/apache/kafka/common/TopicPartition.java) — 캐싱된 hashCode 패턴

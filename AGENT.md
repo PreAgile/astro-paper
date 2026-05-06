@@ -339,7 +339,7 @@ repo.findById(id)
 
 ### 표기 규칙 — 본문 안의 절 참조 (절대 룰)
 
-> **`§` (section sign) 기호는 본문에서 절대 사용하지 않는다.**
+> **`§` (section sign) 기호는 어떤 경우에도 사용하지 않는다 — 외부 spec 좌표 인용도 예외 없다.**
 > 한국어 본문 흐름에 부자연스럽고, 마크다운의 자연스러운 anchor 링크와도 분리되어 있으며, 자동 점검 스크립트가 이 기호를 발견하면 **CI 를 깨뜨린다** (`scripts/check-post-anatomy.mjs`).
 
 #### 한국어 글 — 변환 규칙
@@ -363,15 +363,17 @@ repo.findById(id)
 | `covered in §6.` | `covered in Section 6.` |
 | `§3~5 cover…` | `Sections 3 to 5 cover…` |
 
-#### 외부 spec 인용 — 예외 (유지)
+#### 외부 spec 좌표 인용도 절 번호만
 
-다음 패턴은 *공식 spec 의 표기법 자체* 라서 그대로 유지한다.
+다음과 같은 spec 좌표 인용도 section sign 없이 절 번호만 적는다 — anchor URL 이 외부 좌표를 정확히 가리키므로 추적성은 유지된다.
 
-- `JLS §15.21` (Java Language Specification — Oracle 의 공식 표기)
-- `(JSR 338) §3.2` (JPA Spec 의 공식 절 표기)
-- `RFC 7230 §3.1` (IETF RFC 의 공식 절 표기)
+| 피한다 | 권장 |
+|---|---|
+| `JLS §15.21 Equality Operators` | `JLS 15.21 Equality Operators` |
+| `(JSR 338) §3.2 "Entity Lifecycle"` | `(JSR 338) 3.2 절 "Entity Lifecycle"` |
+| `RFC 7230 §3.1` | `RFC 7230 3.1 절` |
 
-이런 인용은 본문 서술이 아니라 **외부 문서의 절 자체를 가리키는 좌표** 다. 변환하면 출처 추적성이 깨진다. `scripts/check-post-anatomy.mjs` 도 이 패턴은 화이트리스트로 통과시킨다.
+URL 의 anchor (`#jls-15.21`, `#section-3.1` 등) 가 이미 외부 좌표를 정확히 가리키므로 출처 추적성은 유지된다.
 
 #### 마크다운 anchor 링크 권장
 
@@ -633,7 +635,7 @@ description: |
 ### 설계 의도 / 패턴의 근거
 - Martin Fowler, *Patterns of Enterprise Application Architecture* (Addison-Wesley, 2002)
   — Identity Map / Unit of Work 패턴 (영속성 컨텍스트의 개념적 기반)
-- JPA Specification (JSR 338) §3.2 "Entity Instance's Life Cycle Management"
+- JPA Specification (JSR 338) 3.2 절 "Entity Instance's Life Cycle Management"
   — managed entity 의 변경이 commit/flush 시점에 반영되어야 한다는 spec 요구사항
 
 ### 공식 문서 (라이브러리 / spec)

@@ -3,7 +3,7 @@
 // 사용: bun run check:posts  (또는 node scripts/check-post-anatomy.mjs)
 //
 // 검사 항목
-//   1. 표기 룰: 본문에 § 기호 사용 금지 (외부 spec 인용 — JLS / JSR / RFC / ECMA — 만 예외).
+//   1. 표기 룰: 본문에 § 기호 사용 금지 (예외 없음).
 //      코드 블록 / 인라인 코드 안의 § 는 룰 설명용 인용으로 보고 통과.
 //   2. depth: deep-dive 라벨이 붙은 글에 한해 8 개 anatomy 장치 점검.
 //
@@ -22,12 +22,8 @@ const ROOT = join(__dirname, '..');
 const BLOG_DIR = join(ROOT, 'src', 'data', 'blog');
 const AGENT_MD = join(ROOT, 'AGENT.md');
 
-const SPEC_PATTERNS = [
-  /\bJLS §[0-9.]+/g,
-  /\(JSR \d+\)[*\s]*§[0-9.]+/g,
-  /\bRFC \d+[,\s]+§[0-9.]+/g,
-  /\bECMA-\d+[,\s]+§[0-9.]+/g,
-];
+// § 는 외부 spec 좌표든 본문 서술이든 어떤 경우에도 허용하지 않는다.
+const SPEC_PATTERNS = [];
 
 function parseFrontmatter(content) {
   const match = content.match(/^---\n([\s\S]*?)\n---\n/);
@@ -157,7 +153,7 @@ console.log(`\n📚 검사: 블로그 ${blogFiles} 글 (deep-dive 라벨: ${deep
 if (errors.length > 0) {
   console.error(`\n❌ 표기 룰 위반 (§ 기호) — ${errors.length} 건`);
   for (const e of errors) console.error(`  ${e}`);
-  console.error(`\n   → 외부 spec (JLS / JSR / RFC / ECMA) 외에는 § 금지.`);
+  console.error(`\n   → § 는 어떤 경우에도 사용 금지 (외부 spec 좌표도 절 번호만 남긴다).`);
   console.error(`   → 변환 규칙: AGENT.md "표기 규칙 — 본문 안의 절 참조" 섹션.`);
 }
 
