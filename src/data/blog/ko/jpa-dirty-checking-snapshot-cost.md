@@ -126,7 +126,87 @@ JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` *한 줄
 
 대신 Hibernate 는 ORM 영역의 고전 패턴인 ***Unit of Work*** 를 그대로 구현했다 — *commit 시점까지 변경을 영속성 컨텍스트(= Identity Map) 에 모아두고 한 번에 flush*. 이걸 가능하게 하려면 commit 시점에 *무엇이 바뀌었는지* 를 알아야 → 다시 snapshot. Hibernate 공식 문서는 이 동작을 *transactional write-behind* 라고 부른다. 트랜잭션이 끝날 때 (또는 AUTO flush 정책에선 query 발사 직전) 영속성 컨텍스트의 `ActionQueue` 가 INSERT → UPDATE → DELETE 순으로 정렬되어 한꺼번에 flush 된다.
 
-write-behind 가 없으면 batch_size / @DynamicUpdate / 2nd-level cache write-through 같은 핵심 최적화의 *작동 공간 자체가 크게 줄어든다*. snapshot 은 그 최적화들이 깔리는 기준점이다.
+write-behind 가 없으면 `batch_size` / `@DynamicUpdate` / 2 차 캐시 write-through 같은 핵심 최적화의 **작동 공간 자체가 크게 줄어든다**. snapshot 은 그 최적화들이 깔리는 기준점이다.
+
+<details>
+<summary><b>(심도) Unit of Work 패턴과 그 위에 깔리는 4 가지 최적화</b> (펼치기)</summary>
+
+##### Unit of Work — 원전과 정의
+
+원전은 Martin Fowler, *Patterns of Enterprise Application Architecture* (Addison-Wesley, 2002), pp. 184~193.
+
+> "Maintains a list of objects affected by a business transaction and coordinates the writing out of changes and the resolution of concurrency problems."
+
+번역하면 **트랜잭션 동안 영향받은 객체 목록을 관리하고, 변경 반영 시점·순서·동시성 충돌 해결을 한꺼번에 조정** 한다. 1990 년대 ODBMS / EJB 시절 ORM 마다 다르게 구현되던 동작을 Fowler 가 PoEAA 에서 공통 추상으로 뽑아낸 패턴이고, JPA spec (JSR 220, 2006) 이 그 추상을 표준화했다.
+
+Hibernate 매핑은 다음과 같다.
+
+| Fowler 패턴 용어 | Hibernate 구현체 |
+|---|---|
+| Unit of Work | `org.hibernate.engine.spi.ActionQueue` |
+| Identity Map | `StatefulPersistenceContext` (1 차 캐시) |
+| registerDirty 자동 추적 | dirty checking (snapshot 비교) |
+| commit 시 flush | `DefaultFlushEventListener` → `EntityPersister#update` |
+
+##### 즉시 UPDATE 가 깨뜨리는 최적화 4 가지
+
+setter 호출마다 SQL 을 즉시 발사하면 다음 네 가지가 **작동할 공간 자체가 사라진다**.
+
+**(a) batch flush — JDBC `addBatch()` + `executeBatch()`**
+
+JDBC 드라이버는 같은 SQL string 의 PreparedStatement 를 여러 번 묶어 한 번의 round-trip 에 보낸다. `hibernate.jdbc.batch_size = 50` 이 켜지면 flush 시점에 ActionQueue 의 같은 SQL 50 개를 한꺼번에 발사. 1 만 row UPDATE 의 round-trip 이 1 만 회에서 약 200 회로 떨어진다 (이론값, 드라이버 / 옵션 / SQL 동일성에 따라 다름).
+
+setter 마다 즉시 UPDATE 를 발사하면 한 번에 한 statement 만 나가서 묶을 공간이 없다.
+
+**(b) SQL 의존성 정렬 — INSERT → UPDATE → DELETE**
+
+같은 트랜잭션에서 `Order` INSERT (FK 로 `Customer` 참조) 와 `Customer.last_order_at` UPDATE 가 함께 있을 때, ActionQueue 는 commit 시점에 type 별 정렬을 적용해 FK 무결성과 deadlock 회피를 보장한다. 즉시 발사 모델은 작성된 코드 순서대로 SQL 이 나가기 때문에 순서가 잘못된 케이스에서 FK violation 이 터진다 (`hibernate.order_inserts` / `hibernate.order_updates` 옵션 참조).
+
+**(c) `@Version` 검사 묶기 — Optimistic Lock 의 stale-write 방지**
+
+`@Version` 이 붙은 entity 는 UPDATE 시 WHERE 절에 snapshot 의 version 을 박는다.
+
+```sql
+UPDATE r SET col=?, version = version + 1
+WHERE id = ? AND version = ?
+                 ^^^^^^^^^^
+       이 검사가 stale write (남이 먼저 바꾼 row 를 덮어쓰기) 를 막음
+```
+
+WHERE 의 version 값은 snapshot 에서 가져오므로, snapshot 이 없으면 검사 자체가 불가능하다. 여러 row 의 version 검사를 한 번의 batch 에 묶는 것도 commit 까지 모아두기 때문에 가능하다.
+
+**(d) rollback 비용**
+
+setter 마다 즉시 UPDATE 면 트랜잭션 중간 예외 시 DB 트랜잭션 메커니즘으로 N 개의 발사된 UPDATE 를 rollback 해야 한다 — undo log 비용이 쌓인다. write-behind 면 발사 자체가 commit 직전이라 rollback 시 애초에 SQL 이 안 나간 상태라 비용이 0 이다.
+
+##### 본문에 등장한 3 가지 최적화 — 각각의 개념
+
+**`hibernate.jdbc.batch_size`**
+
+flush 시점에 같은 SQL string 의 PreparedStatement 를 N 개씩 묶어 JDBC `addBatch()` 로 발사. 함정은 세 가지.
+
+1. `IDENTITY` generator 면 batch insert 가 비활성화 — ID 가 INSERT 후에만 알려져 묶을 수 없으므로 `SEQUENCE` / `TABLE` generator 를 쓴다.
+2. SQL string 이 row 마다 다르면 batch 가 깨진다 — `@DynamicUpdate` 와 충돌 가능 (본 글 4.1 절).
+3. MySQL Connector/J 는 `rewriteBatchedStatements=true` 옵션이 있어야 진짜 multi-row 로 다시 쓰인다.
+
+**`@DynamicUpdate`**
+
+기본 Hibernate 는 entity 매핑의 모든 컬럼을 SET 절에 박는데, `@DynamicUpdate` 가 붙으면 변경된 컬럼만 SET. SET 절 / binlog 바이트는 줄어들지만 SQL string 이 변경 컬럼 조합마다 달라져 `batch_size` 효과를 약화시킨다 (본 글 4.1 절 측정). LOB / TEXT / JSON 컬럼이 있고 대부분 안 바뀌는 wide table, 또는 컬럼별 trigger / audit 가 있을 때 국지적으로 적용한다.
+
+**2 차 캐시 write-through**
+
+JPA 캐시 계층은 두 층이다.
+
+| 계층 | 위치 | 수명 |
+|---|---|---|
+| 1 차 캐시 | `EntityManager` (= 영속성 컨텍스트) | 트랜잭션 동안만 |
+| 2 차 캐시 | `SessionFactory` 전역 (JVM) | 명시적 evict 까지 |
+
+2 차 캐시는 여러 트랜잭션이 공유하므로 누군가 UPDATE 하면 stale 해진다. **write-through 정책** (`CacheConcurrencyStrategy.READ_WRITE` / `TRANSACTIONAL`) 은 UPDATE 시점에 2 차 캐시도 함께 갱신하는데, **어떤 컬럼이 바뀌었는지** 를 알아야 가능하므로 snapshot 비교 결과를 그대로 사용한다. 대안인 invalidation 정책 (`NONSTRICT_READ_WRITE`) 은 UPDATE 시 캐시 entry 를 그냥 지우는데, write 가 잦으면 invalidation 폭주로 캐시 효과 자체가 사라진다.
+
+근거: Hibernate User Guide — *Batching* / *Caching*; *Java Persistence with Hibernate, 2nd ed*, ch. 20; Vlad Mihalcea — *The best way to do batch processing with JPA and Hibernate*.
+
+</details>
 
 #### (3) snapshot 은 dirty check 만의 비용이 아니다 — 여러 ORM 기능의 공통 기준점
 

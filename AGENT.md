@@ -305,7 +305,7 @@ repo.findById(id)
 - **baseline 1 개** (raw JDBC, native call 등) 를 `1.0×` 로 두고 정규화
 - 최소 4 개 시나리오로 *비교축이 다른* 케이스를 분리
 - bar chart 는 ASCII 로도 충분 (`████████ 3,450ms`)
-- 각 비교축마다 "이 차이의 *의미*" 를 한 줄로 (위 §1 의 비교 기준 분리표가 곧 이 부분)
+- 각 비교축마다 "이 차이의 *의미*" 를 한 줄로 (위 첫 번째 장치의 비교 기준 분리표가 곧 이 부분)
 
 #### 7. 자가진단 체크리스트 + 의사결정 매트릭스
 
@@ -371,11 +371,11 @@ repo.findById(id)
 - `(JSR 338) §3.2` (JPA Spec 의 공식 절 표기)
 - `RFC 7230 §3.1` (IETF RFC 의 공식 절 표기)
 
-이런 인용은 본문 *서술* 이 아니라 *외부 문서의 절 자체를 가리키는 좌표* 다. 변환하면 출처 추적성이 깨진다. `scripts/check-post-anatomy.mjs` 도 이 패턴은 화이트리스트로 통과시킨다.
+이런 인용은 본문 서술이 아니라 **외부 문서의 절 자체를 가리키는 좌표** 다. 변환하면 출처 추적성이 깨진다. `scripts/check-post-anatomy.mjs` 도 이 패턴은 화이트리스트로 통과시킨다.
 
 #### 마크다운 anchor 링크 권장
 
-내부 절 참조가 필요하면 마크다운 anchor 를 쓰는 게 *항상 더 좋다*:
+내부 절 참조가 필요하면 마크다운 anchor 를 쓰는 게 더 좋다.
 
 ```markdown
 [bytecode enhancement 절](#15-diff-based-dirty-checking-vs-bytecode-enhancement)
@@ -383,7 +383,7 @@ repo.findById(id)
 
 #### 서사적 참조 우선
 
-본문에 절 번호가 너무 자주 등장한다는 것은 *글의 흐름이 절 번호에 의존하고 있다* 는 신호다. 가능하면 다음과 같은 *서사적 참조* 로 바꾸고, 절 번호는 정말 필요한 곳에만 남긴다.
+본문에 절 번호가 너무 자주 등장한다면 글의 흐름이 절 번호에 의존하고 있다는 신호다. 가능하면 다음과 같은 서사적 참조로 바꾸고, 절 번호는 정말 필요한 곳에만 남긴다.
 
 - `앞서 ~ 에서 본 ~` / `위에서 다룬 ~`
 - `뒤이어 다룰 ~` / `다음 절에서 보겠지만 ~`
@@ -391,30 +391,56 @@ repo.findById(id)
 
 #### 자동 일괄 변환 (기존 글)
 
-기존 글의 `§` 를 일괄 변환할 때는 다음 perl 룰을 사용한다 (한국어 글 기준, spec 인용 보호 포함). 영문 글은 `절` → `Section` 로 치환만 다르다.
+기존 글의 일괄 변환은 perl 정규식으로 처리한다. spec 인용을 토큰으로 보호 → `§N.M` → `N.M 절` (한글) / `Section N.M` (영문) 치환 → 받침 ㄹ 조사 정정 (`5 절 가` → `5 절이`) → 보호 해제 순서. 함정: perl byte 모드에서 `§?` 는 multi-byte 의 마지막 바이트만 옵션화하므로 `(?:§)?` 로 그룹화 한다. 실제 룰은 커밋 `5e3e161` 의 perl one-liner 참조.
 
-```perl
-# 1. spec 보호
-s/\bJLS §([0-9.]+)/JLS_KEEPSEC_$1/g;
-s/\(JSR (\d+)\)([*\s]*)§([0-9.]+)/(JSR $1)$2JSRKEEPSEC_$3/g;
+---
 
-# 2. 변환 (긴 패턴 우선)
-s/§([0-9]+(?:\.[0-9]+)*)·§([0-9]+(?:\.[0-9]+)*)·§([0-9]+(?:\.[0-9]+)*)/$1 절·$2 절·$3 절/g;
-s/§([0-9]+(?:\.[0-9]+)*)·§([0-9]+(?:\.[0-9]+)*)/$1 절·$2 절/g;
-s/§([0-9]+(?:\.[0-9]+)*)~(?:§)?([0-9]+(?:\.[0-9]+)*)/$1 절부터 $2 절까지/g;
-s/§([0-9]+(?:\.[0-9]+)*)/$1 절/g;
-s/§/절/g;
+### 표기 규칙 — 한국어 본문 강조 (italic 금지)
 
-# 3. 조사 띄어쓰기 정리 (받침 ㄹ 정정 포함)
-s/(\d+(?:\.\d+)* 절) 가 /$1이 /g;
-s/(\d+(?:\.\d+)* 절) (의|이|을|를|에서|에|부터|까지|만|도|은|로|으로|과)\s/$1$2 /g;
+> **한국어 본문에서 `*텍스트*` (italic) 는 사용하지 않는다.**
+> 한글은 글자 형태가 기하학적으로 정형이라 기울이면 *부자연스럽게 흐릿* 해 보인다. italic 은 라틴 문자 위주 표기법이지 한글 가독성에는 맞지 않는다. 강조가 5 ~ 10 줄마다 반복되면 강조의 의미 자체가 사라진다.
 
-# 4. 보호 해제
-s/JLS_KEEPSEC_([0-9.]+)/JLS §$1/g;
-s/JSRKEEPSEC_([0-9.]+)/§$1/g;
+#### 강조의 4 단계
+
+| 의도 | 표기 |
+|---|---|
+| 진짜 핵심 (글 전체에서 5 ~ 10 곳) | `**굵게**` |
+| 새 용어 도입 / 개념 인용 | `"따옴표"` 또는 굵게 |
+| 식별자·명령어·코드·옵션값 | `` `백틱` `` |
+| 외래어 원어 보존 (영어 단어 그대로) | 평문 (예: dirty checking, snapshot) |
+
+#### italic (`*텍스트*`) 사용이 허용되는 4 가지 예외
+
+1. **영문 라틴 단어** 가 한글 문장에 *섞여 들어가는* 도서명·논문명 — 예: *High-Performance Java Persistence*
+2. **외래 인용구·라틴 약어** — 예: *transparent persistence*, *write-behind* 같은 *원전 용어* 의 첫 도입
+3. **수식·변수** — 예: *N* = entity 수
+4. **영문 글 본문** — 영문에서는 italic 이 자연스러우므로 그대로
+
+#### Before / After 예시
+
+**Before** (italic 5 회 — 가독성 저하)
+```markdown
+JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` *한 줄로 끝나려면*
+누군가가 *변경을 알아채고* *commit 시점에 자동으로 UPDATE 를 발사* 해야 한다 —
+그 "누군가" 가 dirty check loop 이고, *변경 전 상태* 를 비교 기준으로 들고 있어야
+하니 snapshot 이 필요하다. transparent persistence 라는 약속을 지키면서 변경을
+알아내는 *가장 보편적인 방식* 이 — entity 본체를 직접 수정하지 않고 *별도 메모리에
+비교 기준을 두는* 것이다.
 ```
 
-> **주의**: perl byte 모드에서 `§?` 는 `§` (UTF-8 2-byte) 의 마지막 바이트만 옵션으로 만든다. 범위 패턴은 반드시 `(?:§)?` 로 그룹화 한다.
+**After** (italic 0, 굵게 1 ~ 2 — 진짜 핵심만 강조)
+```markdown
+JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` 한 줄로 끝나려면
+누군가가 변경을 알아채고 commit 시점에 자동으로 UPDATE 를 발사해야 한다 —
+그 "누군가" 가 dirty check loop 이고, **변경 전 상태**를 비교 기준으로 들고
+있어야 하니 snapshot 이 필요하다. transparent persistence 라는 약속을 지키면서
+변경을 알아내는 가장 보편적인 방식이 — entity 본체를 직접 수정하지 않고
+**별도 메모리에 비교 기준을 두는 것**이다.
+```
+
+#### 자동 점검
+
+`scripts/check-post-anatomy.mjs` 가 *italic 밀도* 를 검사한다 — 한 글당 italic 이 50 개를 넘으면 warning 을 띄운다 (한국어 글 한정, 영문 글은 예외). 새 글은 처음부터 굵게/따옴표 위주로 쓰고, 기존 글은 점진적으로 정리한다.
 
 ---
 
@@ -431,254 +457,47 @@ s/JSRKEEPSEC_([0-9.]+)/§$1/g;
 
 ## Architecture Diagrams
 
-### 다이어그램 선택 기준
+### 도구 선택
 
-| 용도 | 도구 | 이유 |
-|------|------|------|
-| **핵심 개념/아키텍처** | **Excalidraw** | 손그림 느낌, 고퀄리티, 독자 집중 유도 |
-| **플로우차트/시퀀스** | Mermaid | 빠른 작성, 자동 테마 지원 |
-| **간단한 비교/흐름** | Mermaid | 텍스트 기반, 수정 용이 |
+| 용도 | 도구 |
+|---|---|
+| 핵심 개념·아키텍처·메모리 레이아웃 (오래 기억할 시각화) | **Excalidraw** (손그림 SVG) |
+| 플로우차트·시퀀스·의사결정 트리 (자주 수정 / 빠른 작성) | **Mermaid** |
 
-**Excalidraw 사용이 권장되는 경우:**
-- 글의 핵심 개념을 설명하는 다이어그램 (예: B+-tree 구조, Page 내부 구조)
-- 독자가 오래 기억해야 할 중요한 시각화
-- Before/After 비교 등 임팩트가 필요한 다이어그램
-- 복잡한 내부 구조 (예: 메모리 레이아웃, 데이터 포맷)
+**ASCII 박스 다이어그램(`┌─┐│ │└─┘`) 은 금지** — AI 스러운 차가운 느낌. Excalidraw 로 대체한다.
 
-**Mermaid 사용이 권장되는 경우:**
-- 프로세스 흐름, 시퀀스 다이어그램
-- 간단한 의사결정 트리
-- 빠르게 이해 가능한 단순 비교
-- 자주 수정될 가능성이 있는 다이어그램
+### Mermaid
 
----
+- 인라인 `style` 지시어 / `%%{init:{'theme':...}}%%` 사용 금지 — 블로그가 `data-theme` 으로 라이트/다크 자동 전환을 처리한다
+- 이모지 대신 `[문제]` / `[해결]` / `[OK]` / `[WARN]` 같은 텍스트 레이블
+- 점선(`-.`)은 개선/변환 관계, 화살표는 인과/프로세스 흐름
 
-### Mermaid Diagrams
-
-**일반적인 플로우차트, 시퀀스 다이어그램에 사용**
-
-- Markdown에 직접 삽입 가능
-- 버전 관리 용이 (텍스트 기반)
-- 일관된 스타일 유지
-- 수정 및 유지보수 간편
-- **라이트/다크 모드 자동 지원** (테마 전환 시 자동 재렌더링)
-
-> **중요**: `%%{init: {'theme':'base'}}%%` 지시어는 사용하지 마세요!
-> 블로그가 자동으로 테마를 감지하여 라이트/다크 모드에 맞는 색상을 적용합니다.
-
-**다크 모드 자동 지원 원리:**
-
-블로그의 Mermaid 렌더러가 자동으로:
-1. 현재 테마 감지 (`data-theme` 속성)
-2. 라이트/다크 모드에 맞는 색상 팔레트 적용
-3. 테마 전환 시 다이어그램 자동 재렌더링
-
-**시각적 디자인 원칙:**
-
-```markdown
-# 인라인 style 사용 금지 (테마 자동 적용을 위해)
-- ❌ style A fill:#ff6b6b,color:#fff
-- ✅ 기본 노드/subgraph 스타일 사용
-
-# 이모지 사용 금지
-- ❌ 이모지 아이콘 사용 금지
-- ✅ 텍스트 레이블 사용: [문제], [결과], [OK], [WARN] 등
-
-# 시각적 계층
-- 점선 (-.): 개선 관계, 변환 관계
-- 화살표: 인과 관계, 프로세스 흐름
-```
-
-**다이어그램 예시 (권장):**
-
-````markdown
 ```mermaid
 graph LR
-    subgraph "Before"
-        A1["[문제] 레이턴시 50ms"]
-    end
-    subgraph "After"
-        B1["[해결] 레이턴시 &lt;1ms"]
-    end
-    A1 -.개선.-> B1
-```
-````
-
-**참고**: 인라인 스타일 없이 작성하면 블로그가 자동으로 라이트/다크 테마에 맞는 색상을 적용합니다.
-
-### Excalidraw — 정성스러운 다이어그램
-
-**ASCII 박스 다이어그램 대신 Excalidraw 사용**
-
-> **중요**: Excalidraw 다이어그램은 반드시 **라이트 모드용**과 **다크 모드용** 두 벌을 제작합니다.
-
-블로그에서 구조를 설명할 때, 코드 블록 안에 ASCII 문자로 그린 박스 다이어그램은 피합니다:
-
-```
-# 피해야 할 것 — AI스러운 ASCII 다이어그램
-
-┌─────────────────────────────────────────┐
-│ FIL Header (38 bytes)                   │  ← 이런 스타일
-│  - Checksum (무결성 검증)               │
-│  - Page Number                          │
-├─────────────────────────────────────────┤
-│ INDEX Header (36 bytes)                 │
-└─────────────────────────────────────────┘
+    A1["[문제] 50ms"] -.개선.-> B1["[해결] <1ms"]
 ```
 
-이런 다이어그램은 **Excalidraw**로 직접 그려서 이미지로 대체합니다.
+### Excalidraw
 
-**왜 Excalidraw인가?**
+라이트/다크 두 벌을 *반드시* 제작한다.
 
-| ASCII 다이어그램 | Excalidraw |
-|------------------|------------|
-| 기계적이고 차가운 느낌 | 손으로 그린 듯한 따뜻한 느낌 |
-| 텍스트 정렬에 한계 | 자유로운 레이아웃 |
-| 색상 표현 불가 | 색상으로 구분/강조 가능 |
-| 복잡한 구조 표현 어려움 | 화살표, 그룹핑 자유로움 |
-| AI가 생성한 느낌 | **정성 들인 느낌** |
+- **저장**: `src/assets/images/{주제}/{내용}-{light|dark}.svg` — SVG 우선, "Embed scene" 체크
+- **사용 (Markdown)**: `class="theme-img-light"` / `theme-img-dark` 로 HTML img 태그 직접 삽입. 또는 `<ThemeImage lightSrc={...} darkSrc={...} alt="..." />` 컴포넌트
+- **선/폰트 스타일**: 손글씨 기본 + "Architect" 선
 
-**Excalidraw 사용 원칙:**
+색상 팔레트:
 
-1. **파일 저장 위치**: `src/assets/images/{주제}/`
-   ```
-   src/assets/images/
-   └── innodb/
-       ├── page-structure-light.svg  # 라이트 모드용
-       ├── page-structure-dark.svg   # 다크 모드용
-       ├── record-format-light.svg
-       ├── record-format-dark.svg
-       └── ...
-   ```
+| 용도 | Light | Dark |
+|---|---|---|
+| 배경 | `transparent` / `#ffffff` | `#212737` (블로그 다크 배경) |
+| 텍스트·선 | `#1e1e1e` | `#eaedf3` |
+| 문제·에러·Before | `#e03131` | `#ff6b6b` |
+| 주의·경고·신규 | `#f08c00` | `#ffd43b` |
+| 해결·After·성공 | `#2f9e44` | `#51cf66` |
+| 정상·정보 | `#1971c2` | `#4dabf7` |
+| 비활성·콜드 | `#868e96` | `#adb5bd` |
 
-2. **파일 형식**: SVG 우선 (PNG은 고해상도 필요 시)
-   - Excalidraw에서 "Export" → "SVG" 선택
-   - "Embed scene" 체크 (나중에 수정 가능하도록)
-
-3. **스타일 가이드**:
-
-   **라이트 모드용 색상 팔레트:**
-   | 용도 | 색상 | HEX |
-   |------|------|-----|
-   | 배경 | 흰색/투명 | `transparent` 또는 `#ffffff` |
-   | 텍스트/선 | 진한 회색 | `#1e1e1e` |
-   | 문제/에러/Before | 빨간색 | `#e03131` |
-   | 주의/경고/신규 | 노란색 | `#f08c00` |
-   | 해결책/After/성공 | 초록색 | `#2f9e44` |
-   | 정상 흐름/정보 | 파란색 | `#1971c2` |
-   | 비활성/콜드 데이터 | 회색 | `#868e96` |
-
-   **다크 모드용 색상 팔레트:**
-   | 용도 | 색상 | HEX |
-   |------|------|-----|
-   | 배경 | 다크 배경 | `#212737` (블로그 다크 배경색) |
-   | 텍스트/선 | 밝은 회색 | `#eaedf3` |
-   | 문제/에러/Before | 연한 빨간색 | `#ff6b6b` |
-   | 주의/경고/신규 | 연한 노란색 | `#ffd43b` |
-   | 해결책/After/성공 | 연한 초록색 | `#51cf66` |
-   | 정상 흐름/정보 | 연한 파란색 | `#4dabf7` |
-   | 비활성/콜드 데이터 | 중간 회색 | `#adb5bd` |
-
-   - **폰트**: Excalidraw 기본 손글씨 스타일 유지
-   - **선 스타일**: 손으로 그린 느낌의 "Architect" 스타일
-
-4. **네이밍 규칙**: `{내용}-{light|dark}.svg`
-   - 예: `page-structure-light.svg`, `page-structure-dark.svg`
-   - 예: `lru-algorithm-light.svg`, `lru-algorithm-dark.svg`
-   - **반드시 light/dark 쌍으로 생성**
-
-**블로그에서 사용 (Markdown):**
-
-마크다운 파일에서는 HTML 태그로 직접 사용:
-
-```html
-<img src="/src/assets/images/innodb/page-structure-light.svg" alt="InnoDB Page 내부 구조" class="theme-img-light" />
-<img src="/src/assets/images/innodb/page-structure-dark.svg" alt="InnoDB Page 내부 구조" class="theme-img-dark" />
-```
-
-**Astro 컴포넌트에서 사용:**
-
-```astro
----
-import ThemeImage from '@/components/ThemeImage.astro';
-import pageStructureLight from '@/assets/images/innodb/page-structure-light.svg';
-import pageStructureDark from '@/assets/images/innodb/page-structure-dark.svg';
----
-<ThemeImage
-  lightSrc={pageStructureLight}
-  darkSrc={pageStructureDark}
-  alt="InnoDB Page 내부 구조"
-/>
-```
-
-**작동 원리:**
-- 라이트 모드: `-light.svg` 표시, `-dark.svg` 숨김
-- 다크 모드: `-dark.svg` 표시, `-light.svg` 숨김
-- CSS `[data-theme]` 속성 기반으로 즉시 전환
-- 깜빡임 없이 부드러운 전환
-
-**CSS 클래스:**
-- `theme-img-light`: 라이트 모드에서만 표시
-- `theme-img-dark`: 다크 모드에서만 표시
-
-**Excalidraw로 대체해야 하는 것들:**
-
-| 기존 표현 방식 | Excalidraw로 대체 |
-|---------------|------------------|
-| `┌───┬───┐` 형태의 ASCII 박스 | 손그림 스타일 다이어그램 |
-| 텍스트 기반 구조 설명 | 시각적 계층 구조 |
-| Step 1 → Step 2 텍스트 흐름 | 화살표와 타임라인 |
-| 크기/비율 수치 나열 | 비례 시각화 |
-
-**Excalidraw 편집 팁:**
-
-1. [excalidraw.com](https://excalidraw.com)에서 직접 작업
-2. `.excalidraw` 파일을 `docs/diagrams/` 폴더에 원본 저장 (선택)
-3. 블로그용은 SVG로 export하여 `src/assets/images/`에 저장
-
----
-
-## Recent Posts
-
-### 멀티 플랫폼 데이터베이스 설계 (2026-01-07)
-
-**파일:**
-- 한글: `src/data/blog/multi-platform-database-design-deep-dive.md`
-- 영어: `src/data/blog/multi-platform-database-design-deep-dive-en.md`
-
-**핵심 내용:**
-- 새로운 외부 플랫폼 연동을 위한 DB 아키텍처 설계
-- God Table 안티패턴 → Bounded Context 분리
-- AI Debate를 활용한 설계 검증 프로세스
-- 고성능 로깅 시스템 (버퍼링, 배치 처리)
-- 인덱스 전략과 EXPLAIN 기반 의사결정
-- 데이터 라이프사이클 관리 (파티셔닝, 아카이브)
-- Observability를 고려한 스키마 설계
-
-**다이어그램 (10개):**
-1. God Table 문제 시각화
-2. Bounded Context 분리 (DDD)
-3. 3-Table ERD
-4. 성능 비교 (Before/After - 50배 개선)
-5. 버퍼링 시스템 Sequence Diagram
-6. 인덱스 의사결정 플로우
-7. 세션 안정성 등급 (STABLE/UNSTABLE/CRITICAL)
-8. 파티션 프루닝
-9. 데이터 라이프사이클 (Hot→Cold→Delete)
-10. 비용 비교 (67% 절감)
-
-**주요 수치:**
-- 약 4,000줄의 코드
-- 95% 테스트 커버리지
-- 50배 성능 개선 (레이턴시, DB 커넥션)
-- 100배 처리량 개선 (100 → 10,000+ logs/sec)
-- 67% 스토리지 비용 절감
-
-**사용된 원칙:**
-- "추측하지 말고 측정하라" (EXPLAIN 기반)
-- 정규화 우선, 비정규화는 측정 후
-- 인덱스는 가설 → Production 검증 후 제거
-- 트레이드오프를 명시적으로 문서화
+원본 `.excalidraw` 파일은 `docs/diagrams/` 에 둔다 (선택).
 
 ---
 
