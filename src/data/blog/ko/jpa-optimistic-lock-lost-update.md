@@ -16,22 +16,22 @@ tags:
   - Concurrency
   - Backend
 description: |
-  100 worker 가 같은 룰의 priority 를 +1 합니다. @Version 없으면 priority < 100 (Lost Update). @Version 적용하면 OptimisticLockException 만 던지고 처리는 호출자 책임 — 일부만 성공. @Retryable(3) 백오프 0 으로 retry 면 *동시에 retry 가 몰려서* 다시 충돌 (retry stampede). exponential + full jitter 가 retry 를 분산시켜 priority=100 도달. 그리고 측정 도중 만난 자기 Lost Update — 같은 트랜잭션 안에서 SELECT 두 번이 다른 객체 (JDBC) vs 같은 인스턴스 (JPA 1차 캐시 ==). 분산 환경 Lost Update 와는 완전히 별개의 함정. @Transactional + @Retryable AOP 순서, exponential backoff + jitter 의 이론적 근거 (AWS Architecture Blog) 까지 풀었습니다.
+  100 worker 가 같은 룰의 priority 를 +1 합니다. @Version 없으면 priority < 100 (Lost Update). @Version 적용하면 OptimisticLockException 만 던지고 처리는 호출자 책임 — 일부만 성공. @Retryable(3) 백오프 0 으로 retry 면 **동시에 retry 가 몰려서** 다시 충돌 (retry stampede). exponential + full jitter 가 retry 를 분산시켜 priority=100 도달. 그리고 측정 도중 만난 자기 Lost Update — 같은 트랜잭션 안에서 SELECT 두 번이 다른 객체 (JDBC) vs 같은 인스턴스 (JPA 1차 캐시 ==). 분산 환경 Lost Update 와는 완전히 별개의 함정. @Transactional + @Retryable AOP 순서, exponential backoff + jitter 의 이론적 근거 (AWS Architecture Blog) 까지 풀었습니다.
 ---
 
 ## Table of contents
 
 ## 들어가며 {#intro}
 
-자동 응답 룰 도메인의 코드 리뷰에서 같은 패턴이 또 나왔습니다. **사장님 두 명이 동시에 같은 룰의 priority 를 수정** — 한 명만 dashboard 를 쓰면 문제없는데, 가끔씩 priority 가 *증가하지 않았다* 는 운영 보고가 들어왔습니다.
+자동 응답 룰 도메인의 코드 리뷰에서 같은 패턴이 또 나왔습니다. **사장님 두 명이 동시에 같은 룰의 priority 를 수정** — 한 명만 dashboard 를 쓰면 문제없는데, 가끔씩 priority 가 **증가하지 않았다** 는 운영 보고가 들어왔습니다.
 
-흔한 답은 두 가지입니다. **"`@Version` 붙이면 됩니다"** 또는 **"비관락 (FOR UPDATE) 쓰면 됩니다"**. 둘 다 *부분적으로 맞는데* 둘 다 *부분적으로 틀립니다*. `@Version` 만 붙이면 `OptimisticLockException` 이 *던져지기만 하고* 처리는 호출자 책임. 비관락은 *충돌 빈번* 환경에서만 효율적. 사장님 룰 수정처럼 *충돌 드문* 환경에선 비관락이 오버킬.
+흔한 답은 두 가지입니다. **"`@Version` 붙이면 됩니다"** 또는 **"비관락 (FOR UPDATE) 쓰면 됩니다"**. 둘 다 **부분적으로 맞는데** 둘 다 **부분적으로 틀립니다**. `@Version` 만 붙이면 `OptimisticLockException` 이 **던져지기만 하고** 처리는 호출자 책임. 비관락은 **충돌 빈번** 환경에서만 효율적. 사장님 룰 수정처럼 **충돌 드문** 환경에선 비관락이 오버킬.
 
-그래서 직접 측정했습니다. **같은 룰의 priority 를 100 worker 가 +1**. `@Version` 의 *진짜 한계* 와 *retry 의 진짜 함정* 을 끝까지 풀어봤습니다.
+그래서 직접 측정했습니다. **같은 룰의 priority 를 100 worker 가 +1**. `@Version` 의 **진짜 한계** 와 **retry 의 진짜 함정** 을 끝까지 풀어봤습니다.
 
-그리고 측정 도중 더 깊은 함정을 발견했습니다. **`@Retryable` 백오프 0** 으로 두면 — retry 가 *동시에 몰려서* 다시 충돌. retry 횟수만 늘리고 성공률은 그대로. 이게 retry stampede. exponential + jitter 가 *왜 표준* 인지 측정으로 확인했습니다. 거기에 *같은 트랜잭션 내 자기 Lost Update* 라는 별개의 함정 (Vlad Mihalcea 의 1차 캐시 == 보장) 까지 한 글에서 정리했습니다.
+그리고 측정 도중 더 깊은 함정을 발견했습니다. **`@Retryable` 백오프 0** 으로 두면 — retry 가 **동시에 몰려서** 다시 충돌. retry 횟수만 늘리고 성공률은 그대로. 이게 retry stampede. exponential + jitter 가 **왜 표준** 인지 측정으로 확인했습니다. 거기에 **같은 트랜잭션 내 자기 Lost Update** 라는 별개의 함정 (Vlad Mihalcea 의 1차 캐시 == 보장) 까지 한 글에서 정리했습니다.
 
-이 글은 같은 의도의 update 를 **6 시나리오** 로 비교한 deep-dive 입니다. JPA 의 함정은 *기능 한 줄* 이 아니라 *전체 트랜잭션 lifecycle 과 retry policy 의 상호작용* 입니다.
+이 글은 같은 의도의 update 를 **6 시나리오** 로 비교한 deep-dive 입니다. JPA 의 함정은 **기능 한 줄** 이 아니라 **전체 트랜잭션 lifecycle 과 retry policy 의 상호작용** 입니다.
 
 ---
 
@@ -75,7 +75,7 @@ public void incrementWithoutVersion(Long ruleId) {
 }
 ```
 
-100 worker 가 동시 호출. 결과는 `priority < 100` — Lost Update. 두 worker 가 *같은 priority 값을 SELECT* 한 후 *같은 next* 로 UPDATE 하면 한 worker 의 increment 가 사라집니다.
+100 worker 가 동시 호출. 결과는 `priority < 100` — Lost Update. 두 worker 가 **같은 priority 값을 SELECT** 한 후 **같은 next** 로 UPDATE 하면 한 worker 의 increment 가 사라집니다.
 
 **[실측 — Java/Spring Stage 2 / 2026-05-04 23:00 KST]**
 
@@ -83,7 +83,7 @@ public void incrementWithoutVersion(Long ruleId) {
 |---|---:|---:|---:|---:|
 | S1 baseline | **137** | 100 | **26** | **74 (조용한 Lost!)** |
 
-→ 핵심: *모든 worker 가 success* 인데 *priority 가 100 미만*. 사용자 입장에선 "코드 정상 동작" 처럼 보이지만 데이터가 어긋남. 운영에서 *재현 불가능한* 부류의 버그.
+→ 핵심: **모든 worker 가 success** 인데 **priority 가 100 미만**. 사용자 입장에선 "코드 정상 동작" 처럼 보이지만 데이터가 어긋남. 운영에서 **재현 불가능한** 부류의 버그.
 
 ---
 
@@ -119,21 +119,21 @@ UPDATE auto_reply_rule
    AND version = ?              ← 핵심: version 체크
 ```
 
-다른 worker 가 먼저 update 해서 version 이 바뀌어 있으면 — 위 UPDATE 가 *0 row 매칭*. Spring 이 이를 감지해서 `ObjectOptimisticLockingFailureException` 던짐.
+다른 worker 가 먼저 update 해서 version 이 바뀌어 있으면 — 위 UPDATE 가 **0 row 매칭**. Spring 이 이를 감지해서 `ObjectOptimisticLockingFailureException` 던짐.
 
-→ Lost Update 는 **방지**. 단 일부 worker 만 성공, 나머지는 *예외* 로 끝남. *처리는 호출자 책임*.
+→ Lost Update 는 **방지**. 단 일부 worker 만 성공, 나머지는 **예외** 로 끝남. **처리는 호출자 책임**.
 
 | Scenario | success | optLockFail | finalPriority |
 |---|---:|---:|---:|
 | S2 detect | **14** | **86** | **14** (감지 OK, 86개 작업 손실) |
 
-→ 핵심: 정합성은 OK 인데 *처리량* 이 낮음. 100 worker 중 일부만 성공.
+→ 핵심: 정합성은 OK 인데 **처리량** 이 낮음. 100 worker 중 일부만 성공.
 
 ---
 
 ## 4. S3 — `@Retryable(3)` + backoff=0 (retry stampede) {#s3-stampede}
 
-자연스러운 다음 단계: 충돌하면 *재시도*. Spring Retry 의 `@Retryable`:
+자연스러운 다음 단계: 충돌하면 **재시도**. Spring Retry 의 `@Retryable`:
 
 ```java
 @Retryable(
@@ -148,29 +148,87 @@ public void incrementWithRetryNoBackoff(Long ruleId) {
 }
 ```
 
-직관적으로는 — "충돌하면 다시 시도, 3 번이면 다 성공할 것". 그런데 *백오프 0* 이 함정.
+직관적으로는 — "충돌하면 다시 시도, 3 번이면 다 성공할 것". 그런데 **백오프 0** 이 함정.
 
-99 worker 가 충돌해서 *동시에 retry* 시작 → 그 99 worker 가 *다시 같은 row* 노림 → 1 worker 만 성공, 98 worker 다시 충돌 → 다시 동시 retry → ...
+99 worker 가 충돌해서 **동시에 retry** 시작 → 그 99 worker 가 **다시 같은 row** 노림 → 1 worker 만 성공, 98 worker 다시 충돌 → 다시 동시 retry → ...
 
-이게 **retry stampede**. retry 횟수만 N 번 늘었지 *동시 retry* 자체가 충돌의 원인. 결과:
-- *3 번 retry 다 소진* 한 worker 들이 결국 실패.
+이게 **retry stampede**. retry 횟수만 N 번 늘었지 **동시 retry** 자체가 충돌의 원인. 결과:
+- **3 번 retry 다 소진** 한 worker 들이 결국 실패.
 - success 수가 약간 늘긴 하지만 priority < 100.
-- *총 elapsed 가 늘어남* — 의미 있는 progress 없이 retry 만 폭증.
+- **총 elapsed 가 늘어남** — 의미 있는 progress 없이 retry 만 폭증.
 
 | Scenario | success | optLockFail | finalPriority | totalMs |
 |---|---:|---:|---:|---:|
 | S3 stampede | **29** | **71** | **29** (재충돌로 progress 부족) | **200** |
 
+AWS 의 [Exponential Backoff and Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/) 글이 이 패턴의 수학적 근거입니다. 핵심만 요약하면 — exponential 만으로는 모든 client 가 같은 시간 기다리니 동기화된 retry 파동이 다시 발생하고, 거기에 jitter (랜덤 분산) 를 더해야 retry 시점이 시간 축으로 흩어집니다. 본 EXP 의 S4 가 이 패턴의 적용 케이스 (`@Backoff(random = true)`).
+
 <details>
-<summary><b>(심도) AWS Architecture Blog — Exponential Backoff and Jitter</b> (펼치기)</summary>
+<summary><b>(심도) Backoff & Jitter — 정의, 4종 비교, Spring Retry 의 변형</b> (펼치기)</summary>
 
-AWS 의 [Exponential Backoff and Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/) 글이 이 패턴의 *수학적 근거* 를 정리합니다. 핵심:
+#### Backoff — 재시도 간 대기 시간
 
-- **No backoff**: N client 가 한 번에 retry → 다시 충돌. Server 부하가 *retry 마다 동일* → 영구 stampede.
-- **Exponential backoff**: 각 client 가 attempt 마다 wait 시간을 *2 배*. 그러나 *모든 client 가 같은 시간 기다림* → 같은 시점에 다시 retry → 또 stampede.
-- **Exponential + Full Jitter**: `wait = random(0, 2^attempt × baseDelay)` — 각 client 가 *랜덤* 시간 대기 → retry 가 분산.
+backoff 는 실패한 호출을 재시도하기 전에 두는 대기 시간을 결정하는 함수입니다. retry count (몇 번 재시도) 와는 별개의 개념.
 
-본 EXP 의 S4 가 이 *full jitter* 의 적용 케이스. Spring Retry 의 `@Backoff(random = true)` 가 jitter 를 활성화.
+| 종류 | wait(attempt) | 예 (baseDelay=100ms) | 특성 |
+|---|---|---|---|
+| No backoff | 0 | 0, 0, 0, 0... | 즉시 재시도. 충돌 원인이 같으면 영구 stampede |
+| Fixed (constant) | baseDelay | 100, 100, 100, 100 | 단순. client 폭증 시 동기화된 retry 파동 |
+| Linear | baseDelay × attempt | 100, 200, 300, 400 | 점진적 완화. 큰 attempt 에서 부족 |
+| Exponential | baseDelay × multiplier^attempt | 100, 200, 400, 800 (multiplier=2) | 표준 — 충돌 누적 시 부하가 빠르게 감쇠 |
+
+cap (`maxDelay`) 이 없으면 attempt 10 에서 `100 × 2^10 ≈ 100초` 로 폭주합니다. Spring Retry 는 `@Backoff(maxDelay=10000)` 으로 상한을 둡니다.
+
+#### Jitter — 동시 retry 시점을 흩뿌림
+
+exponential 만으로는 안 되는 이유: 100 client 가 같은 backoff 공식을 따르면 wait 시간도 같습니다 → 같은 시점에 다시 retry → 또 stampede. 부하 그래프가 펄스 모양으로 반복됩니다.
+
+```
+시각:  0ms ────── 100ms ────── 200ms ────── 400ms
+      │             │              │              │
+실패 ─→ 모두 100ms 대기 → 동시 retry → 또 충돌
+        모두 200ms 대기 → 동시 retry → 또 충돌
+        ...
+```
+
+jitter 는 wait 시간에 랜덤성을 더해 시점을 시간 축으로 분산시킵니다.
+
+| 종류 | 공식 (`base = baseDelay × 2^attempt`) | 특성 |
+|---|---|---|
+| No Jitter | wait = base | 동기화 stampede |
+| Full Jitter | wait = random(0, base) | AWS 권장. 평균 대기 base/2. 분산 가장 강함 |
+| Equal Jitter | wait = base/2 + random(0, base/2) | 최소 대기 base/2 보장. 분산은 절반 |
+| Decorrelated Jitter | wait = min(cap, random(base, prev_wait × 3)) | 이전 wait 기반 stateful. AWS 가 long-tail 환경에 가장 추천 |
+
+Full 과 Equal 의 trade-off: Full 은 평균 대기는 짧지만 운 나쁘면 wait=5ms 처럼 server 회복 시간이 부족할 수 있습니다. Equal 은 base/2 최소 대기로 회복 시간을 보장하지만 분산 폭이 절반.
+
+#### Spring Retry 의 jitter 는 AWS Full Jitter 가 아닙니다
+
+`@Backoff(random=true)` 로 활성화되면 `ExponentialRandomBackOffPolicy` 가 사용됩니다. 식은:
+
+```
+nextInterval = random_between(currentInterval, currentInterval × multiplier)
+```
+
+- AWS Full Jitter: `random(0, base)` — 최소값 0
+- Spring Retry: `random(currentInterval, currentInterval × multiplier)` — 최소 대기 보장
+
+즉 Spring Retry 의 jitter 는 AWS 정의로는 Equal Jitter 변형에 가깝습니다. Resilience4j 의 `IntervalFunction.ofExponentialRandomBackoff(initial, multiplier, randomizationFactor)` 도 비슷한 구조이며, `randomizationFactor` (0~1) 로 분산 폭을 조절합니다.
+
+#### 본 EXP 의 매핑
+
+- S3 (`backoff=0`, no jitter): priority=29 — retry stampede 직접 재현
+- S4 (`exponential + random=true`): priority=50 — 1.7배 개선
+
+S4 가 100 에 못 미친 이유 — workers=100 high contention + maxAttempts=5 + `delay=5ms` (base 가 너무 작아 attempt 5 까지 분산 폭이 좁음) + Spring 의 Equal-like jitter (AWS Full 보다 분산 약함) 의 조합. workers=20 또는 maxAttempts=10 환경에서 priority=100 도달이 가능할 것으로 추정합니다.
+
+#### 면접 꼬리 질문
+
+- "왜 exponential 만으로는 부족한가?" → 동기화된 retry 파동.
+- "Full vs Equal Jitter 차이?" → 최소 대기 보장 여부 + 분산 폭.
+- "Spring Retry default 는?" → `random=false` 면 jitter 없음. `random=true` 시 Equal-like.
+- "cap (maxDelay) 가 없으면?" → attempt 누적 시 wait 가 분 단위로 폭주, SLA 안에 finalize 못함.
+- "client 1만 → jitter 만으로 충분?" → 부족. retry budget (token bucket) + circuit breaker + load shedding 추가 필요. jitter 는 동기화 stampede 만 막을 뿐, 전체 retry 부하 자체를 줄이지는 못합니다.
 
 </details>
 
@@ -196,9 +254,9 @@ public void incrementWithRetryJitter(Long ruleId) {
 }
 ```
 
-각 worker 의 retry 시점이 *랜덤* — retry 가 시간 축으로 분산. server (DB) 입장에선 *동시 충돌이 줄어들어* progress 가 누적됨.
+각 worker 의 retry 시점이 **랜덤** — retry 가 시간 축으로 분산. server (DB) 입장에선 **동시 충돌이 줄어들어** progress 가 누적됨.
 
-기대 결과: *priority = 100 도달*. retry 횟수는 늘지만 *의미 있는 progress*.
+기대 결과: **priority = 100 도달**. retry 횟수는 늘지만 **의미 있는 progress**.
 
 | Scenario | success | optLockFail | finalPriority | totalMs |
 |---|---:|---:|---:|---:|
@@ -206,13 +264,13 @@ public void incrementWithRetryJitter(Long ruleId) {
 
 > **가설 부분 충족**: jitter 가 retry 분산해 50 도달 (S3 의 29 → 1.7x). 단 가설 H4 (priority=100) 는 ❌ — workers=100 high contention + retry 5 한도 환경에서는 여전히 부족. workers=20 또는 retry=10 환경에서 100 도달 가능성 추정.
 
-→ 핵심: **단순 retry ≠ 안전**. *jitter 가 있는 retry 만* 안전. 이게 시니어 면접에서 갈리는 지점.
+→ 핵심: **단순 retry ≠ 안전**. **jitter 가 있는 retry 만** 안전. 이게 시니어 면접에서 갈리는 지점.
 
 ---
 
-## 6. AOP 순서 — `@Retryable` + `@Transactional` 의 *결정적* 순서 {#aop-order}
+## 6. AOP 순서 — `@Retryable` + `@Transactional` 의 **결정적** 순서 {#aop-order}
 
-`@Retryable` 과 `@Transactional` 둘 다 AOP. 어느 쪽이 *outer* 인가에 따라 동작이 갈립니다:
+`@Retryable` 과 `@Transactional` 둘 다 AOP. 어느 쪽이 **outer** 인가에 따라 동작이 갈립니다:
 
 ```
 [클라이언트]
@@ -232,32 +290,98 @@ public void incrementWithRetryJitter(Long ruleId) {
 [실제 메서드]
 ```
 
-→ **`@Retryable` 이 outer** 일 때 — retry 마다 *새 트랜잭션* 이 열림. `@Version` 의 fresh read 보장. 이게 우리가 원하는 동작.
+→ **`@Retryable` 이 outer** 일 때 — retry 마다 **새 트랜잭션** 이 열림. `@Version` 의 fresh read 보장. 이게 우리가 원하는 동작.
 
-만약 `@Transactional` 이 outer 면 — retry 가 *같은 트랜잭션* 안에서. JPA 1차 캐시가 *같은 entity* 를 들고 있어서 *같은 stale version* 으로 또 시도 → 무한 retry stampede.
+만약 `@Transactional` 이 outer 면 — retry 가 **같은 트랜잭션** 안에서. JPA 1차 캐시가 **같은 entity** 를 들고 있어서 **같은 stale version** 으로 또 시도 → 무한 retry stampede.
 
-Spring 의 default order: `RetryOperationsInterceptor` 가 Transactional 보다 *outer*. 본 EXP 코드는 default 그대로 — 동작 OK.
+Spring 의 default order: `RetryOperationsInterceptor` 가 Transactional 보다 **outer**. 본 EXP 코드는 default 그대로 — 동작 OK.
 
 <details>
 <summary><b>(곁가지) self-invocation 함정 — 같은 클래스 내부 호출이면 AOP 안 먹음</b> (펼치기)</summary>
 
-Spring AOP 는 *proxy 기반*. 따라서 *외부에서 들어오는 호출* 만 가로챔. 같은 클래스 안에서 `this.method()` 호출은 proxy 우회 → AOP 안 먹음.
+#### 한 줄 요약
+
+Spring 의 `@Transactional` / `@Retryable` 같은 어노테이션은 모두 AOP 프록시 기반입니다. 그래서 **클래스 외부에서 메서드를 호출할 때만** 프록시가 가로채서 트랜잭션을 시작하거나 retry 를 적용합니다. 같은 클래스 안에서 `this.method()` 형태로 부르면 프록시를 거치지 않고 원래 객체 메서드가 직접 호출되어 — 어노테이션이 **있어도 동작하지 않습니다**. 이게 self-invocation 함정.
+
+#### 함정에 빠지는 코드
 
 ```java
 @Service
 class RuleUpdateService {
-    @Retryable(...)
+
+    @Retryable(retryFor = OptimisticLockingFailureException.class,
+               maxAttempts = 5,
+               backoff = @Backoff(delay = 5, multiplier = 2.0, random = true))
     public void wrapper(Long id) {
-        this.realLogic(id);   // ← AOP 우회. retry 안 됨
+        this.realLogic(id);   // ← 프록시 우회. @Transactional 안 먹음
     }
+
     @Transactional
-    private void realLogic(Long id) { ... }
+    public void realLogic(Long id) {
+        AutoReplyRule rule = repo.findById(id).orElseThrow();
+        rule.incrementPriority();   // dirty checking 으로 UPDATE 발사돼야 함
+        // 그러나 트랜잭션이 시작 안 됐으니 PersistenceContext 자체가 없음
+        // → flush 도 안 일어나고 UPDATE SQL 도 발행되지 않음
+    }
 }
 ```
 
-해결법: (a) 별도 빈으로 분리, (b) `AopContext.currentProxy()` 사용 (단 `exposeProxy=true` 필요), (c) self-injection (`@Autowired private RuleUpdateService self;`).
+#### 호출 흐름 — 프록시는 어디서 일하나
 
-W3 EXP-02 측정 시 self-invocation 으로 *낙관락 메서드의 성공 100 인데 잔액 그대로* 함정을 한 번 만났습니다. [JPA Spring Mastery #7](/posts/jpa-spring-mastery-07-aop-self-invocation/) 에서 깊이 있게 다룬 함정이라 본 글은 짧게 언급만.
+외부에서 `service.wrapper(id)` 를 부르면:
+
+```
+Caller (예: Controller)
+   │
+   │ service.wrapper(id)
+   ▼
+[Spring 이 만든 프록시 객체]   ← @Retryable 가로챔, retry 시작
+   │
+   │ proxy → 원본 객체.wrapper(id) 호출
+   ▼
+[원본 RuleUpdateService 인스턴스]
+   │
+   │ wrapper() 안에서 this.realLogic(id) 호출
+   │   ← 여기서 'this' 는 원본 객체 자신.
+   │     프록시가 아님. 그래서 @Transactional 가로채는 코드를 거치지 않음.
+   ▼
+realLogic() 직접 실행 — 트랜잭션 없이.
+```
+
+핵심은 두 가지:
+1. 외부 → wrapper 호출은 프록시 통과 → @Retryable 작동
+2. wrapper 내부의 `this.realLogic()` 은 프록시를 거치지 않음 → @Transactional 작동 안 함
+
+#### 왜 worker 입장에서는 "성공" 처럼 보였는가
+
+이전 락 비교 측정에서 한 번 이 함정에 빠졌습니다. 100 worker 가 동일 메서드를 호출했는데 — `OptimisticLockingFailureException` 도 한 건 안 났고, 모든 worker 가 정상 return. 그런데 DB 잔액은 변경이 0건. 100% "성공" 인데 결과가 0.
+
+원인은 위 흐름:
+1. worker 가 호출한 entry 메서드는 프록시를 통과했지만, 그 안의 진짜 로직은 self-invocation 으로 트랜잭션 없이 실행
+2. 트랜잭션이 없으니 PersistenceContext 자체가 없음 → entity 가 영속 상태가 아님 → dirty checking 동작 안 함
+3. flush 가 안 일어나서 UPDATE SQL 자체가 DB 에 도달하지 않음
+4. 예외도 안 남 (그냥 메모리 객체의 필드만 +1 하고 끝)
+5. 호출자 입장: 정상 return → "성공" 으로 카운트
+6. DB 입장: SELECT 만 받았고 UPDATE 는 한 번도 안 받음
+
+```
+[측정 결과]
+totalMs: 549ms
+successes: 100   ← 100% "성공"
+fails: 0
+finalBalance: 100   ← 그러나 잔액 변화 0
+```
+
+#### 해결 4가지
+
+| 방법 | 코드 형태 | 특성 |
+|---|---|---|
+| (a) 별도 빈으로 분리 | `RuleUpdateLogicService` 신설 후 주입 | 가장 명확. SRP 원칙에도 맞음 |
+| (b) self-injection | `@Autowired private RuleUpdateService self;` 후 `self.realLogic()` | 같은 클래스 내 가능. 순환 참조처럼 보이지만 Spring 이 프록시 주입 |
+| (c) `AopContext.currentProxy()` | `((RuleUpdateService) AopContext.currentProxy()).realLogic(id)` | `@EnableAspectJAutoProxy(exposeProxy=true)` 필요 |
+| (d) AspectJ 컴파일 타임 위빙 | 컴파일 시 바이트코드 변경 | 가장 강력하나 빌드 설정 복잡 |
+
+본 EXP 의 측정 코드는 (a) 형태로 분리해서 함정을 회피했습니다. 더 깊은 분해 (TransactionInterceptor.invoke 6단계, AOP Alliance MethodInvocation, 같은 함정에 걸리는 6 어노테이션) 는 [JPA Spring Mastery #7](/posts/jpa-spring-mastery-07-aop-self-invocation/) 참조.
 
 </details>
 
@@ -265,7 +389,7 @@ W3 EXP-02 측정 시 self-invocation 으로 *낙관락 메서드의 성공 100 �
 
 ## 7. S5 — 자기 Lost Update (DC-4): JDBC vs JPA 1차 캐시 {#s5-self-lost}
 
-분산 환경 Lost Update 와 *완전히 별개* 의 함정. *같은 트랜잭션 안에서 같은 row 두 번 조회* 하면 어떻게 될까?
+분산 환경 Lost Update 와 **완전히 별개** 의 함정. **같은 트랜잭션 안에서 같은 row 두 번 조회** 하면 어떻게 될까?
 
 ### 7.1 JDBC 안티패턴 (자기 Lost Update 발생)
 
@@ -286,7 +410,7 @@ public void selfLostUpdateJdbcStale(Long id) {
 }
 ```
 
-같은 트랜잭션 안에서 일어나는 Lost Update — *아무 락 도 못 막음*. 격리수준 (REPEATABLE READ) 도 무관. *코드 작성자가 1차 SELECT 의 변수를 stale 한 채로 쓴* 안티패턴.
+같은 트랜잭션 안에서 일어나는 Lost Update — **아무 락 도 못 막음**. 격리수준 (REPEATABLE READ) 도 무관. **코드 작성자가 1차 SELECT 의 변수를 stale 한 채로 쓴** 안티패턴.
 
 ### 7.2 JPA 의 1차 캐시 == 보장 (Vlad Mihalcea)
 
@@ -303,9 +427,9 @@ public boolean jpaIdentityProof(Long id) {
 // flush 시 UPDATE 1번 — 두 변경 모두 반영
 ```
 
-[Vlad Mihalcea — JPA First-Level Cache](https://vladmihalcea.com/jpa-hibernate-first-level-cache/) 가 정의하는 **application-level repeatable read**. 같은 트랜잭션 내 같은 ID 로 조회 시 *항상 같은 Java 객체 인스턴스 반환*. `==` 비교까지 true.
+[Vlad Mihalcea — JPA First-Level Cache](https://vladmihalcea.com/jpa-hibernate-first-level-cache/) 가 정의하는 **application-level repeatable read**. 같은 트랜잭션 내 같은 ID 로 조회 시 **항상 같은 Java 객체 인스턴스 반환**. `==` 비교까지 true.
 
-→ 이 보장은 *1차 캐시* 에서 옴. JDBC / MyBatis 는 이 보장이 없습니다 — 메모리 객체 동일성 ≠ DB row 동일성.
+→ 이 보장은 **1차 캐시** 에서 옴. JDBC / MyBatis 는 이 보장이 없습니다 — 메모리 객체 동일성 ≠ DB row 동일성.
 
 | 결과 | JDBC stale | JPA 1차 캐시 |
 |---|---|---|
@@ -313,21 +437,21 @@ public boolean jpaIdentityProof(Long id) {
 | retry_count 결과 | 0 (Lost!) | 1 (정상) |
 | SELECT 횟수 | 2 (또는 캐시 miss) | 1 |
 
-→ 핵심: **JPA 의 dirty checking 편의성과 1차 캐시의 정합성 보장은 별개**. 분산 환경 Lost Update (락으로 방지) 와 자기 Lost Update (1차 캐시로 방지) 도 *별개* 의 함정.
+→ 핵심: **JPA 의 dirty checking 편의성과 1차 캐시의 정합성 보장은 별개**. 분산 환경 Lost Update (락으로 방지) 와 자기 Lost Update (1차 캐시로 방지) 도 **별개** 의 함정.
 
 ---
 
 ## 8. 운영 처방 — 같은 의미의 update 도 6 시나리오로 갈리는 이유 {#operational-rules}
 
-### 8.1 *충돌 빈번* 환경 — 비관락 (W3 EXP-02 결론)
+### 8.1 **충돌 빈번** 환경 — 비관락 (W3 EXP-02 결론)
 
 [W3 EXP-02 — 락 4종 비교](/posts/mysql-credit-concurrency-lock-comparison/) 에서 측정한 잔액 차감 (잔액 100 / 100 worker / 1 차감) 결과:
 - 비관락 (FOR UPDATE) 180ms / 100% 정확 ⭐
 - 낙관락 549ms (재시도 폭증) / 100% 정확
 
-→ *충돌 빈번* 환경은 비관락이 정답.
+→ **충돌 빈번** 환경은 비관락이 정답.
 
-### 8.2 *충돌 드문* 환경 — 낙관락 + retry + jitter (본 EXP)
+### 8.2 **충돌 드문** 환경 — 낙관락 + retry + jitter (본 EXP)
 
 본 EXP 의 룰 수정 (사장님 1명 또는 2명) 환경에선 충돌 빈도 < 1%. 이런 환경에서:
 - 비관락 = 오버킬 (대부분 contention 없는데 매번 row lock)
@@ -335,16 +459,16 @@ public boolean jpaIdentityProof(Long id) {
 
 → **환경에 맞는 락 선택 + retry policy 가 답**. retry 횟수가 적어도 OK — 충돌 빈도가 낮으니까.
 
-### 8.3 *충돌 빈번 + 낙관락 강제* 환경 — UPDATE-then-read 패턴
+### 8.3 **충돌 빈번 + 낙관락 강제** 환경 — UPDATE-then-read 패턴
 
-본 EXP 의 S1 baseline 의 변형으로 *증분 UPDATE* 가 답:
+본 EXP 의 S1 baseline 의 변형으로 **증분 UPDATE** 가 답:
 
 ```sql
 UPDATE auto_reply_rule SET priority = priority + 1 WHERE id = ?
 -- 또는 SET balance = balance - amount WHERE id = ? AND balance >= amount
 ```
 
-→ *원자적* — DB 가 read 와 modify 를 같이 처리. JPA dirty checking 우회. 100% 정확. 단 *값 검증 (balance >= amount)* 을 SQL 안에서 해야 함.
+→ **원자적** — DB 가 read 와 modify 를 같이 처리. JPA dirty checking 우회. 100% 정확. 단 **값 검증 (balance >= amount)** 을 SQL 안에서 해야 함.
 
 ### 8.4 정리
 
@@ -354,15 +478,15 @@ UPDATE auto_reply_rule SET priority = priority + 1 WHERE id = ?
 | 충돌 드문 (룰 수정) | 낙관락 + retry + **jitter** |
 | 단순 증분 / 단순 차감 | UPDATE atomic SQL |
 
-→ 함정: "락 = 무조건 비관락" 또는 "JPA = 무조건 `@Version`" 의 단일 답이 *현실에 없음*.
+→ 함정: "락 = 무조건 비관락" 또는 "JPA = 무조건 `@Version`" 의 단일 답이 **현실에 없음**.
 
 ---
 
-## 9. 결론 — JPA 의 함정은 *기능 한 줄이 아니라 lifecycle 의 상호작용* {#conclusion}
+## 9. 결론 — JPA 의 함정은 **기능 한 줄이 아니라 lifecycle 의 상호작용** {#conclusion}
 
-이 글이 측정으로 보여준 것은 — **`@Version` 만으로는 부족하다**. retry 가 없으면 일부만 성공. retry 가 *백오프 없으면* stampede. *jitter 가 있는 retry* 만 표준. 그리고 분산 환경 Lost Update 와 *별개* 로 *자기 Lost Update* 라는 함정 — JPA 의 1차 캐시가 == 동일성을 보장해야 막아짐.
+이 글이 측정으로 보여준 것은 — **`@Version` 만으로는 부족하다**. retry 가 없으면 일부만 성공. retry 가 **백오프 없으면** stampede. **jitter 가 있는 retry** 만 표준. 그리고 분산 환경 Lost Update 와 **별개** 로 **자기 Lost Update** 라는 함정 — JPA 의 1차 캐시가 == 동일성을 보장해야 막아짐.
 
-같은 의미의 *priority +1* 이 — `@Version` / retry / backoff / jitter / 1차 캐시 의 5 변수 조합으로 *5 가지 다른 결과*. 시니어 면접의 "JPA 어떻게 다뤘나요" 에 답하려면 — 이 *조합 공간* 의 trade-off 를 측정값으로 들고 있어야 합니다.
+같은 의미의 **priority +1** 이 — `@Version` / retry / backoff / jitter / 1차 캐시 의 5 변수 조합으로 **5 가지 다른 결과**. 시니어 면접의 "JPA 어떻게 다뤘나요" 에 답하려면 — 이 **조합 공간** 의 trade-off 를 측정값으로 들고 있어야 합니다.
 
 다음 글은 [JPA dirty checking 비용 — 1만건 update 에서 readOnly / @DynamicUpdate / clear() 패턴](/posts/jpa-dirty-checking-snapshot-cost/) 의 내부 메커니즘을 측정합니다.
 
