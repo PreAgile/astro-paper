@@ -14,7 +14,7 @@ tags:
   - Performance
   - Backend
 description: |
-  In a 4-depth domain (owner→merchant→rule→history) findAll + child traversal yields 21 SQL. JOIN FETCH collapses it to 1. But fetching two collections at once raises MultipleBagFetchException — Hibernate refuses the cartesian product of two Bags. JOIN FETCH + setMaxResults emits HHH000104 and applies pagination *in memory* — load 10K rows, keep 20, OOM. Non-owning @OneToOne LAZY is *always fetched* because the proxy cannot tell whether the value is null. @BatchSize tames N+1 to N/K+1, the standard mitigation. The fetch traps in JPA come from Bag/List/Set semantics, proxy limitations, and how Hibernate handles cartesian products — never from JOIN FETCH alone.
+  In a 4-depth domain (owner→merchant→rule→history) findAll + child traversal yields 121 SQL. JOIN FETCH collapses it to 1 (12× faster). Fetching two collections at once raises MultipleBagFetchException — Hibernate refuses the cartesian of two Bags. JOIN FETCH + setMaxResults emits HHH000104 and applies pagination *in memory* — silent OOM at scale. Non-owning @OneToOne LAZY is *always fetched* because the proxy cannot tell whether the value is null. **`default_batch_fetch_size: 10` reduces N+1 from 121 → 13 prep (9.3× drop) — but does NOT fix @OneToOne non-owning LAZY (still 1201 prep)**, because batch fetch only batches collection LAZY triggers, not row-by-row ToOne SELECTs. The fetch traps come from Bag/List/Set semantics, proxy limitations, and Hibernate's cartesian handling — JOIN FETCH alone is half the answer.
 ---
 
 ## Table of contents
@@ -62,6 +62,29 @@ public void s1NPlusOne() {
 ```
 
 Expected: 1 + 20 + 100 = **121 SQL**.
+
+**[Measured — Java/Spring Stage 2 / 2026-05-09]** Identical code, run twice — only `application.yml`'s `hibernate.default_batch_fetch_size` differs:
+
+**Run A — `default_batch_fetch_size` OFF (default):**
+
+| Scenario | prepStmts | rows | aux | elapsed |
+|---|---:|---:|---:|---:|
+| **S1 N+1 baseline** | **121** | 20 | 300 | 86 ms |
+| S2 JOIN FETCH 1-level | **1** | 20 | 100 | 7 ms (12×) |
+| S3 MultipleBagFetchException | (thrown) | — | — | — |
+| **S4 @OneToOne non-owning LAZY** | **1201** | 1200 | 0 | 282 ms |
+| S5 JOIN FETCH + Pagination | 1 | 5 | 0 | 6 ms |
+| S6 (same code as S1) | **121** | 20 | 300 | 31 ms |
+
+**Run B — `default_batch_fetch_size: 10`:**
+
+| Scenario | prepStmts | Δ vs Run A |
+|---|---:|---|
+| S1 / S6 (identical code) | **13** | **−9.3×** (1 + ⌈20/10⌉ + ⌈100/10⌉) |
+| S2 / S3 / S5 | unchanged | (no effect) |
+| **S4 @OneToOne non-owning LAZY** | **1201** | **unchanged — key finding ★** |
+
+> S1's 121 prep decomposition: **1 main + 20 (owners→merchants) + 100 (merchants→rules) = 121** — the measurement is a 3-depth traversal of the 4-depth domain (history is not iterated). Multiplicative growth per depth. **★ Critical finding: S4's 1201 prep is unaffected by `default_batch_fetch_size`** — the answer "just enable batch_fetch_size" to N+1 is half-true. ToOne LAZY's proxy limitation lives outside the collection batch mechanism (see §6).
 
 ---
 
@@ -143,49 +166,109 @@ Even though `metadata` is LAZY, every `findAll()` of `ReplyHistory` issues a SEL
 
 The owning side (`@JoinColumn`) can decide null-ness from the FK column — proxy works. The non-owning side (`mappedBy`) has no FK in the entity itself, so Hibernate must SELECT to know whether `metadata` is null. The intent of LAZY is impossible to honour without enhancement.
 
+### ★ Why `default_batch_fetch_size` does NOT fix this
+
+S4 stays at **1201 prep in Run B** (with `default_batch_fetch_size: 10`). Two different LAZY mechanisms:
+
+- **Collection LAZY** (OneToMany / ManyToMany): Hibernate wraps the collection in a `PersistentBag`/`PersistentSet`. On first access, `default_batch_fetch_size` rounds up *other parents at the same depth* and fetches them in one IN clause — *batched*.
+- **ToOne LAZY** (OneToOne / ManyToOne): Hibernate inserts a *proxy*. The proxy must know "is this null?" — but for the non-owning side the FK is in the *opposite table*, so Hibernate fires a SELECT *per row* at materialisation time. *No window to batch*.
+
+→ batch_fetch_size batches collection LAZY triggers via IN-clause grouping; it has no hook into the per-row ToOne SELECTs. **This is the article's core point: "N+1" hides two distinct mechanisms** — the global config fixes the first, only `@MapsId` (or bytecode enhancement) fixes the second.
+
 ### Fixes
 
-- `@MapsId` — collapse 1:1 into PK = FK on the owning side, drop the mappedBy mapping. Single direction.
+- `@MapsId` — collapse 1:1 into PK = FK on the owning side, drop the mappedBy mapping. Single direction. Vlad's standard recommendation.
 - Bytecode Enhancement with `@LazyToOne(LazyToOneOption.NO_PROXY)` — needs the gradle plugin.
 
 [Vlad Mihalcea — OneToOne LAZY](https://vladmihalcea.com/hibernate-one-to-one-lazy-not-working/).
 
 ---
 
-## 7. S6 — `@BatchSize` and N/K+1 {#s6}
+## 7. S6 — `default_batch_fetch_size` and N/K+1 {#s6}
 
-`hibernate.default_batch_fetch_size=10` (or `@BatchSize(size=10)`):
+S6 in this experiment runs the **exact same code as S1**. The only difference is one line in `application.yml`:
 
-```sql
--- N+1 baseline
-SELECT * FROM owner;
-SELECT * FROM merchant WHERE owner_id = ?;   -- 20 times
-
--- @BatchSize
-SELECT * FROM owner;
-SELECT * FROM merchant WHERE owner_id IN (?, ?, ?, ..., ?);   -- 2 times
+```yaml
+spring.jpa.properties.hibernate:
+  default_batch_fetch_size: 10   # Hibernate default is -1 (off) — must be enabled explicitly
 ```
 
-121 → ~13. Not 1, but single-digit — the practical fix in many production codebases.
+3-depth traversal SQL emitted:
+
+```sql
+-- Run A (config OFF) — baseline N+1
+SELECT * FROM merchant_owner;                              -- 1
+SELECT * FROM merchant WHERE owner_id = ?;                 -- ×20
+SELECT * FROM auto_reply_rule_n1 WHERE merchant_id = ?;    -- ×100
+-- = 121 SQL
+
+-- Run B (default_batch_fetch_size: 10)
+SELECT * FROM merchant_owner;                              -- 1
+SELECT * FROM merchant WHERE owner_id IN (?,?,...,?);      -- ×2 (20/10)
+SELECT * FROM auto_reply_rule_n1 WHERE merchant_id IN (?,?,...,?);  -- ×10 (100/10)
+-- = 13 SQL
+```
+
+**121 → 13 (9.3×) without changing a single line of application code.** The value of `default_batch_fetch_size` as a *global safety net*. But — as measured in §6 — **it does not fix `@OneToOne` non-owning LAZY**. The full prescription is the config plus `@MapsId`.
 
 ---
 
-## 8. Decision tree {#rules}
+## 8. Operational rules — Vlad's 5 commandments + 4 industry patterns + decision tree {#rules}
+
+### 8.1 Vlad Mihalcea's 5 commandments
+
+[Vlad Mihalcea](https://vladmihalcea.com/) — Hibernate ORM's most active external contributor. His blog is the de facto standard for production-grade Hibernate. Mapped to this article's scenarios:
+
+| # | Commandment | Where this article shows it |
+|---|---|---|
+| 1 | Never use `FetchType.EAGER` (anti-pattern) | (premise) |
+| 2 | Specify the fetch plan **per query** (JPQL / Criteria / EntityGraph) | S2 / §7 |
+| 3 | Read-only views → **DTO projection** | (sidesteps every trap) |
+| 4 | Collections: `JOIN FETCH + DISTINCT` for one, `@BatchSize` for the rest | S2 + S6 |
+| 5 | OneToOne: `@MapsId` *unidirectional* (no `mappedBy`) | S4 |
+
+The 6 scenarios are precisely each commandment violated.
+
+### 8.2 What real teams pick — 4 industry patterns
+
+| Pattern | Examples | Trade-off |
+|---|---|---|
+| **A. JPA write-only + native/QueryDSL/jOOQ read** | Naver D2, Kakao tech (high-traffic services) | ✅ Full performance control / ❌ Two parallel codebases |
+| **B. JPA + @EntityGraph + @BatchSize safety net** | Generic Spring Boot guides — startups / SaaS | ✅ Stay in entities / ❌ EntityGraph methods explode; MultipleBag still possible |
+| **C. JPA + DTO projection everywhere** | Finance / payments / ad bidding (latency-critical) | ✅ Zero N+1, predictable latency / ❌ DTO sprawl, lose dirty checking |
+| **D. Avoid JPA (jOOQ / MyBatis)** | Some US SaaS — strong SQL control | ✅ No fetch traps ever / ❌ Lose object-graph naturalness |
+
+Korean big-tech commerce/content teams typically run pattern A (write JPA + read QueryDSL). Whichever pattern you pick, **the N+1 mechanisms here still matter** — pattern A's write side still triggers LAZY through dirty checking; pattern B with EntityGraph alone walks into the pagination trap.
+
+### 8.3 Decision tree
 
 | Situation | Recommendation |
 |---|---|
+| Read-only view (report / list) | **DTO projection first** — sidesteps every trap |
 | 1:N, no pagination | JOIN FETCH (DISTINCT) |
-| 1:N two levels deep | JOIN FETCH + `@BatchSize` |
+| 1:N two levels deep | JOIN FETCH one level + `@BatchSize` for the rest |
 | Two collections from same entity | One `Set` + JOIN FETCH, or both via `@BatchSize` |
 | Pagination needed | Page parents, fetch children with `IN` or `@BatchSize` |
-| `@OneToOne mappedBy` | `@MapsId` unidirectional, or Bytecode Enhancement |
-| Read-only report | DTO projection (`SELECT new com.x.Dto(...)`) — bypass entities |
+| `@OneToOne mappedBy` (non-owning) | **`@MapsId` unidirectional** — `default_batch_fetch_size` does NOT help (§6) |
+| Global safety net | Always set `default_batch_fetch_size: 10` in `application.yml` |
+
+### 8.4 Production default this article recommends
+
+1. Always enable `default_batch_fetch_size: 10` (measured: 9.3× drop on collection LAZY)
+2. One JOIN FETCH + `@BatchSize` for the rest (commandment 4)
+3. DTO projection for read-only views (commandment 3)
+4. `@MapsId` unidirectional for OneToOne (commandment 5; batch_fetch_size cannot save you)
 
 ---
 
 ## 9. Conclusion {#conclusion}
 
-JOIN FETCH alone is not the answer. The trade-off space spans `List` vs `Set`, owning vs non-owning, pagination compatibility, and how Hibernate processes cartesian products. Without that map, the failure modes (OOM, surprise SELECTs) reproduce only in production.
+JOIN FETCH alone is not the answer. The trade-off space spans `List` vs `Set`, owning vs non-owning, pagination compatibility, **the boundary between N+1 that batch_fetch_size *can* fix and N+1 it *cannot***, and how Hibernate processes cartesian products. Without that map, the failure modes (OOM, surprise SELECTs) reproduce only in production.
+
+Three-line summary:
+1. **`default_batch_fetch_size: 10`** — one line, 9.3× drop on collection LAZY (S1 121 → 13). Always on.
+2. **But it does NOT fix `@OneToOne` non-owning LAZY** (S4 1201 → 1201). Separate prescription: `@MapsId` unidirectional.
+3. *DTO projection for read-only views* + *JOIN FETCH + BatchSize for transactional views*. Two trails, picked per screen.
 
 Next: [JPA saveAll IDENTITY bulk-insert trap](/en/posts/jpa-saveall-identity-bulk-insert-trap/).
 

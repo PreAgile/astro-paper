@@ -66,18 +66,28 @@ public void s1NPlusOne() {
 
 → 운영에선 사장님 100 명, 매장 1000 개, 룰 5000 개면 *수천 SQL* 한 번 호출에 발사.
 
-**[실측 — Java/Spring Stage 2 / 2026-05-04 23:01 KST]** 20 owner × 5 merchant × 3 rule × 4 history 도메인:
+**[실측 — Java/Spring Stage 2 / 2026-05-09 23:21~22 KST 재측정]** 20 owner × 5 merchant × 3 rule × 4 history 도메인. *동일 코드를 두 번 실행* — `application.yml` 의 `hibernate.default_batch_fetch_size` 한 줄을 토글:
+
+**Run A — `default_batch_fetch_size` OFF (기본):**
 
 | Scenario | prepStmts | queries | rows | aux | elapsedMs |
 |---|---:|---:|---:|---:|---:|
-| **S1 N+1 baseline** | **121** | 1 | 20 | 300 | **73** |
-| S2 JOIN FETCH 1-level | **1** | 1 | 20 | 100 | **10** (7x 빠름) |
+| **S1 N+1 baseline** | **121** | 1 | 20 | 300 | **86** |
+| S2 JOIN FETCH 1-level | **1** | 1 | 20 | 100 | **7** (12x 빠름) |
 | S3 MultipleBagFetchException | (예외) | — | — | — | — |
-| **S4 `@OneToOne` non-owning LAZY** | **1201** | 1 | 1200 | 0 | **384** |
-| S5 JOIN FETCH + Pagination (HHH000104) | 1 | 1 | 5 | 0 | 5 |
-| S6 BatchSize=10 | **21** | 1 | 20 | 100 | 10 |
+| **S4 `@OneToOne` non-owning LAZY** | **1201** | 1 | 1200 | 0 | **282** |
+| S5 JOIN FETCH + Pagination (HHH000104) | 1 | 1 | 5 | 0 | 6 |
+| S6 (S1 과 동일 코드) | **121** | 1 | 20 | 300 | 31 |
 
-> S1 의 121 prep 분해: 1 main + 20 merchant + 60 rule + 40 history aux ≈ 121 — *깊이마다 multiplicative 증가*. S4 `@OneToOne` non-owning LAZY 는 metadata 변수를 안 써도 1200x 추가 SELECT (null 확인용). `@BatchSize=10` 이 121→21 로 5.7x 감소 — 정석은 *한 collection 만 JOIN FETCH + 나머지 BatchSize*.
+**Run B — `default_batch_fetch_size: 10`:**
+
+| Scenario | prepStmts | Δ vs Run A |
+|---|---:|---|
+| S1 / S6 (동일 코드) | **13** | **-9.3x** (1 + ⌈20/10⌉ + ⌈100/10⌉ = 1 + 2 + 10) |
+| S2 / S3 / S5 | 동일 | (영향 없음) |
+| **S4 `@OneToOne` non-owning LAZY** | **1201** | **변화 없음 — 새 발견 ★** |
+
+> S1 의 121 prep 분해: **1 main + 20 (owners→merchants) + 100 (merchants→rules) = 121** — 본 측정은 4-depth 도메인의 *3-depth traversal* (history 까지 안 들어감). 깊이마다 multiplicative 증가. S4 `@OneToOne` non-owning LAZY 는 metadata 변수를 안 써도 1200x 추가 SELECT (null 확인용). **★ 더 중요한 발견 — S4 의 1201 prep 는 `default_batch_fetch_size` 켜도 변화 없음.** "JPA 면접에 batch_fetch_size 한 줄로 답하면 통과" 가 *반쪽 답* 이라는 직접 증거. ToOne LAZY 의 프록시 한계는 collection batch 메커니즘 밖이다 (자세한 이유는 §6).
 
 ---
 
@@ -236,7 +246,16 @@ Hibernate 의 `@OneToOne` LAZY 는 *owning side* (= `@JoinColumn` 가진 쪽) �
 
 *non-owning side* (= `mappedBy` 쪽) 에선 — *FK 가 entity 에 없음*. metadata 가 *존재하는지* / *null 인지* 알려면 *반대 쪽 테이블 SELECT* 필요. Hibernate 가 *값을 set 하기 위해* 미리 SELECT — LAZY 의도 무시.
 
-### 6.2 해결법
+### 6.2 [실측 — 새 발견 ★] `default_batch_fetch_size` 로도 못 풀린다
+
+S4 의 1201 prep 는 `default_batch_fetch_size: 10` 켠 Run B 에서도 **여전히 1201**. 이유:
+
+- **collection LAZY** (OneToMany / ManyToMany): Hibernate 가 컬렉션을 PersistentBag/PersistentSet 으로 wrap. 첫 접근 시 트리거되며, batch fetch 가 활성이면 *같은 깊이의 다른 부모 ID 들* 을 모아 IN 절로 한 번에 fetch — *batch 효과 적용*
+- **ToOne LAZY** (OneToOne / ManyToOne): 프록시 객체. 프록시는 "null 인지 여부" 를 알아야 하는데 — non-owning side 에선 FK 가 *반대 테이블* 에 있어서 *각 row 시점*에 SELECT 한 번. *batch 로 묶을 기회 없음*
+
+→ batch_fetch_size 는 *collection LAZY 트리거의 IN-clause 묶음* 이지 *각 row 단위로 발사되는 ToOne SELECT* 와는 무관. **이게 본 글의 핵심 — N+1 이라는 한 단어 뒤에 *서로 다른 메커니즘 두 개* 가 있음**.
+
+### 6.3 해결법
 
 **(a) `@MapsId` + owning side 에서 PK = FK** — 1:1 의 정통 매핑:
 
@@ -264,44 +283,93 @@ private ReplyHistoryMetadata metadata;
 
 ---
 
-## 7. S6 — `@BatchSize` 의 N/K+1 효과 {#s6-batch-size}
+## 7. S6 — `@BatchSize` / `default_batch_fetch_size` 의 N/K+1 효과 {#s6-batch-size}
 
-`hibernate.default_batch_fetch_size=10` (또는 `@BatchSize(size=10)`) 적용 시:
+본 EXP 의 S6 는 **S1 과 *완전히 동일한 코드***. 차이는 application.yml 한 줄:
 
-```sql
--- N+1 baseline:
-SELECT * FROM owner;
-SELECT * FROM merchant WHERE owner_id = ?;  -- 20 번
--- = 21 SQL
-
--- @BatchSize 적용:
-SELECT * FROM owner;
-SELECT * FROM merchant WHERE owner_id IN (?, ?, ?, ..., ?);  -- 10 owner_id 묶어서, 2 번
--- = 3 SQL
+```yaml
+spring.jpa.properties.hibernate:
+  default_batch_fetch_size: 10   # ★ 명시적으로 켜야 동작 (Hibernate 기본값은 -1 = off)
 ```
 
-→ N + 1 = 21 → ⌈N/K⌉ + 1 = 3. 한 자릿수.
+3-depth traversal 기준:
 
-application.yml 의 `hibernate.default_batch_fetch_size` 가 활성화된 상태면 — *모든 LAZY collection* 에 자동 적용.
+```sql
+-- Run A (config OFF) — N+1 baseline:
+SELECT * FROM merchant_owner;                              -- 1
+SELECT * FROM merchant WHERE owner_id = ?;                 -- 20 번
+SELECT * FROM auto_reply_rule_n1 WHERE merchant_id = ?;    -- 100 번
+-- = 121 SQL
+
+-- Run B (default_batch_fetch_size: 10):
+SELECT * FROM merchant_owner;                              -- 1
+SELECT * FROM merchant WHERE owner_id IN (?,?,...,?);      -- 2 번 (20/10)
+SELECT * FROM auto_reply_rule_n1 WHERE merchant_id IN (?,?,...,?);  -- 10 번 (100/10)
+-- = 13 SQL
+```
+
+→ **121 → 13 (9.3x 감소)**. 코드 한 줄 안 고치고 application.yml 한 줄 추가만. 이게 *전역 안전망* 으로서 batch_fetch_size 의 가치.
+
+단 (§6.2 측정) **OneToOne non-owning LAZY 함정에는 안 먹힘** — 이걸 함께 푸는 건 @MapsId 만 가능. 한 줄 처방으론 부족하다는 게 본 EXP 의 메시지.
 
 ---
 
-## 8. 운영 룰 — fetch 전략 결정 트리 {#operational-rules}
+## 8. 운영 룰 — Vlad 5 계명 + 기업 4 패턴 + 결정 트리 {#operational-rules}
+
+### 8.1 Vlad Mihalcea 의 5 계명
+
+[Vlad Mihalcea](https://vladmihalcea.com/) — Hibernate 의 most active 외부 contributor. 그의 블로그가 *현실적인 Hibernate 사용법* 의 사실상 표준. 5 계명을 본 EXP 의 시나리오와 매핑하면:
+
+| # | 계명 | 본 EXP 의 시연 |
+|---|---|---|
+| 1 | `FetchType.EAGER` 를 *절대* 쓰지 말 것 — anti-pattern | (전제) |
+| 2 | fetch 플랜은 *쿼리별* 명시 (JPQL / Criteria / EntityGraph) | S2 / §7 |
+| 3 | 읽기 전용 화면은 **DTO projection** | (모든 함정 우회) |
+| 4 | 컬렉션은 `JOIN FETCH + DISTINCT` 한 단계, 나머지는 `@BatchSize` | S2 + S6 |
+| 5 | OneToOne 은 `@MapsId` *단방향* (양방향 mappedBy 안 됨) | S4 |
+
+본 EXP 의 6 시나리오는 정확히 *각 계명을 안 지킨 함정* 을 시연한 것 — S1 = 계명 4, S3 = 계명 4 의 함정, S4 = 계명 5, S5 = 계명 4 의 paging 함정.
+
+### 8.2 기업의 실제 패턴 4 종 [외부 사례 + 추정]
+
+| 패턴 | 사례 | 트레이드오프 |
+|---|---|---|
+| **A. JPA write-only + native/QueryDSL/jOOQ read** | Naver D2, Kakao tech 다수 [외부 사례] — 대규모 트래픽 | ✅ 성능 100% 통제 / ❌ 코드 두 갈래 유지 비용 |
+| **B. JPA + @EntityGraph + @BatchSize 안전망** | 일반적 Spring Boot 가이드 [외부 사례] — 스타트업 / SaaS | ✅ entity 그대로 / ❌ EntityGraph 정의 폭증 + MultipleBag 함정 잔존 |
+| **C. JPA + DTO projection 전부** | 금융 / 결제 / 광고 입찰 [추정] — latency-critical | ✅ N+1 zero / ❌ DTO 폭증 + dirty checking 못 씀 |
+| **D. JPA 회피 (jOOQ / MyBatis)** | 일부 미국 SaaS [외부 사례] — 강한 SQL 통제 | ✅ fetch 함정 영원히 zero / ❌ 객체 모델링 자연스러움 포기 |
+
+→ 한국 빅테크 커머스/콘텐츠는 보통 패턴 A (write JPA + read QueryDSL). B2B/스타트업은 패턴 B. 어느 패턴이든 *N+1 함정의 메커니즘은 알아야* — 패턴 A 도 write 측 dirty checking 이 LAZY 트리거를 일으킬 수 있고, 패턴 B 는 EntityGraph 만 믿으면 paging 함정에 빠진다.
+
+### 8.3 fetch 전략 결정 트리
 
 | 상황 | 추천 |
 |---|---|
+| 읽기 전용 (보고서 / 리스트) | **DTO projection 1순위** — 모든 함정 우회 |
 | 1:N 한 단계 + paging 없음 | JOIN FETCH (DISTINCT) |
-| 1:N 두 단계 동시 | JOIN FETCH + `@BatchSize` 조합 |
+| 1:N 두 단계 동시 | JOIN FETCH 한 단계 + `@BatchSize` |
 | 한 entity 의 *두 collection* 동시 | Set 으로 변경 또는 `@BatchSize` |
 | paging 필요 | parent 만 paging + 자식은 `IN` 쿼리 또는 `@BatchSize` |
-| 1:1 mappedBy | `@MapsId` 단방향 또는 Bytecode Enhancement |
-| read-only 보고서 | DTO projection (`SELECT new com.x.Dto(o.id, m.name) ...`) — entity 우회 |
+| 1:1 mappedBy (non-owning) | **`@MapsId` 단방향** — batch_fetch_size 는 도움 안 됨 (§6.2) |
+| 전역 안전망 | `application.yml` 에 `default_batch_fetch_size: 10` *항상* 켜둠 |
+
+### 8.4 본 EXP 측정으로 권장하는 운영 default
+
+1. application.yml 에 `default_batch_fetch_size: 10` *항상 켜둠* (S6 측정: 9.3x 감소)
+2. 화면별로 fetch plan 명시: 한 collection JOIN FETCH + 두 번째는 BatchSize (계명 4)
+3. 읽기 전용 화면은 DTO projection (계명 3)
+4. OneToOne 은 무조건 @MapsId 단방향 (계명 5, S4 측정 — batch fetch 못 풂)
 
 ---
 
 ## 9. 결론 — fetch 함정은 *Bag / List / Set + 프록시 + cartesian 처리 정책* 의 상호작용 {#conclusion}
 
-이 글이 측정으로 보여준 것은 — **JOIN FETCH 한 단어로 끝나는 게 아님**. List 와 Set 의 차이, owning / non-owning side 의 차이, paging 과의 호환성. 이 *조합 공간* 을 모르면 운영에서 *재현 어려운* OOM 이나 *의외의 SELECT 폭발*.
+이 글이 측정으로 보여준 것은 — **JOIN FETCH 한 단어로 끝나는 게 아님**. List 와 Set 의 차이, owning / non-owning side 의 차이, paging 과의 호환성, *batch_fetch_size 가 풀 수 있는 N+1 과 풀 수 없는 N+1 의 경계*. 이 *조합 공간* 을 모르면 운영에서 *재현 어려운* OOM 이나 *의외의 SELECT 폭발*.
+
+세 줄 요약:
+1. **`default_batch_fetch_size: 10`** 한 줄로 collection LAZY 의 N+1 이 9.3x 감소 (S1 121 → 13). 안전망으로 항상 켜둠.
+2. **그러나 `@OneToOne` non-owning LAZY 는 batch fetch 가 못 푼다** (S4 1201 → 1201). 별도 처방: `@MapsId` 단방향.
+3. *읽기 전용 화면은 DTO projection*, *수정 가능 화면은 JOIN FETCH + BatchSize 조합*. 두 trail 을 화면별로 명시.
 
 다음 글은 [JPA saveAll IDENTITY 의 batch insert 비활성화 함정](/posts/jpa-saveall-identity-bulk-insert-trap/).
 
