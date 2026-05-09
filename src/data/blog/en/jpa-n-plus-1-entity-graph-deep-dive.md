@@ -435,6 +435,145 @@ public List<OwnerSummaryDto> summaries() {
 
 ---
 
+## 7.6 Deep hierarchy — *dedicated single-shot query* (QueryDSL / DTO projection) {#deep-hierarchy-dedicated}
+
+The `@BatchSize` chain (§7.1) is a safety net for *generic entity traversal*, not the answer for every deep hierarchy. **If a specific screen / API endpoint demands a deep hierarchy, a dedicated single-shot query is the right move.** §8.2's *industry pattern A* (Naver / Kakao style — write JPA + read QueryDSL/jOOQ) institutionalises exactly this principle.
+
+### 7.6.1 Four options for a 4-depth single-shot query
+
+#### (A) JPQL `JOIN FETCH` (entity) — depth-limited
+
+```java
+@Query("""
+    SELECT DISTINCT o FROM MerchantOwner o
+    LEFT JOIN FETCH o.merchants m
+    LEFT JOIN FETCH m.rules
+""")
+List<MerchantOwner> findOwnersWithMerchantsAndRules();
+```
+
+❌ **`m.rules` is also a List → MultipleBagFetchException** (Hibernate 6 startup HQL validation rejects it). Switching to `Set` avoids the exception, but the cartesian still grows: 20 × 5 × 3 = **300 rows**, plus history = **1,200 rows** → result hydration cost explodes; pagination impossible. → entity JOIN FETCH tops out at depth 1, maybe 2.
+
+#### (B) JPQL DTO projection (★) — unlimited depth, all traps avoided
+
+```java
+public record OwnerHierarchyRow(
+    Long ownerId, String ownerName,
+    Long merchantId, String merchantName,
+    Long ruleId, String keyword,
+    Long historyId, String matchedText
+) {}
+
+@Query("""
+    SELECT new com.example.OwnerHierarchyRow(
+        o.id, o.name,
+        m.id, m.name,
+        r.id, r.keyword,
+        h.id, h.matchedText
+    )
+    FROM MerchantOwner o
+    LEFT JOIN o.merchants m
+    LEFT JOIN m.rules r
+    LEFT JOIN r.histories h
+    WHERE o.id IN :ownerIds
+    ORDER BY o.id, m.id, r.id, h.id
+""")
+List<OwnerHierarchyRow> findHierarchy(@Param("ownerIds") List<Long> ownerIds);
+```
+
+The SQL emitted — **1 SQL**:
+```sql
+SELECT o.id, o.name, m.id, m.name, r.id, r.keyword, h.id, h.matched_text
+FROM merchant_owner o
+LEFT JOIN merchant m ON m.owner_id = o.id
+LEFT JOIN auto_reply_rule_n1 r ON r.merchant_id = m.id
+LEFT JOIN reply_history h ON h.rule_id = r.id
+WHERE o.id IN (?, ?, ...)
+ORDER BY o.id, m.id, r.id, h.id;
+```
+
+→ 1,200 rows arrive *flat*. **No proxy is created, no entity hydrated**:
+- ✅ MultipleBagFetchException avoided (no entity collection mapping)
+- ✅ Zero N+1 (no proxy)
+- ✅ Pagination possible (paginate parents only, then IN)
+- ✅ Zero snapshot / first-level-cache cost
+
+#### (C) QueryDSL DTO projection (★★) — type-safe + dynamic
+
+```java
+public List<OwnerHierarchyRow> findHierarchy(List<Long> ownerIds, String keywordPrefix) {
+    return queryFactory
+        .select(Projections.constructor(OwnerHierarchyRow.class,
+            owner.id, owner.name,
+            merchant.id, merchant.name,
+            rule.id, rule.keyword,
+            history.id, history.matchedText))
+        .from(owner)
+        .leftJoin(owner.merchants, merchant)
+        .leftJoin(merchant.rules, rule)
+        .leftJoin(rule.histories, history)
+        .where(
+            owner.id.in(ownerIds),
+            keywordPrefix == null ? null : rule.keyword.startsWith(keywordPrefix)  // ← dynamic
+        )
+        .orderBy(owner.id.asc(), merchant.id.asc(), rule.id.asc(), history.id.asc())
+        .fetch();
+}
+```
+
+Advantages over JPQL: ✅ type-safe (compile-time column refs) ✅ dynamic where ✅ refactor-safe. Why Korean big-tech adopts QueryDSL on the *read side* — read paths usually have high condition variability per screen, and QueryDSL fits naturally.
+
+#### (D) Native SQL — *special cases* (window functions / CTE / complex aggregations)
+
+When you need RDBMS-native features like `GROUP BY` with rollups, window functions, or CTEs.
+
+### 7.6.2 SQL count comparison — 4-depth, 1,200 rows
+
+| Strategy | SQL | round-trips | hydration |
+|---|---:|---|---|
+| N+1 baseline | 421 | 421× | entity proxy 1200 |
+| All `@BatchSize=10` cascading IN | 43 | 43× | entity proxy 1200 |
+| **JPQL DTO single-shot** | **1** | **1×** | flat 1,200 rows |
+| **QueryDSL DTO single-shot** | **1** | **1×** | flat 1,200 rows |
+| JPQL JOIN FETCH 2+ depth | (exception) | — | — |
+
+→ The DTO multi-JOIN single-shot dominates round-trips. The 1× vs 43× gap means *tens of times* latency difference if the DB is far away (e.g. cross-region).
+
+### 7.6.3 Two-axis decision — entity/DTO × JPQL/QueryDSL
+
+DTO projection itself is doable in either JPQL or QueryDSL. The two axes are independent.
+
+| | JPQL string | QueryDSL builder |
+|---|---|---|
+| **entity return** | `@Query("SELECT o FROM ... JOIN FETCH ...")` | `selectFrom(o).leftJoin(...)` |
+| **DTO return** | `@Query("SELECT new com.x.Dto(...)")` ★ | `Projections.constructor(Dto.class, ...)` ★★ |
+
+Axis 1 (return type) trade-offs:
+- **entity** → BatchSize works, dirty checking available, *but the traps (MultipleBag / paging) remain*
+- **DTO** → no proxy, all traps avoided, *but cascade / dirty checking unavailable*
+
+Axis 2 (authoring tool) trade-offs:
+- **JPQL** → concise, static — fine for simple screens
+- **QueryDSL** → type-safe, strong dynamic where, great IDE support — the standard for complex / dynamic screens
+
+### 7.6.4 Three-track production default
+
+A real codebase typically runs *all three tracks* — chosen per screen / endpoint.
+
+| Situation | Prescription |
+|---|---|
+| Specific screen / API + dynamic conditions | **QueryDSL DTO projection** (first choice) |
+| Specific screen / API + static conditions | **JPQL DTO projection** (less boilerplate) |
+| Generic traversal (admin / domain methods) | **Entity + `default_batch_fetch_size: 10`** (safety net) |
+| Statistics / aggregations | **Native SQL** |
+| Write transactions | **Entity** (dirty checking + cascade) |
+
+**Decision in one line**:
+- *"Is this deep hierarchy bound to a specific screen / API?"* → YES → **DTO + (QueryDSL or JPQL)** single-shot
+- *NO, it's a generic entity traversal* → **Entity + BatchSize chain**
+
+---
+
 ## 8. Operational rules — Vlad's 5 commandments + 4 industry patterns + decision tree {#rules}
 
 ### 8.1 Vlad Mihalcea's 5 commandments

@@ -524,6 +524,145 @@ public List<OwnerSummaryDto> summaries() {
 
 ---
 
+## 7.6 Deep hierarchy — *dedicated 한 방 쿼리* (QueryDSL / DTO projection) {#deep-hierarchy-dedicated}
+
+`@BatchSize` chain (§7.1) 은 *generic entity traversal* 의 안전망이지 *모든 deep hierarchy 의 정답* 은 아님. **명확한 화면 / API endpoint 가 deep hierarchy 를 요구하면 *전용 쿼리 한 방* 이 정석**. §8.2 의 *기업 패턴 A* (Naver / Kakao 류 — write JPA + read QueryDSL/jOOQ) 가 이 원칙의 제도화.
+
+### 7.6.1 4-depth 한 방 쿼리 옵션 4 가지
+
+#### (A) JPQL `JOIN FETCH` (entity) — *깊이 한계*
+
+```java
+@Query("""
+    SELECT DISTINCT o FROM MerchantOwner o
+    LEFT JOIN FETCH o.merchants m
+    LEFT JOIN FETCH m.rules
+""")
+List<MerchantOwner> findOwnersWithMerchantsAndRules();
+```
+
+❌ **`m.rules` 도 List → MultipleBagFetchException** (Hibernate 6 startup HQL 검증). `Set` 으로 바꿔도 cartesian = 20×5×3 = **300 row** + history 까지 = **1,200 row** → result hydration 비용 폭증, paging 불가. → entity JOIN FETCH 는 *깊이 1, 잘해야 2* 까지가 한계.
+
+#### (B) JPQL DTO projection (★) — depth 무한, 모든 함정 우회
+
+```java
+public record OwnerHierarchyRow(
+    Long ownerId, String ownerName,
+    Long merchantId, String merchantName,
+    Long ruleId, String keyword,
+    Long historyId, String matchedText
+) {}
+
+@Query("""
+    SELECT new com.example.OwnerHierarchyRow(
+        o.id, o.name,
+        m.id, m.name,
+        r.id, r.keyword,
+        h.id, h.matchedText
+    )
+    FROM MerchantOwner o
+    LEFT JOIN o.merchants m
+    LEFT JOIN m.rules r
+    LEFT JOIN r.histories h
+    WHERE o.id IN :ownerIds
+    ORDER BY o.id, m.id, r.id, h.id
+""")
+List<OwnerHierarchyRow> findHierarchy(@Param("ownerIds") List<Long> ownerIds);
+```
+
+발사 SQL — **1 SQL**:
+```sql
+SELECT o.id, o.name, m.id, m.name, r.id, r.keyword, h.id, h.matched_text
+FROM merchant_owner o
+LEFT JOIN merchant m ON m.owner_id = o.id
+LEFT JOIN auto_reply_rule_n1 r ON r.merchant_id = m.id
+LEFT JOIN reply_history h ON h.rule_id = r.id
+WHERE o.id IN (?, ?, ...)
+ORDER BY o.id, m.id, r.id, h.id;
+```
+
+→ 1200 row flat. **proxy / entity 자체가 안 만들어지므로**:
+- ✅ MultipleBagFetchException 우회
+- ✅ N+1 zero (proxy 없음)
+- ✅ paging 가능 (parent 만 paginate 후 IN)
+- ✅ snapshot / 1차 캐시 비용 0
+
+#### (C) QueryDSL DTO projection (★★) — type-safe + dynamic
+
+```java
+public List<OwnerHierarchyRow> findHierarchy(List<Long> ownerIds, String keywordPrefix) {
+    return queryFactory
+        .select(Projections.constructor(OwnerHierarchyRow.class,
+            owner.id, owner.name,
+            merchant.id, merchant.name,
+            rule.id, rule.keyword,
+            history.id, history.matchedText))
+        .from(owner)
+        .leftJoin(owner.merchants, merchant)
+        .leftJoin(merchant.rules, rule)
+        .leftJoin(rule.histories, history)
+        .where(
+            owner.id.in(ownerIds),
+            keywordPrefix == null ? null : rule.keyword.startsWith(keywordPrefix)  // ← 동적
+        )
+        .orderBy(owner.id.asc(), merchant.id.asc(), rule.id.asc(), history.id.asc())
+        .fetch();
+}
+```
+
+JPQL 대비 장점: ✅ type-safe (컴파일 타임 컬럼 참조) ✅ 동적 where ✅ 리팩토링 안전. 한국 빅테크가 *read 측에 QueryDSL 채택* 하는 이유 — 화면별 조건 다양성이 큰 read 에 가장 자연스러움.
+
+#### (D) Native SQL — *특수 case* (window function / CTE / 복잡 집계)
+
+`GROUP BY`, window function, CTE 같은 *RDBMS 고유 기능* 필요할 때.
+
+### 7.6.2 SQL 수 비교 — 4-depth 1200 row 기준
+
+| 전략 | SQL 수 | round-trip | hydration |
+|---|---:|---|---|
+| N+1 baseline | 421 | 421× | entity proxy 1200 |
+| All `@BatchSize=10` cascading IN | 43 | 43× | entity proxy 1200 |
+| **JPQL DTO 한 방** | **1** | **1×** | flat 1200 row |
+| **QueryDSL DTO 한 방** | **1** | **1×** | flat 1200 row |
+| JPQL JOIN FETCH 2+ depth | (예외) | — | — |
+
+→ DTO multi-JOIN 한 방 쿼리가 round-trip *압도적*. 1× vs 43× 의 차이는 *DB 가 멀리 있으면* latency 가 수십 배.
+
+### 7.6.3 두 축 의사결정 — entity/DTO × JPQL/QueryDSL
+
+DTO projection 자체는 JPQL 로도 QueryDSL 로도 가능. 두 축이 독립.
+
+| | JPQL string | QueryDSL builder |
+|---|---|---|
+| **entity 반환** | `@Query("SELECT o FROM ... JOIN FETCH ...")` | `selectFrom(o).leftJoin(...)` |
+| **DTO 반환** | `@Query("SELECT new com.x.Dto(...)")` ★ | `Projections.constructor(Dto.class, ...)` ★★ |
+
+축 1 (반환 타입):
+- **entity** → BatchSize 동작, dirty checking 가능, *but 함정 (MultipleBag / paging) 잔존*
+- **DTO** → proxy 없음, 모든 함정 우회, *but cascade / dirty checking 못 씀*
+
+축 2 (작성 도구):
+- **JPQL** → 짧음, 정적 — 단순 화면에 충분
+- **QueryDSL** → type-safe, 동적 where 강함 — 복잡 / 동적 화면에 정석
+
+### 7.6.4 세 갈래 운영 default
+
+한 운영 코드베이스에서 *세 갈래가 공존*. 화면 / endpoint 별 결정.
+
+| 상황 | 처방 |
+|---|---|
+| 명시적 화면 / API + 동적 조건 | **QueryDSL DTO projection** (1순위) |
+| 명시적 화면 / API + 정적 조건 | **JPQL DTO projection** (보일러플레이트 적음) |
+| Generic traversal (백오피스 / 도메인 메서드) | **entity + `default_batch_fetch_size: 10`** (안전망) |
+| 통계 / 집계 | **Native SQL** |
+| Write 트랜잭션 | **entity** (dirty checking + cascade) |
+
+**의사결정 한 줄**:
+- *"이 deep hierarchy 가 화면 / API 단위로 명확한가?"* → YES → **DTO + (QueryDSL or JPQL)** 한 방
+- *NO, generic entity traversal 임* → **entity + BatchSize chain**
+
+---
+
 ## 8. 운영 룰 — Vlad 5 계명 + 기업 4 패턴 + 결정 트리 {#operational-rules}
 
 ### 8.1 Vlad Mihalcea 의 5 계명
