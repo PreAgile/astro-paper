@@ -182,17 +182,59 @@ WARN  o.h.h.internal.ast.QueryTranslatorImpl :
 HHH000104: firstResult/maxResults specified with collection fetch; applying in memory!
 ```
 
-### 5.1 왜 메모리에서 paging 되는가
+### 5.1 왜 메모리에서 paging 되는가 — 코드 트레이스
+
+20 owner × 5 merchant 도메인에서 `Pageable.of(0, 5)` 로 *5 owner 만* 받고 싶다고 가정.
+
+#### ❌ 만약 Hibernate 가 LIMIT 을 그대로 붙였다면 (가상 시나리오)
 
 ```sql
-SELECT DISTINCT o.*, m.* FROM merchant_owner o LEFT JOIN merchant m ON ...
+SELECT o.*, m.* FROM merchant_owner o
+LEFT JOIN merchant m ON m.owner_id = o.id
+ORDER BY o.id LIMIT 5;
 ```
 
-이 SQL 에 `LIMIT 5` 를 붙이면 — *5 row* 만 가져옴. 그런데 owner 와 merchants 의 cartesian product 면 5 row 가 *5 owner 가 아닌 5 merchants* 일 수도. Hibernate 가 어느 row 가 한 owner 단위인지 보장 못 해서 — *limit 안 붙이고 전체 가져온 후 메모리에서 paging*.
+생성되는 row:
 
-### 5.2 운영의 OOM 시나리오
+| row # | o.id | m.id | 설명 |
+|---:|---:|---:|---|
+| 1 | 1 | 11 | owner 1 의 1 번째 merchant |
+| 2 | 1 | 12 | owner 1 의 2 번째 |
+| 3 | 1 | 13 | owner 1 의 3 번째 |
+| 4 | 1 | 14 | owner 1 의 4 번째 |
+| 5 | 1 | 15 | owner 1 의 5 번째 |
 
-owner 1만 명 × 매장 평균 5개 = 5만 row 의 cartesian. 페이지 사이즈 20 인데 — 5만 row 다 메모리로 읽고 *20 owner 만 남김*. heap OOM.
+→ **1 owner 만 반환됨** (요청한 5 owner 와 전혀 다름). 더 나쁜 경우: owner 1 의 merchants 가 3 개라면 row 4 부터 owner 2 의 merchants 로 넘어가 *5 row 안에 owner 2 의 5 merchants 중 2 개만* — *잘린 자식*. 데이터 일관성 자체 깨짐.
+
+#### ✅ Hibernate 의 실제 fallback
+
+```sql
+-- Hibernate 가 실제로 발사 — LIMIT 없음
+SELECT o.*, m.* FROM merchant_owner o
+LEFT JOIN merchant m ON m.owner_id = o.id
+ORDER BY o.id;
+```
+
+```java
+// Hibernate 의 내부 흐름 (의사 코드):
+List<Object[]> rawRows = jdbc.executeQuery(sqlWithoutLimit);  // 100 row 모두 hydrate
+List<MerchantOwner> allOwners = dedupByOwnerId(rawRows);      // 메모리 dedup → 20 owner
+return allOwners.subList(0, 5);                               // ★ 메모리에서 paging
+```
+
+→ 결과는 *정확히 5 owner* 지만 *100 row 가 메모리를 거쳐감*. **정확성을 메모리 비용으로 산 셈**. WARN `HHH90003004` 가 이 fallback 의 신호.
+
+### 5.2 운영의 OOM 시나리오 — 도메인 크기에 따른 위험도
+
+| 시나리오 | 부모 N | 자식/부모 M | cartesian (N×M) | heap 영향 |
+|---|---:|---:|---:|---|
+| 본 EXP (S5) | 20 | 5 | 100 | 무시 (rows=5 만 보임) |
+| 작은 운영 | 1,000 | 5 | 5,000 | 수 MB, 무해 |
+| 중간 운영 | 10,000 | 5 | 50,000 | 수십 MB, latency ↑ |
+| 큰 운영 | 10,000 | 50 | **500,000** | **OOM 위험권** |
+| Worst | 100,000 | 100 | **10,000,000** | **OOM 확정** |
+
+→ 페이지 사이즈가 *고작 20* 이라도 cartesian 의 모든 row 가 *한 번에 메모리에* 올라감. **조용한 OOM** — 평소엔 잘 돌다가 광고주 / 매장이 늘면 갑자기 5xx.
 
 ### 5.3 해결법
 
@@ -310,7 +352,175 @@ SELECT * FROM auto_reply_rule_n1 WHERE merchant_id IN (?,?,...,?);  -- 10 번 (1
 
 → **121 → 13 (9.3x 감소)**. 코드 한 줄 안 고치고 application.yml 한 줄 추가만. 이게 *전역 안전망* 으로서 batch_fetch_size 의 가치.
 
+### 7.1 step-by-step — Hibernate 의 batch fetch 메커니즘
+
+`default_batch_fetch_size: 10` 켜진 상태에서 page 20 owner 를 forEach 하면 어떻게 *13 SQL* 로 끝나는지 영속성 컨텍스트 변화로 풀어봄.
+
+#### 1:N 의 DB row 분포
+
+```
+merchant_owner (20 row)               merchant (100 row, 5/owner)
+┌────┬──────────┐                     ┌────┬──────────┬──────────┐
+│ id │ name     │                     │ id │ name     │ owner_id │
+├────┼──────────┤                     ├────┼──────────┼──────────┤
+│  1 │ owner-1  │ ─┐                  │  1 │ m-1-0    │    1     │ ◄┐
+│  2 │ owner-2  │  │                  │  2 │ m-1-1    │    1     │ ◄┤  owner=1
+│ ...│ ...      │  │   1:N            │ ...│ ...      │   ...    │ ◄┤  의 5 m
+│ 20 │ owner-20 │ ─┘                  │  5 │ m-1-4    │    1     │ ◄┘
+└────┴──────────┘                     │ ...│ ...      │   ...    │
+                                      │100 │ m-20-4   │   20     │
+                                      └────┴──────────┴──────────┘
+```
+
+#### Step 1: parent paging — 영속성 컨텍스트 초기 상태
+
+```sql
+-- 발사 SQL #1
+SELECT * FROM merchant_owner ORDER BY id LIMIT 20;
+```
+
+```
+PersistenceContext (1차 캐시):
+  owner#1  → merchants: ⏳ PersistentBag (NOT initialized)
+  owner#2  → merchants: ⏳ PersistentBag (NOT initialized)
+  ...
+  owner#20 → merchants: ⏳ PersistentBag (NOT initialized)
+```
+
+→ 20 owner hydrate, 각 merchants 자리에는 *아직 비어있는 PersistentBag* 만 끼움. merchant 테이블 SQL 미발사.
+
+#### Step 2: forEach 첫 iteration → owner#1 LAZY trigger
+
+`owner#1.getMerchants().size()` 호출. Hibernate 의 batch 결정 로직:
+
+```
+1. owner#1 의 merchants 가 필요해짐
+2. 영속성 컨텍스트의 *다른 미초기화 PersistentBag* 본다 → owner#2..#20 (19 개)
+3. batch_size = 10 → owner#1 + 9 개 더 묶음 → owner_id ∈ {1, 2, 3, ..., 10}
+4. IN 절 SQL 한 번 발사 → 10 owner 의 merchants 모두 hydrate
+```
+
+```sql
+-- 발사 SQL #2
+SELECT * FROM merchant WHERE owner_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+```
+
+→ **owner#1 만 필요했는데도 10 owner 의 merchants 한 번에 fetch**. 이게 batch 의 핵심 — *현재 + 곧 필요할 것* 을 같이 미리 (look-ahead).
+
+```
+PersistenceContext 변화:
+  owner#1..#10 → merchants: ✅ hydrated (1~10 batch)
+  owner#11..#20 → merchants: ⏳ NOT initialized
+```
+
+#### Step 3~10: owner#2..#10 — 모두 cache hit
+
+```java
+owner#2.getMerchants().size();   // ✅ 이미 hydrated → SQL 안 나감
+...
+owner#10.getMerchants().size();  // ✅ 같음
+```
+
+#### Step 11: owner#11 → 새 batch
+
+```sql
+-- 발사 SQL #3
+SELECT * FROM merchant WHERE owner_id IN (11, 12, ..., 20);
+```
+
+#### Step 12~20: 모두 cache hit
+
+#### 결과
+
+| Step | SQL |
+|---|---:|
+| parent paging | 1 |
+| owner#1 trigger → batch (1..10) | 1 |
+| owner#2..#10 cache hit | 0 |
+| owner#11 trigger → batch (11..20) | 1 |
+| owner#12..#20 cache hit | 0 |
+| **합계** | **3** |
+
+공식: **1 + ⌈N/K⌉**. 본 EXP 의 3-depth (rules 까지) 까지 가면 1 + 2 + 10 = **13 SQL** — §7 측정값과 일치.
+
+**핵심**:
+- application 코드 0 변경 — `o.getMerchants()` 호출 패턴 그대로
+- 첫 trigger 후 모든 호출 cache hit
+- forEach 순서 무관 — 어떤 owner 든 첫 trigger 가 batch 발동
+- cartesian 위험 zero (IN 절은 row 곱 없음)
+
+### 7.2 batch fetch 가 못 푸는 N+1
+
 단 (§6.2 측정) **OneToOne non-owning LAZY 함정에는 안 먹힘** — 이걸 함께 푸는 건 @MapsId 만 가능. 한 줄 처방으론 부족하다는 게 본 EXP 의 메시지.
+
+---
+
+## 7.5 자주 헷갈림 — DTO projection vs `@Transactional(readOnly = true)` {#dto-vs-readonly}
+
+이 둘은 *완전 다른 차원* — 같이 써야 하지만 *서로 풀어주는 문제가 다름*.
+
+| | DTO projection | `@Transactional(readOnly = true)` |
+|---|---|---|
+| **차원** | *결과 객체의 종류* — entity vs POJO | *트랜잭션의 모드* — flush/snapshot 옵션 |
+| **푸는 문제** | N+1 / fetch plan 함정 자체 | dirty checking snapshot 비용 |
+| **LAZY 트리거** | ❌ 불가능 (proxy 자체가 안 만들어짐) | ✅ 발생함 (entity 그대로) |
+
+**본 EXP 의 직접 증거** — S1 코드는 *이미 `@Transactional(readOnly = true)`* 인데도 121 prep N+1 그대로 발생:
+
+```java
+@Transactional(readOnly = true)         // ← 이미 readOnly!
+public Stats s1NPlusOne() {
+    List<MerchantOwner> owners = ownerRepo.findAllNoFetch();
+    for (MerchantOwner o : owners) {
+        for (Merchant m : o.getMerchants()) {       // ← LAZY trigger
+            sumRules += m.getRules().size();
+        }
+    }
+}
+```
+
+→ **readOnly 는 fetch 측 함정에 대해 아무것도 안 해줌**.
+
+### 7.5.1 `@Transactional(readOnly = true)` 가 하는 일
+
+1. `FlushMode.MANUAL` → 자동 flush 안 일어남 (`INSERT/UPDATE/DELETE` 차단)
+2. **★ snapshot 안 뜸** — entity hydrate 시 원본 복사본 안 만듦. dirty checking 비용 0 (W4 P2 EXP-13 측정 132×)
+3. DB 드라이버에 read-only hint 전달
+
+남아있는 것 (= 못 푸는 것):
+- ✅ entity 그대로 hydrate, proxy 살아있음
+- ✅ LAZY trigger 가능 → **N+1 함정 그대로**
+- ✅ JOIN FETCH / paging / MultipleBag / OneToOne LAZY 함정 모두 그대로
+
+### 7.5.2 DTO projection 이 하는 일
+
+1. POJO 생성자에 직접 매핑 → proxy 자체를 안 만듦
+2. 영속성 컨텍스트 등록 안 함 — 1차 캐시 비용 0
+3. snapshot 비용 0 (readOnly 와 같은 효과)
+4. **★ proxy 가 없으므로 LAZY trigger 자체 불가능** → N+1 함정 *원리적* 차단
+
+### 7.5.3 항목별 비교
+
+| 차원 | DTO projection | readOnly | 둘 다 |
+|---|---|---|---|
+| dirty checking snapshot 비용 | ✅ 우회 | ✅ 절감 | ✅ |
+| LAZY 트리거 → N+1 | ✅ 불가능 | ❌ **그대로 발생** | ✅ 불가능 |
+| MultipleBagFetchException | ✅ 우회 | ❌ 그대로 | ✅ 우회 |
+| HHH000104 paging OOM | ✅ 우회 | ❌ 그대로 | ✅ 우회 |
+| @OneToOne LAZY 1201 prep | ✅ 우회 | ❌ 그대로 | ✅ 우회 |
+| flush 차단 | (entity 아님) | ✅ | ✅ |
+| entity 메서드 / cascade | ❌ 못 씀 | ✅ | ❌ |
+
+### 7.5.4 실무 — 같이 쓰는 게 정석
+
+```java
+@Transactional(readOnly = true)              // ← snapshot 절감 (W4 P2 132×)
+public List<OwnerSummaryDto> summaries() {
+    return ownerRepo.findOwnerSummaries();   // ← DTO projection (N+1 zero)
+}
+```
+
+→ 두 도구의 *작용 지점이 다름*. readOnly 는 *write 측* (snapshot/flush) 비용을 풀고, DTO projection 은 *read 측* (proxy/LAZY/캐시) 함정을 푼다. **"readOnly 켜면 N+1 풀려요" 는 틀린 답** — S1 의 121 prep 가 직접 증거.
 
 ---
 

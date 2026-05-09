@@ -140,7 +140,59 @@ Logs:
 WARN  HHH000104: firstResult/maxResults specified with collection fetch; applying in memory!
 ```
 
-Hibernate cannot push `LIMIT` to SQL because the cartesian breaks the row-to-owner mapping. So it loads *all* rows and keeps `pageSize` in memory. With 10K owners × 5 merchants average, that's 50K rows materialised to return 20.
+### 5.1 Why in-memory paging — code trace
+
+Assume 20 owners × 5 merchants and `Pageable.of(0, 5)` (we want 5 owners).
+
+#### ❌ If Hibernate naively appended LIMIT (hypothetical)
+
+```sql
+SELECT o.*, m.* FROM merchant_owner o
+LEFT JOIN merchant m ON m.owner_id = o.id
+ORDER BY o.id LIMIT 5;
+```
+
+The 5 rows returned:
+
+| row # | o.id | m.id | meaning |
+|---:|---:|---:|---|
+| 1 | 1 | 11 | owner 1's 1st merchant |
+| 2 | 1 | 12 | owner 1's 2nd |
+| 3 | 1 | 13 | owner 1's 3rd |
+| 4 | 1 | 14 | owner 1's 4th |
+| 5 | 1 | 15 | owner 1's 5th |
+
+→ **only 1 owner returned** (not the 5 requested). Worse case: if owner 1 had 3 merchants, row 4 would jump to owner 2's merchants, leaving owner 2 with only 2 of its 5 — *truncated child collection*. Data integrity broken.
+
+#### ✅ Hibernate's actual fallback
+
+```sql
+-- Hibernate's actual SQL — no LIMIT
+SELECT o.*, m.* FROM merchant_owner o
+LEFT JOIN merchant m ON m.owner_id = o.id
+ORDER BY o.id;
+```
+
+```java
+// Hibernate internal flow (pseudocode):
+List<Object[]> rawRows = jdbc.executeQuery(sqlWithoutLimit);  // all 100 rows hydrated
+List<MerchantOwner> allOwners = dedupByOwnerId(rawRows);      // memory dedup → 20 owners
+return allOwners.subList(0, 5);                               // ★ in-memory paging
+```
+
+→ correct 5 owners, but *100 rows traversed memory*. **Correctness paid in heap**. The `HHH90003004` WARN signals this fallback.
+
+### 5.2 Production OOM scale — domain size matters
+
+| Scenario | Parents N | Children/parent M | cartesian (N×M) | heap |
+|---|---:|---:|---:|---|
+| This EXP (S5) | 20 | 5 | 100 | negligible |
+| Small ops | 1,000 | 5 | 5,000 | a few MB |
+| Medium ops | 10,000 | 5 | 50,000 | tens of MB |
+| Large ops | 10,000 | 50 | **500,000** | **OOM risk** |
+| Worst | 100,000 | 100 | **10,000,000** | **certain OOM** |
+
+→ even with page size of just 20, the *entire cartesian* materialises in memory. **A silent OOM** — fine until your advertiser/store list grows, then sudden 5xx.
 
 ### Fix
 
@@ -210,6 +262,176 @@ SELECT * FROM auto_reply_rule_n1 WHERE merchant_id IN (?,?,...,?);  -- ×10 (100
 ```
 
 **121 → 13 (9.3×) without changing a single line of application code.** The value of `default_batch_fetch_size` as a *global safety net*. But — as measured in §6 — **it does not fix `@OneToOne` non-owning LAZY**. The full prescription is the config plus `@MapsId`.
+
+### 7.1 Step-by-step — how Hibernate's batch fetch actually works
+
+How does paging 20 owners with `default_batch_fetch_size: 10` enabled end up at *13 SQL*? Let's trace it through the persistence context.
+
+#### 1:N row layout
+
+```
+merchant_owner (20 rows)              merchant (100 rows, 5/owner)
+┌────┬──────────┐                     ┌────┬──────────┬──────────┐
+│ id │ name     │                     │ id │ name     │ owner_id │
+├────┼──────────┤                     ├────┼──────────┼──────────┤
+│  1 │ owner-1  │ ─┐                  │  1 │ m-1-0    │    1     │ ◄┐
+│  2 │ owner-2  │  │                  │  2 │ m-1-1    │    1     │ ◄┤  owner=1's
+│ ...│ ...      │  │   1:N            │ ...│ ...      │   ...    │ ◄┤  5 merchants
+│ 20 │ owner-20 │ ─┘                  │  5 │ m-1-4    │    1     │ ◄┘
+└────┴──────────┘                     │ ...│ ...      │   ...    │
+                                      │100 │ m-20-4   │   20     │
+                                      └────┴──────────┴──────────┘
+```
+
+#### Step 1: parent paging — initial persistence context
+
+```sql
+-- SQL #1
+SELECT * FROM merchant_owner ORDER BY id LIMIT 20;
+```
+
+```
+PersistenceContext (1st-level cache):
+  owner#1  → merchants: ⏳ PersistentBag (NOT initialized)
+  owner#2  → merchants: ⏳ PersistentBag (NOT initialized)
+  ...
+  owner#20 → merchants: ⏳ PersistentBag (NOT initialized)
+```
+
+→ 20 owners hydrated; each `merchants` slot holds an *uninitialized PersistentBag*. No merchant SQL fired yet.
+
+#### Step 2: forEach first iteration → owner#1 LAZY trigger
+
+`owner#1.getMerchants().size()` is called. Hibernate's batch decision:
+
+```
+1. owner#1's merchants are needed
+2. scan persistence context for *other uninitialized PersistentBags* → owner#2..#20 (19)
+3. batch_size = 10 → group owner#1 + 9 others → owner_id ∈ {1, 2, ..., 10}
+4. fire one IN-clause SQL, hydrate all 10 owners' merchants
+```
+
+```sql
+-- SQL #2
+SELECT * FROM merchant WHERE owner_id IN (1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+```
+
+→ **only owner#1 was needed, but 10 owners' merchants were fetched in one SQL**. This is the heart of batch fetching — *current need + likely upcoming needs* combined as a look-ahead.
+
+```
+PersistenceContext after Step 2:
+  owner#1..#10 → merchants: ✅ hydrated (1..10 batch)
+  owner#11..#20 → merchants: ⏳ NOT initialized
+```
+
+#### Steps 3~10: owner#2..#10 — all cache hits
+
+```java
+owner#2.getMerchants().size();   // ✅ already hydrated → no SQL
+...
+owner#10.getMerchants().size();  // ✅ same
+```
+
+#### Step 11: owner#11 → second batch
+
+```sql
+-- SQL #3
+SELECT * FROM merchant WHERE owner_id IN (11, 12, ..., 20);
+```
+
+#### Steps 12~20: all cache hits
+
+#### Result
+
+| Step | SQL |
+|---|---:|
+| parent paging | 1 |
+| owner#1 trigger → batch (1..10) | 1 |
+| owner#2..#10 cache hit | 0 |
+| owner#11 trigger → batch (11..20) | 1 |
+| owner#12..#20 cache hit | 0 |
+| **total** | **3** |
+
+Formula: **1 + ⌈N/K⌉**. For the 3-depth traversal in this EXP (down to rules), it's 1 + 2 + 10 = **13 SQL** — the §7 measurement.
+
+**Key takeaways**:
+- zero changes to application code — `o.getMerchants()` calls remain the same
+- after the first trigger, every subsequent call is a cache hit
+- iteration order doesn't matter — whichever owner triggers first kicks off the batch
+- no cartesian risk — IN clauses can't produce row multiplication
+
+### 7.2 What batch fetch does NOT fix
+
+But (§6.2) **`@OneToOne` non-owning LAZY (S4) stays at 1201 prep** — only `@MapsId` fixes it. The one-line config is half the answer; that's this article's core message.
+
+---
+
+## 7.5 Easy to confuse — DTO projection vs `@Transactional(readOnly = true)` {#dto-vs-readonly}
+
+These are *completely different dimensions* — meant to be used together, but each fixes a different problem.
+
+| | DTO projection | `@Transactional(readOnly = true)` |
+|---|---|---|
+| **Dimension** | *result object type* — entity vs POJO | *transaction mode* — flush/snapshot |
+| **What it fixes** | the N+1 / fetch plan traps themselves | dirty checking snapshot cost |
+| **LAZY trigger?** | ❌ impossible (no proxy is created) | ✅ still happens (entity intact) |
+
+**Direct evidence from this EXP** — S1 already uses `@Transactional(readOnly = true)` and *still emits 121 prep*:
+
+```java
+@Transactional(readOnly = true)         // ← already readOnly!
+public Stats s1NPlusOne() {
+    List<MerchantOwner> owners = ownerRepo.findAllNoFetch();
+    for (MerchantOwner o : owners) {
+        for (Merchant m : o.getMerchants()) {       // ← LAZY trigger
+            sumRules += m.getRules().size();
+        }
+    }
+}
+```
+
+→ **readOnly does nothing for the fetch traps**.
+
+### 7.5.1 What `@Transactional(readOnly = true)` actually does
+
+1. Sets `FlushMode.MANUAL` → no auto-flush → no `INSERT/UPDATE/DELETE`
+2. **★ no snapshot taken** — entity hydration skips the original-state copy. Dirty-check cost = 0 (W4 P2 EXP-13 measured 132×)
+3. Passes a read-only hint to the JDBC driver
+
+What it does NOT fix:
+- ✅ entities still hydrate, proxies still alive
+- ✅ LAZY triggers still fire → **N+1 unchanged**
+- ✅ JOIN FETCH / paging / MultipleBag / OneToOne LAZY traps unchanged
+
+### 7.5.2 What DTO projection actually does
+
+1. Maps SQL results directly to a POJO constructor → no proxy is created
+2. Not registered in the persistence context — first-level cache cost = 0
+3. No snapshot taken (same effect as readOnly)
+4. **★ since there is no proxy, LAZY triggers are physically impossible** → N+1 traps fail to start
+
+### 7.5.3 Side-by-side
+
+| Dimension | DTO projection | readOnly | both |
+|---|---|---|---|
+| dirty-check snapshot cost | ✅ avoided (no entity) | ✅ skipped (readOnly) | ✅ |
+| LAZY trigger → N+1 | ✅ impossible | ❌ **still happens** | ✅ impossible |
+| MultipleBagFetchException | ✅ avoided | ❌ unchanged | ✅ avoided |
+| HHH000104 paging OOM | ✅ avoided | ❌ unchanged | ✅ avoided |
+| @OneToOne LAZY 1201 prep | ✅ avoided | ❌ unchanged | ✅ avoided |
+| flush blocking | (no entity) | ✅ | ✅ |
+| entity methods / cascade | ❌ unavailable | ✅ | ❌ |
+
+### 7.5.4 In practice — use both together
+
+```java
+@Transactional(readOnly = true)              // ← snapshot savings (W4 P2 132×)
+public List<OwnerSummaryDto> summaries() {
+    return ownerRepo.findOwnerSummaries();   // ← DTO projection (zero N+1)
+}
+```
+
+→ The two tools act on *different layers*. readOnly fixes the *write side* (snapshot/flush) cost; DTO projection fixes the *read side* (proxy/LAZY/cache) traps. **"readOnly solves N+1" is wrong** — S1's 121 prep is the direct counter-evidence.
 
 ---
 
