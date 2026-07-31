@@ -7,12 +7,13 @@ import { SITE } from "@/config";
 export async function GET() {
   const posts = await getCollection(
     "blog",
-    ({ id, data }) => id.startsWith("ko/") && !data.draft
+    ({ id, data }) => id.startsWith("en/") && !data.draft
   );
   const sortedPosts = getSortedPosts(posts);
   return rss({
-    title: SITE.title,
-    description: SITE.desc,
+    title: `${SITE.title} — English`,
+    description:
+      "Evidence-backed backend engineering: production incidents, architecture decisions, and reproducible experiments.",
     site: SITE.website,
     items: sortedPosts.map(({ data, id, filePath }) => ({
       link: getPath(id, filePath),

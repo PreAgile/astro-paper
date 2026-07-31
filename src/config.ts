@@ -1,7 +1,13 @@
 export const SITE = {
   website: "https://astro-paper-23v.pages.dev/",
   author: "김면수",
-  profile: "https://github.com/preAgile",
+  authorEnglish: "Myeonsoo Kim",
+  authorId: "https://astro-paper-23v.pages.dev/about/#person",
+  profile: "https://github.com/PreAgile",
+  authorSameAs: [
+    "https://github.com/PreAgile",
+    "https://github.com/PreAgile/reputation-pool",
+  ],
   desc: "내일을 위한 기록 — 더 나은 엔지니어링을 향해",
   title: "Forward Engineering",
   ogImage: "astropaper-og.jpg",

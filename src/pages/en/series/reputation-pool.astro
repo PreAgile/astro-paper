@@ -1,0 +1,134 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import { SITE } from "@/config";
+
+const title = "Building reputation-pool";
+const description =
+  "An evidence-led backend engineering series from a production problem to a JDK-only core, concurrency contracts, open-core boundaries, multi-tenancy, and horizontal scaling.";
+const articles = [
+  {
+    order: 1,
+    label: "Lincheck",
+    title:
+      "Our 32-thread stress test passed. The specification was still wrong.",
+    summary:
+      "How Lincheck traces rewrote the contracts for fencing tokens, resource selection, and block races.",
+    href: "/en/posts/reputation-pool-lincheck-concurrency-contract/",
+    status: "Published",
+  },
+  {
+    order: 2,
+    label: "Open-core boundary",
+    title: "Separating the core from SaaS revealed a missing boundary",
+    summary:
+      "Why the copied gRPC surface became a public adapter module shared by two different hosts.",
+    href: "/en/posts/reputation-pool-open-core-thin-host-boundary/",
+    status: "Published",
+  },
+  {
+    order: 3,
+    label: "Multi-tenancy",
+    title: "Isolation and noisy-neighbor control",
+    summary: "Tenant-scoped state and a shared-JVM resource budget.",
+    status: "Planned",
+  },
+  {
+    order: 4,
+    label: "Origin",
+    title: "Why production needed a reputation pool",
+    summary:
+      "The operational failure that required resource history and recovery rather than a static proxy list.",
+    status: "Planned",
+  },
+  {
+    order: 5,
+    label: "Horizontal scaling",
+    title: "Where the single-JVM contract breaks",
+    summary:
+      "The boundary of local atomicity and the direction for distributed leases and fencing.",
+    status: "Planned",
+  },
+  {
+    order: 6,
+    label: "Shadow mode",
+    title: "Validating decisions with production traffic",
+    summary:
+      "A baseline-to-shadow comparison after enough real production data exists.",
+    status: "Awaiting data",
+  },
+];
+---
+
+<Layout
+  title={`${title} | ${SITE.title}`}
+  {description}
+  pageType="collection"
+  alternateLinks={[
+    {
+      lang: "ko",
+      href: new URL("/series/reputation-pool/", SITE.website).href,
+    },
+    {
+      lang: "en",
+      href: new URL("/en/series/reputation-pool/", SITE.website).href,
+    },
+    {
+      lang: "x-default",
+      href: new URL("/series/reputation-pool/", SITE.website).href,
+    },
+  ]}
+>
+  <Header />
+  <main id="main-content" class="app-layout py-10">
+    <header class="mb-10 border-b border-border pb-8">
+      <p class="mb-2 text-sm font-semibold text-accent">
+        BUILDING REPUTATION-POOL
+      </p>
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
+      <p class="mt-4 max-w-3xl text-lg">{description}</p>
+    </header>
+
+    <section class="app-prose max-w-none">
+      <h2>What this series verifies</h2>
+      <p>
+        This is not a retrospective tour of a finished architecture. Each
+        article connects the initial assumption, the test or operational
+        constraint that broke it, the revised contract, and the remaining
+        limitation to real code and pull requests.
+      </p>
+
+      <ol class="not-prose mt-8 space-y-5">
+        {
+          articles.map(article => (
+            <li class="rounded-xl border border-border p-5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm font-semibold text-accent">
+                  Part {article.order} · {article.label}
+                </span>
+                <span class="rounded-full bg-muted px-3 py-1 text-xs">
+                  {article.status}
+                </span>
+              </div>
+              <h2 class="mt-3 text-xl font-bold">
+                {article.href ? (
+                  <a
+                    class="underline-offset-4 hover:underline"
+                    href={article.href}
+                  >
+                    {article.title}
+                  </a>
+                ) : (
+                  article.title
+                )}
+              </h2>
+              <p class="mt-2">{article.summary}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+  </main>
+  <Footer />
+</Layout>

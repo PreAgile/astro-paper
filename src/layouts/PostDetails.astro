@@ -1,5 +1,5 @@
 ---
-import { render, type CollectionEntry } from "astro:content";
+import { getCollection, render, type CollectionEntry } from "astro:content";
 import Layout from "@/layouts/Layout.astro";
 import Header from "@/components/Header.astro";
 import Footer from "@/components/Footer.astro";
@@ -35,9 +35,19 @@ const {
   timezone,
   tags,
   hideEditPost,
+  translationKey,
+  series,
+  seriesOrder,
 } = post.data;
 
 const { Content } = await render(post);
+const directAnswer =
+  description.length > 480
+    ? `${description
+        .slice(0, 480)
+        .replace(/\s+\S*$/, "")
+        .trim()}…`
+    : description.trim();
 
 let ogImageUrl: string | undefined;
 
@@ -58,6 +68,24 @@ const ogImage = ogImageUrl
   ? new URL(ogImageUrl, Astro.url.origin).href
   : undefined;
 
+const translatedPosts = translationKey
+  ? await getCollection(
+      "blog",
+      ({ data }) => !data.draft && data.translationKey === translationKey
+    )
+  : [];
+const alternateLinks = translatedPosts.map(({ id, filePath }) => {
+  const lang = id.startsWith("en/") ? "en" : "ko";
+  return {
+    lang,
+    href: new URL(getPath(id, filePath), SITE.website).href,
+  };
+});
+const koreanAlternate = alternateLinks.find(({ lang }) => lang === "ko");
+if (koreanAlternate) {
+  alternateLinks.push({ lang: "x-default", href: koreanAlternate.href });
+}
+
 const layoutProps = {
   title: `${title} | ${SITE.title}`,
   author,
@@ -67,6 +95,9 @@ const layoutProps = {
   canonicalURL,
   ogImage,
   scrollSmooth: true,
+  pageType: "blogPosting" as const,
+  tags,
+  alternateLinks,
 };
 
 /* ========== Prev/Next Posts ========== */
@@ -106,12 +137,43 @@ const nextPost =
       <span
         aria-hidden="true"
         class:list={[
-          "max-sm:hidden opacity-50",
+          "opacity-50 max-sm:hidden",
           { hidden: !SITE.editPost.enabled || hideEditPost },
         ]}>|</span
       >
       <EditPost {hideEditPost} {post} class="max-sm:hidden" />
     </div>
+    {
+      series === "reputation-pool" && (
+        <aside class="my-6 rounded-lg border border-border bg-muted/30 p-4">
+          <p class="m-0 text-sm font-semibold">
+            {post.id.startsWith("en/")
+              ? `Building reputation-pool · Part ${seriesOrder}`
+              : `reputation-pool 설계 기록 · ${seriesOrder}편`}
+          </p>
+          <a
+            class="mt-1 inline-block text-sm underline underline-offset-4"
+            href={
+              post.id.startsWith("en/")
+                ? "/en/series/reputation-pool/"
+                : "/series/reputation-pool/"
+            }
+          >
+            {post.id.startsWith("en/")
+              ? "View the complete series and its evidence"
+              : "전체 시리즈와 검증 근거 보기"}
+          </a>
+        </aside>
+      )
+    }
+    <aside
+      class="my-6 rounded-lg border-s-4 border-accent bg-muted/30 px-5 py-4"
+    >
+      <p class="m-0 text-sm font-semibold">
+        {post.id.startsWith("en/") ? "Direct answer" : "핵심 답변"}
+      </p>
+      <p class="mt-2 mb-0 text-sm leading-6">{directAnswer}</p>
+    </aside>
     <article
       id="article"
       class="app-prose mt-8 w-full max-w-app prose-pre:bg-(--shiki-light-bg) dark:prose-pre:bg-(--shiki-dark-bg)"
@@ -294,8 +356,12 @@ const nextPost =
 
   async function initMermaid(forceRerender = false) {
     // Find mermaid code blocks or existing diagrams
-    const mermaidElements = document.querySelectorAll('pre[data-language="mermaid"]');
-    const existingDiagrams = document.querySelectorAll('.mermaid-diagram[data-mermaid-id]');
+    const mermaidElements = document.querySelectorAll(
+      'pre[data-language="mermaid"]'
+    );
+    const existingDiagrams = document.querySelectorAll(
+      ".mermaid-diagram[data-mermaid-id]"
+    );
 
     if (mermaidElements.length === 0 && existingDiagrams.length === 0) {
       initLightbox();
@@ -304,68 +370,70 @@ const nextPost =
 
     // Dynamically import mermaid (pinned version for security)
     if (!mermaidInstance) {
-      const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs");
+      const { default: mermaid } =
+        await import("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs");
       mermaidInstance = mermaid;
     }
 
     // Detect dark mode
-    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+    const isDark =
+      document.documentElement.getAttribute("data-theme") === "dark";
 
     // Theme variables for light mode
     const lightThemeVars = {
-      primaryColor: '#dbeafe',
-      primaryTextColor: '#1e40af',
-      primaryBorderColor: '#3b82f6',
-      secondaryColor: '#dcfce7',
-      secondaryTextColor: '#166534',
-      secondaryBorderColor: '#22c55e',
-      tertiaryColor: '#fef3c7',
-      tertiaryTextColor: '#92400e',
-      tertiaryBorderColor: '#f59e0b',
-      lineColor: '#64748b',
-      textColor: '#1e293b',
-      mainBkg: '#f8fafc',
-      nodeBorder: '#94a3b8',
-      clusterBkg: '#f1f5f9',
-      clusterBorder: '#cbd5e1',
-      titleColor: '#1e293b',
-      edgeLabelBackground: '#ffffff',
-      nodeTextColor: '#1e293b',
+      primaryColor: "#dbeafe",
+      primaryTextColor: "#1e40af",
+      primaryBorderColor: "#3b82f6",
+      secondaryColor: "#dcfce7",
+      secondaryTextColor: "#166534",
+      secondaryBorderColor: "#22c55e",
+      tertiaryColor: "#fef3c7",
+      tertiaryTextColor: "#92400e",
+      tertiaryBorderColor: "#f59e0b",
+      lineColor: "#64748b",
+      textColor: "#1e293b",
+      mainBkg: "#f8fafc",
+      nodeBorder: "#94a3b8",
+      clusterBkg: "#f1f5f9",
+      clusterBorder: "#cbd5e1",
+      titleColor: "#1e293b",
+      edgeLabelBackground: "#ffffff",
+      nodeTextColor: "#1e293b",
     };
 
     // Theme variables for dark mode - softer, eye-friendly colors
     const darkThemeVars = {
-      primaryColor: '#1e3a5f',
-      primaryTextColor: '#93c5fd',
-      primaryBorderColor: '#60a5fa',
-      secondaryColor: '#14532d',
-      secondaryTextColor: '#86efac',
-      secondaryBorderColor: '#4ade80',
-      tertiaryColor: '#78350f',
-      tertiaryTextColor: '#fcd34d',
-      tertiaryBorderColor: '#fbbf24',
-      lineColor: '#94a3b8',
-      textColor: '#e2e8f0',
-      mainBkg: '#1e293b',
-      nodeBorder: '#475569',
-      clusterBkg: '#334155',
-      clusterBorder: '#475569',
-      titleColor: '#e2e8f0',
-      edgeLabelBackground: '#1e293b',
-      nodeTextColor: '#e2e8f0',
-      noteBkgColor: '#78350f',
-      noteTextColor: '#fcd34d',
-      noteBorderColor: '#fbbf24',
-      actorBkg: '#334155',
-      actorBorder: '#64748b',
-      actorTextColor: '#e2e8f0',
-      signalColor: '#94a3b8',
-      signalTextColor: '#e2e8f0',
+      primaryColor: "#1e3a5f",
+      primaryTextColor: "#93c5fd",
+      primaryBorderColor: "#60a5fa",
+      secondaryColor: "#14532d",
+      secondaryTextColor: "#86efac",
+      secondaryBorderColor: "#4ade80",
+      tertiaryColor: "#78350f",
+      tertiaryTextColor: "#fcd34d",
+      tertiaryBorderColor: "#fbbf24",
+      lineColor: "#94a3b8",
+      textColor: "#e2e8f0",
+      mainBkg: "#1e293b",
+      nodeBorder: "#475569",
+      clusterBkg: "#334155",
+      clusterBorder: "#475569",
+      titleColor: "#e2e8f0",
+      edgeLabelBackground: "#1e293b",
+      nodeTextColor: "#e2e8f0",
+      noteBkgColor: "#78350f",
+      noteTextColor: "#fcd34d",
+      noteBorderColor: "#fbbf24",
+      actorBkg: "#334155",
+      actorBorder: "#64748b",
+      actorTextColor: "#e2e8f0",
+      signalColor: "#94a3b8",
+      signalTextColor: "#e2e8f0",
     };
 
     mermaidInstance.initialize({
       startOnLoad: false,
-      theme: 'base',
+      theme: "base",
       themeVariables: isDark ? darkThemeVars : lightThemeVars,
       // "loose" is safe here - blog content is author-controlled, not user-generated
       // "strict" disables inline style directives which are needed for custom node colors
@@ -376,16 +444,16 @@ const nextPost =
     // Re-render existing diagrams on theme change
     if (forceRerender && existingDiagrams.length > 0) {
       for (const diagram of existingDiagrams) {
-        const mermaidId = diagram.getAttribute('data-mermaid-id');
+        const mermaidId = diagram.getAttribute("data-mermaid-id");
         const code = mermaidCodes.get(mermaidId);
         if (code) {
           const newId = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
           try {
             // Remove %%{init...}%% directives to use our theme
-            const cleanCode = code.replace(/%%\{init:.*?\}%%/g, '').trim();
+            const cleanCode = code.replace(/%%\{init:.*?\}%%/g, "").trim();
             const { svg } = await mermaidInstance.render(newId, cleanCode);
             diagram.innerHTML = svg;
-            diagram.setAttribute('data-mermaid-id', newId);
+            diagram.setAttribute("data-mermaid-id", newId);
             mermaidCodes.set(newId, code);
             mermaidCodes.delete(mermaidId);
           } catch (e) {
@@ -400,16 +468,19 @@ const nextPost =
     // Render new mermaid diagrams
     for (const element of mermaidElements) {
       const codeEl = element.querySelector("code");
-      const code = codeEl ? codeEl.textContent || "" : element.textContent || "";
+      const code = codeEl
+        ? codeEl.textContent || ""
+        : element.textContent || "";
       const id = `mermaid-${Math.random().toString(36).slice(2, 11)}`;
 
       try {
         // Remove %%{init...}%% directives to use our theme
-        const cleanCode = code.replace(/%%\{init:.*?\}%%/g, '').trim();
+        const cleanCode = code.replace(/%%\{init:.*?\}%%/g, "").trim();
         const { svg } = await mermaidInstance.render(id, cleanCode);
         const wrapper = document.createElement("div");
-        wrapper.className = "mermaid-diagram my-4 flex justify-center overflow-x-auto";
-        wrapper.setAttribute('data-mermaid-id', id);
+        wrapper.className =
+          "mermaid-diagram my-4 flex justify-center overflow-x-auto";
+        wrapper.setAttribute("data-mermaid-id", id);
         wrapper.innerHTML = svg;
         element.replaceWith(wrapper);
         // Store original code for re-rendering on theme change
@@ -430,9 +501,9 @@ const nextPost =
   });
 
   // Re-render mermaid on theme change
-  const themeObserver = new MutationObserver((mutations) => {
+  const themeObserver = new MutationObserver(mutations => {
     for (const mutation of mutations) {
-      if (mutation.attributeName === 'data-theme') {
+      if (mutation.attributeName === "data-theme") {
         initMermaid(true);
         break;
       }
@@ -456,15 +527,18 @@ const nextPost =
       document.body.appendChild(overlay);
 
       // Close on overlay click
-      overlay.addEventListener("click", (e) => {
-        if (e.target === overlay || e.target.classList.contains("lightbox-close")) {
+      overlay.addEventListener("click", e => {
+        if (
+          e.target === overlay ||
+          e.target.classList.contains("lightbox-close")
+        ) {
           overlay.classList.remove("active");
           document.body.style.overflow = "";
         }
       });
 
       // Close on ESC key
-      document.addEventListener("keydown", (e) => {
+      document.addEventListener("keydown", e => {
         if (e.key === "Escape" && overlay.classList.contains("active")) {
           overlay.classList.remove("active");
           document.body.style.overflow = "";
@@ -477,7 +551,7 @@ const nextPost =
     const mermaidDiagrams = document.querySelectorAll(".mermaid-diagram");
 
     // Add click handler to images
-    images.forEach((img) => {
+    images.forEach(img => {
       img.style.cursor = "zoom-in";
       img.addEventListener("click", () => {
         const body = overlay.querySelector(".lightbox-body");
@@ -492,7 +566,7 @@ const nextPost =
     });
 
     // Add click handler to mermaid diagrams
-    mermaidDiagrams.forEach((diagram) => {
+    mermaidDiagrams.forEach(diagram => {
       diagram.style.cursor = "zoom-in";
       diagram.addEventListener("click", () => {
         const svg = diagram.querySelector("svg");
@@ -533,7 +607,6 @@ const nextPost =
       });
     });
   }
-
 </script>
 
 <style is:global>
@@ -548,7 +621,9 @@ const nextPost =
     justify-content: center;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 0.3s ease, visibility 0.3s ease;
+    transition:
+      opacity 0.3s ease,
+      visibility 0.3s ease;
     backdrop-filter: blur(4px);
   }
 

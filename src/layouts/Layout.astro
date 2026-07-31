@@ -1,6 +1,9 @@
 ---
 import { ClientRouter } from "astro:transitions";
-import { PUBLIC_GOOGLE_SITE_VERIFICATION } from "astro:env/client";
+import {
+  PUBLIC_GA_MEASUREMENT_ID,
+  PUBLIC_GOOGLE_SITE_VERIFICATION,
+} from "astro:env/client";
 import { SITE } from "@/config";
 import { getLocaleFromUrl } from "@/i18n/utils";
 import "@/styles/global.css";
@@ -11,44 +14,120 @@ const langCode = locale === "ko" ? "ko-KR" : "en-US";
 type Props = {
   title?: string;
   author?: string;
-  profile?: string;
   description?: string;
   ogImage?: string;
-  canonicalURL?: string;
+  canonicalURL?: string | URL;
   pubDatetime?: Date;
   modDatetime?: Date | null;
   scrollSmooth?: boolean;
+  pageType?: "website" | "webpage" | "blogPosting" | "profile" | "collection";
+  tags?: string[];
+  alternateLinks?: Array<{ lang: string; href: string }>;
 };
 
 const {
   title = SITE.title,
   author = SITE.author,
-  profile = SITE.profile,
   description = SITE.desc,
   ogImage = SITE.ogImage ? `/${SITE.ogImage}` : "/og.png",
-  canonicalURL = new URL(Astro.url.pathname, Astro.url),
+  canonicalURL = new URL(Astro.url.pathname, SITE.website),
   pubDatetime,
   modDatetime,
   scrollSmooth = false,
+  pageType = pubDatetime ? "blogPosting" : "webpage",
+  tags = [],
+  alternateLinks = [],
 } = Astro.props;
 
-const socialImageURL = new URL(ogImage, Astro.url);
-
-const structuredData = {
-  "@context": "https://schema.org",
-  "@type": "BlogPosting",
-  headline: `${title}`,
-  image: `${socialImageURL}`,
-  datePublished: `${pubDatetime?.toISOString()}`,
-  ...(modDatetime && { dateModified: modDatetime.toISOString() }),
-  author: [
-    {
-      "@type": "Person",
-      name: `${author}`,
-      ...(profile && { url: profile }),
-    },
-  ],
+const canonicalHref = new URL(canonicalURL, SITE.website).href;
+const socialImageURL = new URL(ogImage, SITE.website);
+const person = {
+  "@type": "Person",
+  "@id": SITE.authorId,
+  name: SITE.author,
+  alternateName: SITE.authorEnglish,
+  url: new URL("/about/", SITE.website).href,
+  sameAs: SITE.authorSameAs,
 };
+
+const structuredData =
+  pageType === "blogPosting" && pubDatetime
+    ? {
+        "@context": "https://schema.org",
+        "@type": "BlogPosting",
+        "@id": `${canonicalHref}#article`,
+        headline: title,
+        description,
+        image: socialImageURL.href,
+        url: canonicalHref,
+        mainEntityOfPage: {
+          "@type": "WebPage",
+          "@id": canonicalHref,
+        },
+        datePublished: pubDatetime.toISOString(),
+        dateModified: (modDatetime ?? pubDatetime).toISOString(),
+        inLanguage: langCode,
+        keywords: tags.join(", "),
+        author: person,
+        publisher: person,
+        isPartOf: {
+          "@type": "Blog",
+          "@id": `${SITE.website}#blog`,
+          name: SITE.title,
+          url: SITE.website,
+        },
+      }
+    : pageType === "profile"
+      ? {
+          "@context": "https://schema.org",
+          "@type": "ProfilePage",
+          "@id": canonicalHref,
+          url: canonicalHref,
+          name: title,
+          mainEntity: person,
+        }
+      : pageType === "collection"
+        ? {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "@id": canonicalHref,
+            url: canonicalHref,
+            name: title,
+            description,
+            inLanguage: langCode,
+            author: person,
+            isPartOf: {
+              "@type": "Blog",
+              "@id": `${SITE.website}#blog`,
+              name: SITE.title,
+            },
+          }
+        : pageType === "website"
+          ? {
+              "@context": "https://schema.org",
+              "@type": "WebSite",
+              "@id": `${SITE.website}#website`,
+              url: SITE.website,
+              name: SITE.title,
+              description: SITE.desc,
+              inLanguage: langCode,
+              author: person,
+            }
+          : {
+              "@context": "https://schema.org",
+              "@type": "WebPage",
+              "@id": canonicalHref,
+              url: canonicalHref,
+              name: title,
+              description,
+              inLanguage: langCode,
+              author: person,
+              isPartOf: {
+                "@type": "WebSite",
+                "@id": `${SITE.website}#website`,
+                name: SITE.title,
+              },
+            };
 ---
 
 <!doctype html>
@@ -61,23 +140,30 @@ const structuredData = {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="canonical" href={canonicalURL} />
+    <link rel="canonical" href={canonicalHref} />
+    {
+      alternateLinks.map(({ lang, href }) => (
+        <link rel="alternate" hreflang={lang} href={href} />
+      ))
+    }
     <meta name="generator" content={Astro.generator} />
 
-    <!-- General Meta Tags -->
     <title>{title}</title>
     <meta name="title" content={title} />
     <meta name="description" content={description} />
     <meta name="author" content={author} />
     <link rel="sitemap" href="/sitemap-index.xml" />
 
-    <!-- Open Graph / Facebook -->
+    <meta
+      property="og:type"
+      content={pageType === "blogPosting" ? "article" : "website"}
+    />
+    <meta property="og:locale" content={locale === "ko" ? "ko_KR" : "en_US"} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:url" content={canonicalHref} />
     <meta property="og:image" content={socialImageURL} />
 
-    <!-- Article Published/Modified time -->
     {
       pubDatetime && (
         <meta
@@ -95,40 +181,49 @@ const structuredData = {
       )
     }
 
-    <!-- Twitter -->
     <meta property="twitter:card" content="summary_large_image" />
-    <meta property="twitter:url" content={canonicalURL} />
+    <meta property="twitter:url" content={canonicalHref} />
     <meta property="twitter:title" content={title} />
     <meta property="twitter:description" content={description} />
     <meta property="twitter:image" content={socialImageURL} />
 
-    <!-- Google JSON-LD Structured data -->
     <script
       type="application/ld+json"
       is:inline
       set:html={JSON.stringify(structuredData)}
     />
 
-    <!-- Enable RSS feed auto-discovery  -->
-    <!-- https://docs.astro.build/en/recipes/rss/#enabling-rss-feed-auto-discovery -->
     <link
       rel="alternate"
       type="application/rss+xml"
-      title={SITE.title}
-      href={new URL("rss.xml", Astro.site)}
+      title={locale === "ko" ? SITE.title : `${SITE.title} — English`}
+      href={new URL(locale === "ko" ? "rss.xml" : "en/rss.xml", Astro.site)}
     />
 
     <meta name="theme-color" content="" />
 
     {
-      // If PUBLIC_GOOGLE_SITE_VERIFICATION is set in the environment variable,
-      // include google-site-verification tag in the heading
-      // Learn more: https://support.google.com/webmasters/answer/9008080#meta_tag_verification&zippy=%2Chtml-tag
       PUBLIC_GOOGLE_SITE_VERIFICATION && (
         <meta
           name="google-site-verification"
           content={PUBLIC_GOOGLE_SITE_VERIFICATION}
         />
+      )
+    }
+
+    {
+      PUBLIC_GA_MEASUREMENT_ID && (
+        <>
+          <script
+            is:inline
+            async
+            src={`https://www.googletagmanager.com/gtag/js?id=${PUBLIC_GA_MEASUREMENT_ID}`}
+          />
+          <script
+            is:inline
+            set:html={`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments)}gtag("js",new Date());gtag("config","${PUBLIC_GA_MEASUREMENT_ID}",{"anonymize_ip":true});`}
+          />
+        </>
       )
     }
 

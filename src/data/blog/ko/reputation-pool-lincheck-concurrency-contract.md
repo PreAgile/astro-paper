@@ -5,6 +5,9 @@ title: "32스레드 테스트는 통과했지만 명세가 틀렸다 — Linchec
 featured: true
 draft: false
 depth: deep-dive
+translationKey: reputation-pool-lincheck-concurrency-contract
+series: reputation-pool
+seriesOrder: 1
 tags:
   - Java
   - Concurrency
@@ -30,6 +33,18 @@ description: |
 > 3. `block`과 경합하는 `acquire`는 안전하게 실패할 수 있으며, 이 허용 범위는 일반적인 선형화 명세로 표현하기 어렵다.
 >
 > 실패 trace에 맞춰 테스트를 약하게 만든 것이 아닙니다. 호출자가 실제로 관찰하고 의존할 수 있는 약속과, 우연히 관찰되는 실행 결과를 분리했습니다. 이후 `ConcurrentHashMap.compute`를 의도적으로 get-then-put으로 바꾸자 Lincheck는 두 요청이 동시에 lease를 획득하는 반례를 재현했습니다. 가장 큰 결과는 초록색 테스트가 아니라, **어디까지가 공개 계약인지 설명할 수 있게 된 것**이었습니다.
+
+### Evidence card
+
+| 항목               | 검증 근거                                             |
+| ------------------ | ----------------------------------------------------- |
+| 검증 대상          | `LeaseRegistry`, `ResourcePool`의 동시성 계약         |
+| 기준 version       | `reputation-pool` PR #49, Lincheck 3.6, Java 25       |
+| 검증 방법          | 모델 체킹 + stress + 의도적 mutation                  |
+| 실제 반례          | get-then-put 변이에서 동일 리소스 double grant        |
+| 수정된 명세        | token 순서는 리소스별 계약, 선택된 ID는 스케줄링 정책 |
+| 확인한 범위        | 단일 JVM에서 공개한 operation과 설정한 탐색 범위      |
+| 확인하지 않은 범위 | DB·네트워크·여러 process를 포함한 분산 배타성         |
 
 ---
 

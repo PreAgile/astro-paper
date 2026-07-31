@@ -1,33 +1,40 @@
 ---
 layout: ../../layouts/AboutLayout.astro
-title: "About"
+title: "Myeonsoo Kim — Backend Engineer"
+description: "Backend engineer documenting production problems through code, experiments, failure traces, and verifiable architecture decisions."
 ---
 
-AstroPaper is a minimal, accessible and SEO-friendly blog theme built with [Astro](https://astro.build/) and [Tailwind CSS](https://tailwindcss.com/).
+I am **Myeonsoo Kim (김면수)**, a backend engineer who narrows production problems through code and measurement, then publishes the decisions as records other engineers can verify.
 
-![Astro Paper](public/astropaper-og.jpg)
+The principle of this blog is: **engineering is the explanation of choices**. Instead of restating generic tutorials, I document:
 
-AstroPaper provides a solid foundation for blogs, or even portfolios\_ with full markdown support, built-in dark mode, and a clean layout that works out-of-the-box.
+- assumptions that turned out to be wrong,
+- counterexamples that broke an implementation or specification,
+- rejected alternatives and their trade-offs,
+- reproducible test and measurement environments,
+- the real PRs, issues, commits, and source code,
+- and the boundary of what the evidence does not prove.
 
-The blog posts in this theme also serve as guides, docs or example articles\_ making AstroPaper a flexible starting point for your next content-driven site.
+## Current focus
 
-## Features
+- safe selection and leasing of reputation-bearing proxies, accounts, and sessions,
+- Java concurrency contracts and linearizability testing,
+- the boundary between a JDK-only core and a SaaS host,
+- multi-tenant isolation, noisy-neighbor control, and horizontal scaling,
+- and operational reliability for scraping systems.
 
-AstroPaper comes with a set of useful features that make content publishing easy and effective:
+## Public projects
 
-- SEO-friendly
-- Fast performance
-- Light & dark mode
-- Highly customizable
-- Organizable blog posts
-- Responsive & accessible
-- Static search with [PageFind](https://pagefind.app/)
-- Automatic social image generation
+- [PreAgile/reputation-pool](https://github.com/PreAgile/reputation-pool) — a JDK-only reputation decision and resource-leasing engine
+- [PreAgile/reputation-pool-cloud](https://github.com/PreAgile/reputation-pool-cloud) — a hosted SaaS built on the public engine
+- [Building reputation-pool](/en/series/reputation-pool/) — the connected series of implementation failures and redesigns
 
-and so much more.
+## How to evaluate these articles
 
-## Show your support
+Each deep dive includes the tested version, environment, PR, failure trace, and limitations whenever the evidence exists. When production data is not available yet, I say **not measured yet** instead of presenting a hypothesis as a number.
 
-If you like [AstroPaper](https://github.com/satnaing/astro-paper), consider giving it a star.
+## Connect
 
-Found a bug or have an improvement in mind? Feel free to open an [issue](https://github.com/satnaing/astro-paper/issues), submit a [pull request](https://github.com/satnaing/astro-paper/pulls) or start a [discussion](https://github.com/satnaing/astro-paper/discussions).
+- [GitHub](https://github.com/PreAgile)
+- [Korean RSS](/rss.xml)
+- [English RSS](/en/rss.xml)

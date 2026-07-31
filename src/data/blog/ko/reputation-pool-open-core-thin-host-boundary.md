@@ -5,6 +5,9 @@ title: "코어를 SaaS에서 떼어냈더니 경계가 하나 더 필요했다 �
 featured: true
 draft: false
 depth: deep-dive
+translationKey: reputation-pool-open-core-thin-host-boundary
+series: reputation-pool
+seriesOrder: 2
 tags:
   - Java
   - Architecture
@@ -32,6 +35,18 @@ description: |
 > 이를 `reputation-pool-grpc`라는 공개 모듈로 추출했습니다. 이후 reference server와 cloud는 같은 gRPC 계약과 handler를 사용하고, cloud는 Spring 등록·인증된 tenant routing·운영 제한만 덧붙입니다.
 >
 > 이 글의 결론은 “코어를 순수하게 만들면 SaaS가 얇아진다”가 아닙니다. SaaS에는 여전히 많은 코드가 필요합니다. 다만 **판단 규칙의 복잡성과 판매·운영의 복잡성이 서로를 오염시키지 않도록 변화의 이유가 다른 코드를 분리했다**는 것이 핵심입니다.
+
+### Evidence card
+
+| 항목         | 검증 근거                                                                   |
+| ------------ | --------------------------------------------------------------------------- |
+| 검증 대상    | JDK-only core, 공유 gRPC adapter, 두 host의 의존성 방향                     |
+| 기준 version | 공개 artifact 0.5.0, gRPC 1.82.2, Java 25                                   |
+| 구조 변경    | server 내부 gRPC 코드를 `reputation-pool-grpc`로 추출                       |
+| 검증 방법    | 전체 build, mapping mutation, publication dry run, Docker RPC round trip    |
+| 실제 결과    | `ProtoMapping` 25개 mutation 생존 0개, `Register → Acquire → granted: true` |
+| 확인한 범위  | reference server와 Spring Boot cloud의 JVM host 경계                        |
+| 남은 한계    | 다중 process lease와 cloud 사전 budget decode seam                          |
 
 ---
 

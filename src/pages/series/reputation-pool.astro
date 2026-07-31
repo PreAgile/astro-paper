@@ -1,0 +1,133 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import { SITE } from "@/config";
+
+const title = "reputation-pool 설계 기록";
+const description =
+  "운영 문제에서 출발해 JDK-only core, 동시성 계약, open-core, 멀티테넌시와 수평 확장까지 이어지는 검증 중심 백엔드 설계 시리즈입니다.";
+const articles = [
+  {
+    order: 1,
+    label: "Lincheck",
+    title: "32스레드 테스트는 통과했지만 명세가 틀렸다",
+    summary:
+      "Lincheck의 실패 trace가 fencing token, 리소스 선택과 block 경쟁의 실제 계약을 다시 쓰게 만든 과정입니다.",
+    href: "/posts/reputation-pool-lincheck-concurrency-contract/",
+    status: "발행",
+  },
+  {
+    order: 2,
+    label: "Open-core 경계",
+    title: "코어를 SaaS에서 떼어냈더니 경계가 하나 더 필요했다",
+    summary:
+      "JDK-only core와 SaaS를 나눈 뒤, 복사되던 gRPC adapter를 다시 공개 모듈로 추출한 과정입니다.",
+    href: "/posts/reputation-pool-open-core-thin-host-boundary/",
+    status: "발행",
+  },
+  {
+    order: 3,
+    label: "멀티테넌트",
+    title: "격리와 noisy neighbor 대응",
+    summary:
+      "tenant별 상태 격리와 공용 JVM 자원 예산을 함께 설계한 과정을 다룰 예정입니다.",
+    status: "집필 예정",
+  },
+  {
+    order: 4,
+    label: "탄생 배경",
+    title: "운영에서 reputation-pool이 필요해진 원인",
+    summary:
+      "단일 프록시 성공률이 아니라, 리소스의 이력과 회복을 관리해야 했던 운영 문제를 다룰 예정입니다.",
+    status: "집필 예정",
+  },
+  {
+    order: 5,
+    label: "수평 확장",
+    title: "단일 JVM 모델이 여러 인스턴스에서 깨지는 지점",
+    summary:
+      "현재 원자성의 범위와 분산 lease·fencing 재설계 방향을 다룰 예정입니다.",
+    status: "집필 예정",
+  },
+  {
+    order: 6,
+    label: "Shadow mode",
+    title: "프로덕션 데이터로 판단 품질 검증",
+    summary:
+      "실제 운영 데이터가 확보된 뒤 baseline과 shadow decision을 비교합니다.",
+    status: "데이터 확보 후",
+  },
+];
+---
+
+<Layout
+  title={`${title} | ${SITE.title}`}
+  {description}
+  pageType="collection"
+  alternateLinks={[
+    {
+      lang: "ko",
+      href: new URL("/series/reputation-pool/", SITE.website).href,
+    },
+    {
+      lang: "en",
+      href: new URL("/en/series/reputation-pool/", SITE.website).href,
+    },
+    {
+      lang: "x-default",
+      href: new URL("/series/reputation-pool/", SITE.website).href,
+    },
+  ]}
+>
+  <Header />
+  <main id="main-content" class="app-layout py-10">
+    <header class="mb-10 border-b border-border pb-8">
+      <p class="mb-2 text-sm font-semibold text-accent">
+        BUILDING REPUTATION-POOL
+      </p>
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
+      <p class="mt-4 max-w-3xl text-lg">{description}</p>
+    </header>
+
+    <section class="app-prose max-w-none">
+      <h2>이 시리즈가 검증하려는 것</h2>
+      <p>
+        완성된 아키텍처를 사후에 설명하지 않습니다. 처음의 가정, 그 가정을
+        깨뜨린 테스트와 운영 제약, 수정된 계약과 아직 남은 한계를 실제 PR과
+        코드로 연결합니다.
+      </p>
+
+      <ol class="not-prose mt-8 space-y-5">
+        {
+          articles.map(article => (
+            <li class="rounded-xl border border-border p-5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm font-semibold text-accent">
+                  {article.order}편 · {article.label}
+                </span>
+                <span class="rounded-full bg-muted px-3 py-1 text-xs">
+                  {article.status}
+                </span>
+              </div>
+              <h2 class="mt-3 text-xl font-bold">
+                {article.href ? (
+                  <a
+                    class="underline-offset-4 hover:underline"
+                    href={article.href}
+                  >
+                    {article.title}
+                  </a>
+                ) : (
+                  article.title
+                )}
+              </h2>
+              <p class="mt-2">{article.summary}</p>
+            </li>
+          ))
+        }
+      </ol>
+    </section>
+  </main>
+  <Footer />
+</Layout>

@@ -75,17 +75,45 @@ const isActive = (path: string) => {
         ]}
       >
         <li class="col-span-2">
-          <a href={locale === "ko" ? "/posts" : `/${locale}/posts`} class:list={{ "active-nav": isActive("/posts") || isActive(`/${locale}/posts`) }}>
+          <a
+            href={locale === "ko" ? "/posts" : `/${locale}/posts`}
+            class:list={{
+              "active-nav": isActive("/posts") || isActive(`/${locale}/posts`),
+            }}
+          >
             {t(locale, "nav.posts")}
           </a>
         </li>
         <li class="col-span-2">
-          <a href={locale === "ko" ? "/tags" : `/${locale}/tags`} class:list={{ "active-nav": isActive("/tags") || isActive(`/${locale}/tags`) }}>
+          <a
+            href={locale === "ko" ? "/tags" : `/${locale}/tags`}
+            class:list={{
+              "active-nav": isActive("/tags") || isActive(`/${locale}/tags`),
+            }}
+          >
             {t(locale, "nav.tags")}
           </a>
         </li>
         <li class="col-span-2">
-          <a href={locale === "ko" ? "/about" : `/${locale}/about`} class:list={{ "active-nav": isActive("/about") || isActive(`/${locale}/about`) }}>
+          <a
+            href={locale === "ko"
+              ? "/series/reputation-pool"
+              : `/${locale}/series/reputation-pool`}
+            class:list={{
+              "active-nav":
+                isActive("/series") || isActive(`/${locale}/series`),
+            }}
+          >
+            {t(locale, "nav.series")}
+          </a>
+        </li>
+        <li class="col-span-2">
+          <a
+            href={locale === "ko" ? "/about" : `/${locale}/about`}
+            class:list={{
+              "active-nav": isActive("/about") || isActive(`/${locale}/about`),
+            }}
+          >
             {t(locale, "nav.about")}
           </a>
         </li>
@@ -97,7 +125,8 @@ const isActive = (path: string) => {
                 class:list={[
                   "focus-outline flex justify-center p-3 sm:p-1",
                   {
-                    "active-nav [&>svg]:stroke-accent": isActive("/archives") || isActive(`/${locale}/archives`),
+                    "active-nav [&>svg]:stroke-accent":
+                      isActive("/archives") || isActive(`/${locale}/archives`),
                   },
                 ]}
                 title={t(locale, "nav.archives")}
@@ -114,7 +143,10 @@ const isActive = (path: string) => {
             href={locale === "ko" ? "/search" : `/${locale}/search`}
             class:list={[
               "focus-outline flex p-3 sm:p-1",
-              { "[&>svg]:stroke-accent": isActive("/search") || isActive(`/${locale}/search`) },
+              {
+                "[&>svg]:stroke-accent":
+                  isActive("/search") || isActive(`/${locale}/search`),
+              },
             ]}
             title={t(locale, "nav.search")}
             aria-label={t(locale, "nav.search")}

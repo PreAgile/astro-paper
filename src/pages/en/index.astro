@@ -20,7 +20,14 @@ const featuredPosts = sortedPosts.filter(({ data }) => data.featured);
 const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
 ---
 
-<Layout>
+<Layout
+  pageType="website"
+  alternateLinks={[
+    { lang: "ko", href: new URL("/", SITE.website).href },
+    { lang: "en", href: new URL("/en/", SITE.website).href },
+    { lang: "x-default", href: new URL("/", SITE.website).href },
+  ]}
+>
   <Header />
   <main id="main-content" data-layout="index" class="app-layout">
     <section id="hero" class:list={["pt-8 pb-6", "border-b border-border"]}>
@@ -35,7 +42,9 @@ const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
         // only display if at least one social link is enabled
         SOCIALS.length > 0 && (
           <div class="mt-4 flex max-sm:flex-col sm:items-center">
-            <div class="me-2 mb-1 whitespace-nowrap sm:mb-0">{t(locale, "home.socialLinks")}</div>
+            <div class="me-2 mb-1 whitespace-nowrap sm:mb-0">
+              {t(locale, "home.socialLinks")}
+            </div>
             <Socials />
           </div>
         )
@@ -51,7 +60,9 @@ const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
             { "border-b border-border": recentPosts.length > 0 },
           ]}
         >
-          <h2 class="text-2xl font-semibold tracking-wide">{t(locale, "home.featured")}</h2>
+          <h2 class="text-2xl font-semibold tracking-wide">
+            {t(locale, "home.featured")}
+          </h2>
           <ul>
             {featuredPosts.map(data => (
               <Card variant="h3" {...data} />
@@ -64,7 +75,9 @@ const recentPosts = sortedPosts.filter(({ data }) => !data.featured);
     {
       recentPosts.length > 0 && (
         <section id="recent-posts" class="pt-12 pb-6">
-          <h2 class="text-2xl font-semibold tracking-wide">{t(locale, "home.recentPosts")}</h2>
+          <h2 class="text-2xl font-semibold tracking-wide">
+            {t(locale, "home.recentPosts")}
+          </h2>
           <ul>
             {recentPosts.map(
               (data, index) =>
