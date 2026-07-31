@@ -1,0 +1,96 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Header from "@/components/Header.astro";
+import Footer from "@/components/Footer.astro";
+import { SITE } from "@/config";
+
+const title = "서로 다른 작업을 함께 처리하는 파이프라인 설계 기록";
+const description =
+  "브라우저 자동화, API 호출, 세션, 외부 쓰기를 같은 비동기 작업으로 뭉개지 않고, 큐·상태·멱등성 경계로 나눈 운영 설계 시리즈입니다.";
+const articles = [
+  {
+    order: 1,
+    label: "Queue isolation",
+    title: "큐가 가득 찼을 때 작업을 잃지 않으려면",
+    summary:
+      "실제 queue-full 거절과 stale recovery를 바탕으로, bounded backlog·publisher confirm·재예약을 하나의 과부하 계약으로 연결합니다.",
+    href: "/posts/heterogeneous-workload-queue-isolation/",
+    status: "발행",
+  },
+  {
+    order: 2,
+    label: "Session ownership",
+    title: "세션을 잃지 않으려면 요청을 어디로 보내야 하는가",
+    summary:
+      "계정별 affinity로 기존 세션이 있는 인스턴스로 보내고, 모든 세션 작업을 같은 account lock으로 직렬화합니다.",
+    href: "/posts/at-least-once-reply-idempotency/",
+    status: "발행",
+  },
+  {
+    order: 3,
+    label: "Browser capacity",
+    title: "브라우저 worker는 CPU worker도 I/O worker도 아니었다",
+    summary:
+      "Node, browser process, page lifecycle, proxy와 host 자원이 함께 만드는 용량 경계를 다룹니다.",
+    status: "운영 지표 정리 후",
+  },
+  {
+    order: 4,
+    label: "Message semantics",
+    title: "메시지가 두 번 오면 무엇을 한 번만 처리할 것인가",
+    summary:
+      "at-least-once 전달에서 외부 쓰기 중복과 완료 결과의 정합성을 어떤 계약으로 다룰지 정리합니다.",
+    status: "운영 근거 정리 후",
+  },
+  {
+    order: 5,
+    label: "Hybrid operations",
+    title: "ECS와 물리 서버가 공존할 때 배포는 라우팅 정합성 문제가 됐다",
+    summary:
+      "blue/green, DNS, Traefik과 endpoint drift를 호출 경로 전체의 운영 계약으로 다시 정의합니다.",
+    status: "집필 예정",
+  },
+];
+---
+
+<Layout
+  title={`${title} | ${SITE.title}`}
+  {description}
+  pageType="collection"
+  alternateLinks={[
+    { lang: "ko", href: new URL("/series/heterogeneous-workload-pipeline/", SITE.website).href },
+    { lang: "x-default", href: new URL("/series/heterogeneous-workload-pipeline/", SITE.website).href },
+  ]}
+>
+  <Header />
+  <main id="main-content" class="app-layout py-10">
+    <header class="mb-10 border-b border-border pb-8">
+      <p class="mb-2 text-sm font-semibold text-accent">HETEROGENEOUS WORKLOAD PIPELINE</p>
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">{title}</h1>
+      <p class="mt-4 max-w-3xl text-lg">{description}</p>
+    </header>
+    <section class="app-prose max-w-none">
+      <h2>이 시리즈가 검증하려는 것</h2>
+      <p>
+        처리량을 높이는 일보다 먼저, 성격이 다른 실패가 서로 전파되지 않게 만듭니다.
+        각 글은 작업의 상태 전이, queue·session·idempotency 경계, 실패 주입 결과와 아직
+        보장하지 못하는 범위를 실제 코드와 운영 제약에 연결합니다.
+      </p>
+      <ol class="not-prose mt-8 space-y-5">
+        {articles.map(article => (
+          <li class="rounded-xl border border-border p-5">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="text-sm font-semibold text-accent">{article.order}편 · {article.label}</span>
+              <span class="rounded-full bg-muted px-3 py-1 text-xs">{article.status}</span>
+            </div>
+            <h2 class="mt-3 text-xl font-bold">
+              {article.href ? <a class="underline-offset-4 hover:underline" href={article.href}>{article.title}</a> : article.title}
+            </h2>
+            <p class="mt-2">{article.summary}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  </main>
+  <Footer />
+</Layout>

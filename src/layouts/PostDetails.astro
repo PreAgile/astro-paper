@@ -144,19 +144,23 @@ const nextPost =
       <EditPost {hideEditPost} {post} class="max-sm:hidden" />
     </div>
     {
-      series === "reputation-pool" && (
+      (series === "reputation-pool" || series === "heterogeneous-workload-pipeline") && (
         <aside class="my-6 rounded-lg border border-border bg-muted/30 p-4">
           <p class="m-0 text-sm font-semibold">
             {post.id.startsWith("en/")
               ? `Building reputation-pool · Part ${seriesOrder}`
-              : `reputation-pool 설계 기록 · ${seriesOrder}편`}
+              : series === "reputation-pool"
+                ? `reputation-pool 설계 기록 · ${seriesOrder}편`
+                : `서로 다른 작업을 함께 처리하는 파이프라인 설계 기록 · ${seriesOrder}편`}
           </p>
           <a
             class="mt-1 inline-block text-sm underline underline-offset-4"
             href={
               post.id.startsWith("en/")
-                ? "/en/series/reputation-pool/"
-                : "/series/reputation-pool/"
+              ? "/en/series/reputation-pool/"
+              : series === "reputation-pool"
+                ? "/series/reputation-pool/"
+                : "/series/heterogeneous-workload-pipeline/"
             }
           >
             {post.id.startsWith("en/")
