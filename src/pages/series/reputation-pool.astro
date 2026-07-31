@@ -40,16 +40,17 @@ const articles = [
     label: "탄생 배경",
     title: "운영에서 reputation-pool이 필요해진 원인",
     summary:
-      "단일 프록시 성공률이 아니라, 리소스의 이력과 회복을 관리해야 했던 운영 문제를 다룰 예정입니다.",
-    status: "집필 예정",
+      "실제 운영 baseline과 실패 trace를 확보한 뒤, 리소스의 이력과 회복을 관리해야 했던 원인을 검증합니다.",
+    status: "운영 데이터 대기",
   },
   {
     order: 5,
     label: "수평 확장",
-    title: "단일 JVM 모델이 여러 인스턴스에서 깨지는 지점",
+    title: "왜 인스턴스를 두 개로 늘릴 수 없는가",
     summary:
-      "현재 원자성의 범위와 분산 lease·fencing 재설계 방향을 다룰 예정입니다.",
-    status: "집필 예정",
+      "인메모리 lease·fencing·checkpoint의 정확성 범위를 추적하고 세 가지 상태 소유 모델을 비교합니다.",
+    href: "/posts/reputation-pool-horizontal-scaling-limit/",
+    status: "발행",
   },
   {
     order: 6,
