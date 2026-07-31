@@ -472,6 +472,8 @@ frontmatter의 `title`과 `description`은 Markdown으로 렌더링되지 않는
 
 ### 작성 워크플로우 (권장 순서)
 
+글의 기술적 정확성뿐 아니라 대표작·저자 정체성·운영 증거·이력서 활용과 외부 배포 기준은 [`docs/editorial-reputation-strategy.md`](docs/editorial-reputation-strategy.md)를 함께 확인한다.
+
 1. 측정 데이터를 먼저 모은다 (코드 + 결과 파일을 commit 으로 남김)
 2. **비교 기준 분리표** 를 *제일 먼저* 짠다 — 이게 TL;DR 의 골격
 3. "왜 이렇게 설계됐나" 챕터를 측정 *해석* 보다 앞에 끼운다
