@@ -31,7 +31,7 @@ description: |
 >
 > checkpoint 역시 공유 상태 저장소가 아닙니다. 각 JVM의 전체 snapshot을 `DELETE → INSERT`로 교체하므로, 늦게 저장한 인스턴스가 먼저 저장된 인스턴스의 변경을 지울 수 있습니다. 메모리 budget과 tenant별 rate limit도 JVM마다 따로 계산돼 인스턴스 수만큼 실효 한도가 늘어납니다.
 >
-> 이 글은 실제 멀티인스턴스 운영 결과가 아닙니다. **현재 코드 경로로 구성한 결정적인 설계 반례**입니다. 지금은 단일 인스턴스라는 전제를 명시하는 것이 맞고, 고가용성이 필요해질 때의 1차 선택은 tenant마다 한 인스턴스만 상태를 소유하게 하는 sharding입니다. 다만 소유권 세대 번호까지 저장소 쓰기에 강제하지 않으면 장애 전환 중 옛 소유자가 다시 쓰는 문제는 남습니다.
+> 이 글은 실제 멀티인스턴스 운영 결과가 아닙니다. **현재 코드 경로로 구성한 결정적인 설계 반례**입니다. 지금은 단일 인스턴스라는 전제를 명시하는 것이 맞고, 고가용성이 필요해질 때의 1차 선택은 tenant마다 한 인스턴스만 상태를 소유하게 하는 sharding입니다. 다만 이것은 중간 단계입니다. 특정 tenant 하나가 한 인스턴스의 한계를 넘으면 lease와 fencing처럼 정확성이 필요한 상태를 공유 저장소의 원자적 연산으로 옮겨야 합니다. 소유권 세대 번호까지 저장소 쓰기에 강제하지 않으면 장애 전환 중 옛 소유자가 다시 쓰는 문제도 남습니다.
 
 ### Evidence card
 
@@ -241,7 +241,7 @@ B: token 42
 → 뒤늦은 41의 쓰기 거부
 ```
 
-Redis의 공식 distributed lock 문서도 correctness가 중요한 작업에서는 fencing token을 구현해야 한다고 명시합니다. 중요한 점은 token을 “발급”하는 데서 끝나지 않고, 부수 효과를 받는 쪽이 순서를 **강제**해야 한다는 것입니다.
+[Redis의 공식 distributed lock 문서](https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/)도 correctness가 중요한 작업에서는 fencing token을 구현해야 한다고 명시합니다. 중요한 점은 token을 “발급”하는 데서 끝나지 않고, 부수 효과를 받는 쪽이 순서를 **강제**해야 한다는 것입니다.
 
 </details>
 
@@ -376,6 +376,56 @@ Instance 1의 늦은 save(epoch 17)
 
 현재 구조를 가장 적게 바꾸면서 tenant 단위로 확장할 수 있어 **고가용성이 실제 요구가 되는 시점의 1차 후보**입니다.
 
+#### 7.1.1 tenant sharding이 풀지 못하는 hot tenant
+
+Tenant sharding은 서비스 전체를 scale-out합니다. tenant A, B, C를 서로 다른 instance에 배치하면 각 JVM이 맡는 pool 수와 요청량을 줄일 수 있습니다.
+
+하지만 특정 tenant 하나의 트래픽이 한 인스턴스의 CPU·heap·처리량을 넘으면 더 나눌 축이 없습니다.
+
+```text
+일반적인 tenant 분산
+
+tenant A ─> Instance 1
+tenant B ─> Instance 2
+tenant C ─> Instance 3
+
+한 tenant에 트래픽 집중
+
+tenant A ─> Instance 1 ─> 처리 한계
+             ↑
+        다른 instance로
+        나눌 수 없음
+```
+
+이 시점에는 동일 tenant의 요청을 여러 instance가 처리해야 합니다.
+
+```text
+                  ┌─> Instance 1
+tenant A ── LB ───┼─> Instance 2
+                  └─> Instance 3
+                         │
+                  shared coordination
+```
+
+그러면 앞에서 만든 double grant 반례가 다시 나타납니다. 해결하려면 lease 획득을 “각 JVM에서 확인 후 저장”하는 동작이 아니라, 공유 저장소에서 다음 조건을 하나의 원자적 연산으로 실행해야 합니다.
+
+```text
+Acquire(p1)
+→ 아직 유효한 lease가 없을 때만
+→ 다음 fencing token을 발급하고
+→ 새 lease를 저장
+→ 위 세 단계를 한 번에 성공하거나 전부 실패
+```
+
+Instance 1과 2가 동시에 `Acquire(p1)`을 실행해도 공유 저장소에서는 하나만 성공해야 합니다.
+
+```text
+Instance 1 → p1, token 41 → 성공
+Instance 2 → p1은 이미 leased → 실패
+```
+
+따라서 tenant sharding은 최종 구조가 아닙니다. **현재의 빠른 인메모리 core를 유지하면서 분산 상태 관리가 필요한 시점을 늦추는 중간 단계**입니다.
+
 ### 7.2 상태 외부화 — PostgreSQL이나 Redis를 authoritative state로 만든다
 
 lease와 평판 상태의 진짜 원본을 공유 저장소로 옮기고, 모든 instance가 원자적 조건부 연산으로 접근합니다. 어떤 instance가 요청을 받아도 같은 상태를 봅니다.
@@ -383,6 +433,32 @@ lease와 평판 상태의 진짜 원본을 공유 저장소로 옮기고, 모든
 장점은 애플리케이션 instance가 stateless에 가까워지고 routing 자유도가 높아진다는 것입니다. 반면 acquire hot path마다 network 왕복, transaction과 저장소 경합이 들어갑니다. 현재 core의 빠른 in-memory aggregate 경계도 크게 바뀝니다.
 
 단순히 Redis를 추가한다는 말로는 부족합니다. acquire, renew, release, block과 report 각각에 어떤 원자성 조건이 필요한지 다시 명세해야 합니다.
+
+Redis를 사용한다고 자동으로 lock-free 구조가 되는 것도 아닙니다. 여러 명령 사이에 다른 요청이 끼어들 수 있다면 “lease가 비었는지 확인”한 두 instance가 모두 grant할 수 있습니다. Redis Lua script나 transaction, PostgreSQL의 조건부 `UPDATE`처럼 검증과 변경을 저장소가 원자적으로 수행해야 합니다.
+
+모든 평판 계산을 처음부터 외부 저장소로 옮길 필요는 없습니다. 정확성이 필요한 coordination과 계산량이 많은 판단을 나누는 hybrid 구조도 가능합니다.
+
+```text
+Instance 1 ─┐
+Instance 2 ─┼─ acquire / renew / release
+Instance 3 ─┘              │
+                           ▼
+                 Redis 또는 PostgreSQL
+                 lease + fencing token
+
+각 JVM
+└─ reputation 계산과 후보 ranking cache
+
+PostgreSQL
+└─ durable reputation + report
+```
+
+- **공유 저장소** — lease의 존재, 만료와 fencing token을 authoritative state로 관리합니다.
+- **각 JVM** — reputation 계산과 후보 ranking을 cache해 모든 판단이 network 왕복에 묶이지 않게 합니다.
+- **PostgreSQL** — 장기 평판과 report를 영속화하고 version 또는 token 조건으로 오래된 쓰기를 거부합니다.
+- **변경 전파** — event stream이나 cache invalidation으로 각 JVM의 후보 정보를 갱신합니다.
+
+이 구조도 공짜는 아닙니다. lease 저장소 장애 시 요청을 거부할지, 제한적으로 허용할지 결정해야 하고, cache가 오래됐을 때 최종 lease 획득이 실패하는 정상적인 경쟁도 처리해야 합니다.
 
 ### 7.3 single writer와 leader election — 한 instance만 쓰게 한다
 
@@ -394,11 +470,24 @@ Leader lease가 만료됐다는 사실만으로 옛 leader의 실행이 즉시 �
 
 ### 7.4 결정 표
 
-| 선택            | 현재 core 변경 | write 확장성 | 장애 전환 난이도 | hot path 비용         | 적합한 시점                                 |
-| --------------- | -------------- | ------------ | ---------------- | --------------------- | ------------------------------------------- |
-| tenant sharding | 낮음~중간      | tenant 단위  | 중간             | JVM-local 유지        | tenant가 충분히 많고 HA 필요                |
-| 상태 외부화     | 높음           | 높음         | 저장소에 위임    | network·DB/Redis 비용 | 임의 instance routing과 강한 공유 상태 필요 |
-| single writer   | 중간           | 낮음         | leader 전환 필요 | leader 내부는 빠름    | 처리량보다 빠른 failover가 중요             |
+| 선택            | 현재 core 변경 | write 확장성                 | 장애 전환 난이도 | hot path 비용         | 적합한 시점                                 |
+| --------------- | -------------- | ---------------------------- | ---------------- | --------------------- | ------------------------------------------- |
+| tenant sharding | 낮음~중간      | tenant 단위, hot tenant 한계 | 중간             | JVM-local 유지        | tenant가 충분히 많고 HA 필요                |
+| 상태 외부화     | 높음           | 동일 tenant도 확장 가능      | 저장소에 위임    | network·DB/Redis 비용 | 임의 instance routing과 강한 공유 상태 필요 |
+| single writer   | 중간           | 낮음                         | leader 전환 필요 | leader 내부는 빠름    | 처리량보다 빠른 failover가 중요             |
+
+### 7.5 예상하는 진화 순서
+
+현재 요구에서 모든 단계를 한 번에 구현하지 않습니다. 병목이 실제로 나타나는 순서에 맞춰 상태 소유 범위를 바꿉니다.
+
+```text
+단일 인스턴스
+→ tenant 증가: tenant별 single owner + sharding
+→ hot tenant 발생: lease·fencing을 공유 저장소로 외부화
+→ 한 tenant의 상태 자체가 커짐: resource/context 단위 partitioning
+```
+
+첫 번째 확장은 서로 다른 tenant를 여러 instance에 나누는 일입니다. 두 번째 확장부터는 같은 tenant를 여러 instance가 함께 처리하므로 shared coordination이 필수입니다. 마지막 단계에서는 tenant ID만으로 partition key가 충분하지 않아 resource나 context까지 분할해야 합니다.
 
 ---
 
@@ -412,9 +501,12 @@ Leader lease가 만료됐다는 사실만으로 옛 leader의 실행이 즉시 �
 2. “thread-safe”를 “수평 확장 가능”으로 표현하지 않습니다.
 3. budget, rate limit, lease와 checkpoint의 정확성 범위를 JVM으로 문서화합니다.
 4. 두 번째 instance가 필요해지는 조건과 측정값을 먼저 정의합니다.
-5. 그 시점에는 tenant sharding + owner epoch를 우선 검증합니다.
+5. 여러 tenant의 합산 부하가 문제라면 tenant sharding + owner epoch를 우선 검증합니다.
+6. 한 tenant가 한 instance의 한계를 넘으면 lease·fencing을 공유 저장소의 원자적 연산으로 외부화합니다.
 
 이것은 수평 확장을 포기한 것이 아니라 **필요하지 않은 분산 합의 비용을 미루면서 현재의 안전 경계를 명시한 결정**입니다.
+
+Tenant sharding은 최종 해법으로 고정한 구조가 아닙니다. 현재 core의 in-memory 성능을 유지하며 서비스 전체를 먼저 scale-out하는 단계이고, hot tenant가 관찰되는 순간 동일 tenant 내부의 상태 외부화나 partitioning으로 넘어가야 합니다.
 
 ### 재설계를 시작할 조건
 
@@ -422,6 +514,7 @@ Leader lease가 만료됐다는 사실만으로 옛 leader의 실행이 즉시 �
 - 배포 중 중단 시간을 허용할 수 없어 active-standby가 필요하다.
 - 장애 복구 목표가 현재 instance 재기동 시간보다 짧다.
 - tenant별 부하 차이가 커 tenant 단위 분산 효과가 분명하다.
+- 특정 tenant 하나가 한 instance의 CPU·heap·처리량 한계에 지속적으로 도달한다.
 - cross-instance 정확성을 검증할 failure-injection 환경을 준비할 수 있다.
 
 ---
@@ -492,6 +585,14 @@ Leader lease가 만료됐다는 사실만으로 옛 leader의 실행이 즉시 �
 
 **A.** 아직 cross-instance 처리량과 HA 요구가 측정되지 않았습니다. Redis를 넣으면 lease 원자성, 장애 정책, 데이터 영속성과 운영 대상이 새로 생깁니다. 요구가 확인되기 전에는 단일 owner가 더 단순하고 검증 가능한 선택입니다.
 
+### Q. 트래픽이 계속 증가하면 결국 Redis나 공유 DB가 필요하지 않나요?
+
+**A.** 같은 tenant를 여러 instance가 처리해야 하는 시점에는 필요합니다. 다만 처음에는 tenant별 owner를 나눠 서비스 전체를 scale-out할 수 있습니다. 특정 tenant 하나가 한 instance의 한계를 넘을 때 lease와 fencing을 공유 저장소로 외부화합니다. 이때 Redis라는 제품을 선택하는 것보다 acquire의 검증·token 발급·lease 저장이 하나의 원자적 연산인지, 최종 쓰기가 오래된 token을 거부하는지가 더 중요합니다.
+
+### Q. Redis를 사용하면 lock-free하게 처리할 수 있나요?
+
+**A.** Redis를 사용한다는 사실만으로 lock-free가 되지는 않습니다. 애플리케이션이 `GET`으로 빈 lease를 확인한 뒤 별도 `SET`을 수행하면 두 instance가 동시에 성공할 수 있습니다. Lua script나 transaction처럼 검증과 변경을 Redis 안에서 원자적으로 수행해야 합니다. Lock을 피했는지보다 double grant가 불가능한 저장소 계약인지 확인해야 합니다.
+
 ---
 
 ## 12. 다음 검증
@@ -502,7 +603,9 @@ Leader lease가 만료됐다는 사실만으로 옛 leader의 실행이 즉시 �
 2. owner registry와 epoch를 포함한 tenant sharding prototype을 만듭니다.
 3. owner 정지·network partition·늦은 checkpoint를 주입합니다.
 4. failover 시간, 중복 grant와 유실 여부를 측정합니다.
-5. 측정 결과가 요구를 만족하지 못할 때 상태 외부화와 single writer를 다시 비교합니다.
+5. 여러 tenant의 합산 부하와 한 tenant의 hot spot을 별도 시나리오로 측정합니다.
+6. hot tenant가 한 instance의 한계를 넘으면 공유 lease prototype의 처리량과 충돌률을 측정합니다.
+7. 측정 결과가 요구를 만족하지 못할 때 전체 상태 외부화와 single writer를 다시 비교합니다.
 
 분산 시스템에서 어려운 부분은 server를 여러 개 띄우는 일이 아닙니다. **누가 상태의 진짜 주인인지, 주인이 바뀐 뒤 옛 주인의 행동을 어디에서 거부할지 정하는 일**입니다.
 
