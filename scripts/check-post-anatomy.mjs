@@ -111,6 +111,7 @@ function* walk(dir) {
 const errors = [];
 const anatomyWarnings = [];
 const italicWarnings = [];
+const markdownRenderWarnings = [];
 let blogFiles = 0;
 let deepDiveCount = 0;
 
@@ -131,6 +132,19 @@ for (const filepath of walk(BLOG_DIR)) {
     if (italicCount > ITALIC_THRESHOLD) {
       italicWarnings.push(`${relPath}: italic ${italicCount} 개`);
     }
+
+    const riskyBold = maskCodeAndSpec(content).match(/\*\*[^*\n]+[)\]}]\*\*[가-힣]/g) ?? [];
+    if (riskyBold.length > 0) {
+      markdownRenderWarnings.push(
+        `${relPath}: 문장부호 뒤 굵은 강조 + 한국어 조사 ${riskyBold.length} 건`,
+      );
+    }
+  }
+
+  const frontmatter = content.match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
+  const description = frontmatter.match(/^description:\s*(.+)$/m)?.[1] ?? '';
+  if (/(\*\*|__|`)/.test(description)) {
+    markdownRenderWarnings.push(`${relPath}: frontmatter description에 Markdown 문법 사용`);
   }
 
   if (fm.depth === 'deep-dive') {
@@ -169,7 +183,19 @@ if (italicWarnings.length > 0) {
   console.warn(`   → 강조는 굵게/따옴표/백틱. AGENT.md "표기 규칙 — 한국어 본문 강조" 참고.`);
 }
 
-if (errors.length === 0 && anatomyWarnings.length === 0 && italicWarnings.length === 0) {
+if (markdownRenderWarnings.length > 0) {
+  console.warn(`\n⚠️  Markdown 렌더링 위험 — ${markdownRenderWarnings.length} 글`);
+  for (const w of markdownRenderWarnings) console.warn(`  ${w}`);
+  console.warn(`   → build 후 생성된 HTML에 ** 문자가 노출되지 않는지 확인한다.`);
+  console.warn(`   → AGENT.md "강조 문법의 렌더링 검증" 참고.`);
+}
+
+if (
+  errors.length === 0 &&
+  anatomyWarnings.length === 0 &&
+  italicWarnings.length === 0 &&
+  markdownRenderWarnings.length === 0
+) {
   console.log(`\n✅ 모든 검사 통과.`);
 }
 

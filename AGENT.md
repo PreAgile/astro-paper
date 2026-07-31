@@ -444,6 +444,30 @@ JPA 는 이걸 없애기 위해 만들어졌다. `r.setRetryCount(…)` 한 줄�
 
 `scripts/check-post-anatomy.mjs` 가 *italic 밀도* 를 검사한다 — 한 글당 italic 이 50 개를 넘으면 warning 을 띄운다 (한국어 글 한정, 영문 글은 예외). 새 글은 처음부터 굵게/따옴표 위주로 쓰고, 기존 글은 점진적으로 정리한다.
 
+#### 강조 문법의 렌더링 검증
+
+Markdown 원문에 `**`를 썼다는 사실만으로 굵게 렌더링된다고 가정하지 않는다. 닫는 `**` 앞이 `)`, `]` 같은 문장부호이고 바로 뒤에 한국어 조사나 어미가 붙으면 Markdown 파서가 닫는 구분자로 해석하지 못해 `**` 자체가 화면에 노출될 수 있다.
+
+```markdown
+<!-- 나쁜 예: 최종 화면에 **가 남을 수 있음 -->
+**계약 드리프트(contract drift)**라고 부른다.
+
+<!-- 좋은 예: 조사까지 강조하거나 HTML strong을 사용 -->
+**계약 드리프트(contract drift)라고** 부른다.
+<strong>계약 드리프트(contract drift)</strong>라고 부른다.
+```
+
+frontmatter의 `title`과 `description`은 Markdown으로 렌더링되지 않는 곳에서도 사용되므로 `**`, `*`, 백틱 같은 Markdown 강조 문법을 넣지 않는다. 강조가 필요하면 본문에서만 적용한다.
+
+글을 수정한 뒤에는 원문만 확인하지 않고 다음 순서로 검증한다.
+
+1. `bun run build`로 실제 HTML을 생성한다.
+2. 수정한 글의 `dist/posts/{slug}/index.html`에서 `**`가 텍스트로 남았는지 검색한다.
+3. 강조 대상이 `<strong>...</strong>`으로 변환됐는지 확인한다.
+4. 홈, 글 목록과 태그 페이지에 노출되는 `description`에도 Markdown 문법이 보이지 않는지 확인한다.
+
+`scripts/check-post-anatomy.mjs`는 문장부호로 끝나는 굵은 강조 뒤에 한국어가 바로 붙는 위험 패턴과 frontmatter 설명의 Markdown 강조 문법을 경고한다. 경고가 없어도 발행 전에는 생성된 HTML을 확인한다.
+
 ---
 
 ### 작성 워크플로우 (권장 순서)

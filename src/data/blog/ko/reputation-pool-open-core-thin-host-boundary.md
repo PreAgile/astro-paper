@@ -52,25 +52,99 @@ description: |
 
 ## 0. 시작 — 복사해야만 재사용할 수 있다면 경계가 잘못된 것이다
 
-공개 `reputation-pool`에는 이미 실행 가능한 reference server가 있었습니다. gRPC로 리소스를 등록하고, 빌리고, 결과를 보고하고, lease를 갱신하거나 반환할 수 있었습니다.
+먼저 이 프로젝트가 무엇을 하는지부터 설명해야 합니다.
 
-SaaS인 `reputation-pool-cloud`도 같은 기능이 필요했습니다. 차이는 실행 환경이었습니다.
+크롤러는 요청에 사용할 프록시나 계정 같은 **리소스**를 여러 개 가지고 있습니다. 모든 리소스가 항상 건강한 것은 아닙니다. 어떤 프록시는 차단됐고, 어떤 계정은 잠시 쉬어야 하며, 어떤 리소스는 다른 작업자가 이미 사용 중일 수 있습니다.
 
-- reference server는 공개 엔진을 직접 실행해볼 수 있는 최소 서버입니다.
-- cloud는 Spring Boot 위에서 인증, tenant routing, PostgreSQL, 운영 지표와 대시보드를 함께 제공합니다.
+`reputation-pool`은 이런 리소스의 성공·실패 기록을 바탕으로 상태를 평가하고, **지금 빌려줘도 되는 리소스 하나를 선택하는 Java 엔진**입니다. 저장소 안에서는 역할을 다시 둘로 나눴습니다.
 
-처음에는 reference server의 `advisor.proto`와 handler 코드를 cloud로 복사했습니다. 빠르게 동작을 확인하기에는 쉬운 선택이었습니다. 하지만 두 저장소에 같은 계약이 생긴 순간 다음 문제가 시작됐습니다.
+| 구성 요소              | 하는 일                                                                         |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `reputation-pool-core` | 점수 계산, 차단 여부, 리소스 선택, lease처럼 “무엇을 결정할지” 담당합니다.      |
+| reference server       | 공개된 core를 네트워크 너머에서 직접 호출해볼 수 있게 실행하는 최소 서버입니다. |
+
+여기서 **lease**는 리소스를 영구히 넘기는 것이 아니라 “이 작업자가 이 시각까지 사용해도 된다”고 부여하는 임시 사용권입니다. 동시에 여러 작업자가 같은 프록시를 집어 가는 일을 막고, 작업자가 응답 없이 사라져도 만료 뒤 다시 빌려줄 수 있게 합니다.
+
+공개 reference server는 **gRPC**라는 통신 방식을 사용했습니다. 그래서 다른 프로그램은 Java 객체를 직접 만지지 않아도 네트워크 요청으로 다음 기능을 호출할 수 있었습니다.
+
+- 관리할 리소스를 등록합니다.
+- 사용할 리소스를 하나 빌립니다.
+- 사용 결과가 성공인지 실패인지 보고합니다.
+- 사용권을 연장하거나 반환합니다.
+
+이후 같은 엔진을 여러 고객에게 서비스하는 `reputation-pool-cloud`를 만들었습니다. cloud도 위 기능은 같았지만, 실행 환경과 책임은 달랐습니다.
+
+- reference server는 공개 엔진의 사용법을 보여주는 작고 단순한 실행 예제입니다.
+- cloud는 Spring Boot 위에서 사용자 인증, 고객사별 데이터 분리, PostgreSQL 저장, 운영 지표와 대시보드를 함께 제공하는 SaaS입니다.
+
+두 서버가 주고받는 요청과 응답의 모양은 `advisor.proto`라는 파일에 정의했습니다. REST API의 명세서가 “이 주소에는 이 필드로 요청하고 이런 응답을 받는다”고 약속하듯, `.proto` 파일은 gRPC API의 서비스 이름, 기능과 필드를 정하는 **기계가 읽을 수 있는 계약서**입니다.
+
+예를 들어 “리소스 하나를 빌려달라”는 기능이 있다면 계약서에는 요청에 어떤 정보가 들어가고, 응답에 선택된 리소스와 lease 정보가 어떻게 담기는지가 정의됩니다. gRPC 도구는 이 계약서를 읽어 서버와 클라이언트가 사용할 코드를 생성합니다.
+
+문제는 cloud의 첫 구현에서 시작됐습니다. 빠르게 동작을 확인하려고 reference server의 계약서와 처리 코드를 cloud 저장소에 복사했습니다.
 
 ```text
-reputation-pool-server/advisor.proto
-reputation-pool-cloud/advisor.proto
+공개 reference server
+└─ reputation-pool-server/advisor.proto
+
+SaaS cloud
+└─ reputation-pool-cloud/advisor.proto  ← 같은 계약서를 복사
 ```
 
-한쪽에 RPC 필드를 추가하면 다른 쪽도 따라 바꿔야 합니다. mapping의 예외 처리가 달라질 수 있고, event stream 종료 방식도 서로 달라질 수 있습니다. 이름은 같은 API인데 host에 따라 동작이 달라지는 **계약 드리프트**가 생길 구조였습니다.
+겉으로는 두 서버가 같은 API를 제공했습니다. 하지만 이제 계약서의 원본이 두 개였습니다. 공개 서버의 응답에 `lease_expires_at` 필드를 추가해도 cloud의 복사본은 자동으로 바뀌지 않습니다. 같은 실패를 한쪽은 gRPC 오류로 보내고 다른 쪽은 빈 응답으로 보낼 수도 있습니다. 시간이 지날수록 **이름은 같은 API인데 서버에 따라 요청 형식이나 동작이 달라지는 상태**가 됩니다. 이것을 이 글에서는 <strong>계약 드리프트(contract drift)</strong>라고 부르겠습니다.
 
-“cloud는 core를 의존하니 중복이 아니다”라고 말할 수도 없었습니다. 판단 엔진만 공유했을 뿐, 그 엔진을 외부에 노출하는 공식 어댑터는 공유하지 않았기 때문입니다.
+“cloud도 `reputation-pool-core`를 사용하니 중복이 아니다”라고 말할 수도 없었습니다. 두 서버가 공유한 것은 점수와 선택을 판단하는 엔진뿐이었습니다. 네트워크 요청을 core의 입력으로 바꾸고, 결과를 다시 응답으로 만드는 공식 gRPC 어댑터는 공유하지 않았습니다.
 
-결국 첫 구현을 버리고 경계를 다시 그렸습니다.
+결국 첫 구현을 버리고 경계를 다시 그렸습니다. 해결하려던 질문은 단순했습니다.
+
+> core의 판단 규칙뿐 아니라, 그 판단 규칙을 외부에 노출하는 API 계약과 변환 코드도 두 서버가 하나만 공유하게 만들 수 없을까?
+
+<details>
+<summary><b>gRPC와 advisor.proto는 실제로 어떻게 연결되는가</b> (펼치기)</summary>
+
+일반적인 REST API에서는 사람이 경로와 JSON 형식을 정하고 서버와 클라이언트 코드를 각각 작성합니다. gRPC에서는 먼저 `.proto` 파일에 호출할 기능과 메시지 구조를 적습니다.
+
+아래 코드는 실제 파일을 단순화한 예시입니다.
+
+```protobuf
+service ReputationAdvisor {
+  rpc Acquire(AcquireRequest) returns (AcquireResponse);
+}
+
+message AcquireRequest {
+  string pool_id = 1;
+}
+
+message AcquireResponse {
+  string resource_id = 1;
+  string lease_id = 2;
+}
+```
+
+`Acquire`는 원격 서버의 기능을 호출하는 RPC입니다. 클라이언트는 `pool_id`를 보내고, 서버는 선택된 `resource_id`와 임시 사용권인 `lease_id`를 돌려줍니다.
+
+gRPC 도구는 이 파일에서 Java 인터페이스와 메시지 클래스를 생성합니다. 그래서 `.proto`가 달라진다는 것은 문서 한 장만 달라지는 일이 아닙니다. 클라이언트가 보내는 데이터, 서버가 읽는 데이터와 생성되는 코드가 함께 달라지는 일입니다.
+
+이 프로젝트의 handler는 생성된 gRPC 요청을 core의 Java 값으로 변환하고, core를 호출한 뒤 결과를 다시 gRPC 응답으로 변환합니다. 따라서 두 host가 정말 같은 API를 제공하려면 `.proto`뿐 아니라 이 변환과 처리 규칙도 함께 공유해야 합니다.
+
+</details>
+
+<details>
+<summary><b>계약 드리프트는 실제로 어떤 장애를 만드는가</b> (펼치기)</summary>
+
+계약 드리프트는 같은 API의 복사본들이 따로 수정되면서 서로 다른 약속이 되는 현상입니다.
+
+예를 들어 공개 서버가 lease 만료 시각을 새 필드로 제공하도록 바뀌었다고 가정해보겠습니다. cloud의 `.proto`가 예전 상태라면 cloud 사용자는 그 값을 받을 수 없습니다. 더 위험한 경우는 필드 이름은 같지만 의미가 달라지는 상황입니다. 한 서버는 만료 시각을 UTC로 보내고 다른 서버는 로컬 시각으로 보내면 컴파일과 요청은 성공해도 잘못된 만료 판단이 발생할 수 있습니다.
+
+처리 코드도 드리프트할 수 있습니다.
+
+- 존재하지 않는 리소스를 한 서버는 `NOT_FOUND`로, 다른 서버는 빈 성공 응답으로 반환합니다.
+- 이벤트 구독을 한 서버는 정상 종료하지만, 다른 서버는 연결을 계속 유지합니다.
+- 새 필드를 core 값으로 옮기는 mapping이 한쪽에만 반영됩니다.
+
+이 문제의 핵심은 “복사한 코드가 보기 싫다”가 아닙니다. 같은 API를 사용한 클라이언트가 **어느 host에 연결했는지에 따라 다른 결과를 받는 것**입니다. 그래서 계약과 변환 코드는 문서 복사본이 아니라, 두 서버가 함께 의존하는 하나의 배포 가능한 모듈이어야 했습니다.
+
+</details>
 
 ---
 
@@ -108,7 +182,7 @@ flowchart LR
 여기서 JDK-only는 “외부 라이브러리는 나쁘다”는 선언이 아닙니다. 코어가 실행 환경에 관해 알아야 할 내용을 의도적으로 제한한 **아키텍처 제약**입니다.
 
 <details>
-<summary><b>(입문) JDK-only와 zero runtime dependency는 정확히 무엇인가</b> (펼치기)</summary>
+<summary><b>JDK-only와 zero runtime dependency는 정확히 무엇인가</b> (펼치기)</summary>
 
 JDK-only는 코어의 실제 실행 코드가 Java 표준 라이브러리만 사용한다는 뜻입니다. 예를 들어 `java.time.Clock`, `java.util.concurrent.ConcurrentHashMap`, `java.util.random.RandomGenerator`는 사용할 수 있지만 Spring의 `@Service`, Jackson의 `ObjectMapper`, JDBC 구현체에는 의존하지 않습니다.
 
@@ -168,7 +242,7 @@ core 테스트 실행
 이 코드가 server 실행 파일 안에 있으니 cloud가 의존할 수 없었습니다. 실행 애플리케이션 전체를 라이브러리처럼 가져오는 것도 잘못이고, 필요한 클래스만 복사하는 것도 잘못이었습니다.
 
 <details>
-<summary><b>(입문) composition root와 adapter는 어떻게 다른가</b> (펼치기)</summary>
+<summary><b>composition root와 adapter는 어떻게 다른가</b> (펼치기)</summary>
 
 <strong>Adapter</strong>는 서로 다른 표현을 연결합니다. 이 프로젝트의 gRPC adapter는 protobuf 요청을 core의 `ResourceId`, `Context`, `Outcome`으로 바꾸고, core의 결과를 다시 protobuf 응답으로 바꿉니다.
 
@@ -280,7 +354,7 @@ public class ReputationAdvisorService
 여기서 port를 core에 둔 것은 persistence를 core에 넣었다는 의미가 아닙니다. core는 “snapshot을 저장하고 불러올 수 있어야 한다”는 필요만 interface로 표현합니다. PostgreSQL을 사용할지 파일을 사용할지는 바깥 adapter가 결정합니다.
 
 <details>
-<summary><b>(입문) port와 adapter, 의존성 역전은 무엇인가</b> (펼치기)</summary>
+<summary><b>port와 adapter, 의존성 역전은 무엇인가</b> (펼치기)</summary>
 
 코어가 PostgreSQL에 직접 저장한다면 다음과 같은 방향이 됩니다.
 
@@ -426,9 +500,19 @@ Docker PostgreSQL 기동
 
 ### 8.1 release 순서가 생겼다
 
-공유 계약을 바꾸려면 공개 artifact를 먼저 release하고, cloud가 새 version을 소비해야 합니다. 한 저장소에서 동시에 고치던 때보다 느립니다.
+여기서 **공유 계약**은 reference server와 cloud가 함께 지켜야 하는 약속을 뜻합니다. 구체적으로는 `advisor.proto`에 정의한 gRPC 요청·응답 구조, protobuf와 core 값을 오가는 mapping, 두 서버가 공통으로 사용하는 handler와 확장 지점입니다. 이 중 하나를 바꾸면 두 서버에 같은 변경이 적용되어야 합니다.
 
-하지만 이 순서는 호환성을 확인하게 만드는 gate이기도 합니다. cloud의 임시 요구로 공개 계약을 즉시 깨뜨리기 어려워졌습니다.
+이 공유 코드는 `reputation-pool-grpc`라는 **artifact**로 배포합니다. artifact는 다른 프로젝트가 내려받아 사용할 수 있도록 빌드하고 version을 붙인 결과물입니다. 이 프로젝트에서는 Maven Central에 공개되는 Java jar 파일이 artifact입니다. cloud는 소스코드를 복사하는 대신 Gradle에 사용할 version을 적어 이 jar를 dependency로 가져옵니다. 이것을 “cloud가 새 version을 소비한다”고 표현했습니다.
+
+따라서 공유 계약을 변경해 cloud에 반영하는 과정에는 다음 순서가 생겼습니다.
+
+1. 공개 저장소에서 `advisor.proto`, mapping과 handler를 수정하고 호환성을 검증합니다.
+2. 변경된 `reputation-pool-grpc` jar에 새 version을 붙여 Maven Central에 release합니다.
+3. cloud의 Gradle 설정에서 dependency version을 올리고, 인증과 tenant routing을 포함한 전체 흐름을 다시 검증합니다.
+
+한 저장소에서 계약과 구현을 동시에 고치던 때보다 느립니다. 새 jar가 공개되기 전에는 cloud가 그 API를 사용할 수 없기 때문입니다.
+
+하지만 이 순서는 호환성을 확인하게 만드는 **통과 조건**이기도 합니다. cloud에서만 급히 필요한 기능 때문에 공개 API를 바로 깨뜨리는 대신, reference server와 기존 사용자도 계속 사용할 수 있는 변경인지 먼저 확인하게 됐습니다.
 
 ### 8.2 framework 중립 API에도 확장 지점이 필요했다
 
@@ -514,7 +598,11 @@ framework를 모른다고 해서 host 요구를 전혀 모르는 API가 되는 �
 
 ### Q. thin host인데 cloud 코드가 많은 것은 설계 실패 아닌가요?
 
-**A.** thin은 코드량이 아니라 책임의 중복 여부를 뜻합니다. cloud는 인증·tenant lifecycle·metering·관측성·배포처럼 SaaS가 반드시 소유해야 할 코드가 많습니다. 실패는 이 기능들이 많은 것이 아니라, 점수 계산이나 lease 판단을 cloud가 다시 구현해 공개 core와 다른 결과를 만드는 것입니다.
+**A.** 먼저 이 글에서 **host**는 core 라이브러리를 불러와 실제 애플리케이션으로 실행하는 바깥 프로그램을 뜻합니다. 공개 reference server도 하나의 host이고, Spring Boot 기반 cloud도 또 다른 host입니다. core가 “어떤 리소스를 빌려줄지” 결정한다면, host는 요청을 받고 core를 호출하며 결과를 네트워크 응답으로 돌려줍니다.
+
+**Thin host**는 이 바깥 프로그램의 코드가 적다는 뜻이 아닙니다. core가 이미 내리는 도메인 결정을 host가 중복해서 구현하지 않는다는 뜻입니다.
+
+cloud에는 사용자 인증, tenant lifecycle, 사용량 측정, 관측성, 대시보드와 배포처럼 SaaS가 반드시 소유해야 할 코드가 많습니다. 이 코드는 reference server에는 필요하지 않으므로 cloud에 있는 것이 맞습니다. 설계 실패는 cloud의 전체 코드량이 많은 것이 아니라, cloud가 점수 계산이나 lease 판단까지 다시 구현해 같은 입력에 공개 core와 다른 결과를 만드는 경우입니다.
 
 ### Q. 처음부터 gRPC 모듈을 예상하지 못한 것이 문제 아닌가요?
 
