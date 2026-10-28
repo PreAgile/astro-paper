@@ -7,6 +7,7 @@ export const SITE = {
   authorSameAs: [
     "https://github.com/PreAgile",
     "https://github.com/PreAgile/reputation-pool",
+    "https://www.linkedin.com/in/meyonsoo-kim-0534ba202/",
   ],
   desc: "내일을 위한 기록 — 더 나은 엔지니어링을 향해",
   title: "Forward Engineering",
