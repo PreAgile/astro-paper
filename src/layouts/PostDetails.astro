@@ -11,7 +11,7 @@ import BackButton from "@/components/BackButton.astro";
 import BackToTopButton from "@/components/BackToTopButton.astro";
 import TableOfContents from "@/components/TableOfContents.astro";
 import ViewCount from "@/components/ViewCount.astro";
-import { getPath } from "@/utils/getPath";
+import { getCanonicalPostUrl, getPath } from "@/utils/getPath";
 import { slugifyStr } from "@/utils/slugify";
 import IconChevronLeft from "@/assets/icons/IconChevronLeft.svg";
 import IconChevronRight from "@/assets/icons/IconChevronRight.svg";
@@ -78,7 +78,7 @@ const alternateLinks = translatedPosts.map(({ id, filePath }) => {
   const lang = id.startsWith("en/") ? "en" : "ko";
   return {
     lang,
-    href: new URL(getPath(id, filePath), SITE.website).href,
+    href: getCanonicalPostUrl(id, filePath),
   };
 });
 const koreanAlternate = alternateLinks.find(({ lang }) => lang === "ko");

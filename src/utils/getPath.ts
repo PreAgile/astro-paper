@@ -1,4 +1,5 @@
 import { BLOG_PATH } from "@/content.config";
+import { SITE } from "@/config";
 import { slugifyStr } from "./slugify";
 
 /**
@@ -57,4 +58,8 @@ export function getPath(
     return [...pathSegments, slug].join("/");
   }
   return [basePath, ...pathSegments, slug].join("/");
+}
+
+export function getCanonicalPostUrl(id: string, filePath: string | undefined) {
+  return new URL(`${getPath(id, filePath)}/`, SITE.website).href;
 }

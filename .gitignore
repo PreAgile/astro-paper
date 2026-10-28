@@ -29,3 +29,5 @@ public/pagefind
 
 # nested repositories
 callous-jupiter/
+# portable markdown export
+export/

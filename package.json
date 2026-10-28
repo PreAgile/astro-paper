@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
-    "check:posts": "node scripts/check-post-anatomy.mjs"
+    "check:posts": "node scripts/check-post-anatomy.mjs",
+    "export:posts": "node scripts/export-portable-posts.mjs"
   },
   "dependencies": {
     "@astrojs/rss": "^4.0.14",

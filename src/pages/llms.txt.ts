@@ -1,13 +1,39 @@
 import type { APIRoute } from "astro";
-import { getCollection } from "astro:content";
+import type { CollectionEntry } from "astro:content";
 import { SITE } from "@/config";
-import { getPath } from "@/utils/getPath";
-import getSortedPosts from "@/utils/getSortedPosts";
+import { getCanonicalPostUrl } from "@/utils/getPath";
+import {
+  getMarkdownUrl,
+  getPostLocale,
+  getPublishedPosts,
+} from "@/utils/getPortablePosts";
+
+const toArticleLines = (post: CollectionEntry<"blog">) => [
+  `- [${post.data.title}](${getCanonicalPostUrl(post.id, post.filePath)}) ([Markdown](${getMarkdownUrl(post)}))`,
+  `  ${post.data.description.replace(/\s+/g, " ").trim()}`,
+];
+
+const toSeriesLines = (posts: CollectionEntry<"blog">[]) => {
+  const postsBySeries = new Map<string, CollectionEntry<"blog">[]>();
+  for (const post of posts.filter(post => post.data.series)) {
+    const key = `${post.data.series} (${getPostLocale(post)})`;
+    postsBySeries.set(key, [...(postsBySeries.get(key) ?? []), post]);
+  }
+  return [...postsBySeries].flatMap(([series, seriesPosts]) => [
+    `### ${series}`,
+    "",
+    ...seriesPosts
+      .sort((a, b) => (a.data.seriesOrder ?? 0) - (b.data.seriesOrder ?? 0))
+      .map(
+        post =>
+          `${post.data.seriesOrder ?? "-"}. [${post.data.title}](${getCanonicalPostUrl(post.id, post.filePath)})`
+      ),
+    "",
+  ]);
+};
 
 export const GET: APIRoute = async () => {
-  const posts = getSortedPosts(
-    await getCollection("blog", ({ data }) => !data.draft)
-  );
+  const posts = await getPublishedPosts();
   const lines = [
     `# ${SITE.title}`,
     "",
@@ -16,20 +42,18 @@ export const GET: APIRoute = async () => {
     `Canonical site: ${SITE.website}`,
     `Author: ${new URL("/about/", SITE.website).href}`,
     `GitHub: ${SITE.profile}`,
+    `Full text as Markdown: ${new URL("/llms-full.txt", SITE.website).href}`,
     `Korean RSS: ${new URL("/rss.xml", SITE.website).href}`,
     `English RSS: ${new URL("/en/rss.xml", SITE.website).href}`,
     "",
-    "## Primary series",
+    "Every article is also available as Markdown by replacing the trailing slash of its URL with `.md`.",
     "",
-    `- [Building reputation-pool](${new URL("/en/series/reputation-pool/", SITE.website).href}): JDK-only core, concurrency contracts, open-core boundaries, multi-tenancy, and horizontal scaling.`,
-    `- [reputation-pool 설계 기록](${new URL("/series/reputation-pool/", SITE.website).href}): 실제 PR, 실패 trace와 운영 제약을 연결한 한국어 원문 시리즈.`,
+    "## Series",
     "",
+    ...toSeriesLines(posts),
     "## Published articles",
     "",
-    ...posts.flatMap(post => [
-      `- [${post.data.title}](${new URL(getPath(post.id, post.filePath), SITE.website).href})`,
-      `  ${post.data.description.replace(/\s+/g, " ").trim()}`,
-    ]),
+    ...posts.flatMap(toArticleLines),
     "",
     "## Citation notes",
     "",
